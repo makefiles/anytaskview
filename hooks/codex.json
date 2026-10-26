@@ -1,0 +1,77 @@
+{
+  "description": "anytaskview(Codex): 세션 사건을 화판에 올린다(파일 수정·명령·하위 에이전트·승인 요청). 세션 시작 때 그리기 규칙을 넣고, 그림 없이 도구를 8번 넘게 쓰면 그 대화에 한 번 알린다. 화판 글은 화판 서버가 codex queue 로 보내므로 Stop 에서 기다리지 않는다",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/atv\" hook --codex", "timeout": 5 }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/atv\" hook --codex", "timeout": 3 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/atv\" hook --codex", "async": true, "timeout": 5 },
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/nudge\" prompt codex", "timeout": 2 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/atv\" hook --codex", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch)$",
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/atv\" hook --codex", "async": true, "timeout": 5 }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/nudge\" tool codex", "timeout": 2 }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/atv\" hook --codex", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/atv\" hook --codex", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/atv\" hook --codex", "async": true, "timeout": 5 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$PLUGIN_ROOT/scripts/atv\" hook --codex", "async": true, "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

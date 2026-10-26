@@ -4,6 +4,7 @@
 
 - Requirements: Claude Code with plugin support, Node.js 22.12 or later, Linux (macOS untested, Windows through WSL), a recent browser.
 - Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md).
+- OpenAI Codex (CLI, desktop app, VS Code) works too: `codex plugin marketplace add makefiles/anytaskview`, `codex plugin add anytaskview@anytaskview`, allow the five board tools in `~/.codex/config.toml`, and trust the hooks in `/hooks`. See the Codex part of [INSTALL.md](INSTALL.md).
 - Security: the board listens on 127.0.0.1 only and every request needs a token; nothing is sent off the machine. Details and limits: [SECURITY.md](SECURITY.md).
 - License: Apache-2.0. Bundled browser libraries keep their own licenses (ELK: EPL-2.0, Mermaid: MIT).
 
@@ -37,6 +38,8 @@ claude plugin install anytaskview@anytaskview
 Claude Code 안에서는 `/plugin marketplace add makefiles/anytaskview` 와 `/plugin install anytaskview@anytaskview` 입니다. 이미 열려 있는 세션에서는 `/reload-plugins` 를 실행합니다.
 
 자세한 순서와 확인 방법, 갱신·삭제는 [INSTALL.md](INSTALL.md) 에 있습니다.
+
+OpenAI Codex(터미널 `codex`, ChatGPT 데스크톱 앱, VS Code)에서도 씁니다. `codex plugin marketplace add makefiles/anytaskview` 와 `codex plugin add anytaskview@anytaskview` 로 설치하고, 그리기 도구 다섯을 사용자 Codex 설정에서 늘 허용한 뒤 `/hooks` 에서 훅을 믿어 줍니다. 순서는 [INSTALL.md](INSTALL.md) 의 「Codex 에 설치」 에 있습니다. Codex 세션은 목록에 「Codex」 로 보이고, 화판에서 보낸 글은 쉬는 세션이면 바로, 일하는 중이면 그 차례가 끝난 뒤 받습니다.
 
 ### LLM 에게 설치를 맡기려면
 

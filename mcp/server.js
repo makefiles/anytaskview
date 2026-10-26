@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // stdio MCP 서버: LLM 의 plan·draw·note·ids 호출을 화판 서버에 넘기고 한 줄 결과를 돌려준다.
 // 어느 세션의 것인지는 부모 프로세스(claude) 번호와 CLAUDE_CODE_SESSION_ID 로 화판 서버가 가린다.
+// Codex 는 호출마다 _meta 에 세션 id 를 싣는다. 데스크톱 앱·VS Code 는 한 프로세스에 세션이 여럿이라 그 id 를 앞세운다.
 // 설치할 때 npm 이 필요 없도록 MCP SDK 없이 줄 단위 JSON-RPC 를 직접 읽고 쓴다(시험은 SDK 클라이언트로 한다).
 // 화판 서버가 꺼져 있으면 떼어 내 띄운다. 여러 세션이 동시에 띄우면 늦은 쪽은 포트를 못 잡고 끝난다.
 import crypto from "node:crypto";
@@ -15,9 +16,15 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.ANYTASKVIEW_PORT || 4871);
 const HOME = stateHome();
 const PID = process.ppid;
-// Claude Code 가 아닌 에이전트는 ANYTASKVIEW_SESSION, 그것도 없으면 이 프로세스만의 id 를 쓴다
-const ENV_SESSION = process.env.CLAUDE_CODE_SESSION_ID || process.env.ANYTASKVIEW_SESSION || "mcp-" + crypto.randomBytes(8).toString("hex");
-const CWD = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+// Claude Code 가 아닌 에이전트는 ANYTASKVIEW_SESSION, 그것도 없으면 이 프로세스만의 id 를 쓴다.
+// Codex 에서는 이 프로세스만의 id 로 짝짓지 않는다(hello): MCP 가 첫 입력보다 먼저 떠서 빈 세션이 따로 생기고,
+// 호출마다 _meta 에 세션 id 가 온다. 그래서 hello 는 initialize 로 Codex 인지 안 뒤에 보낸다
+const KNOWN_SESSION = process.env.CLAUDE_CODE_SESSION_ID || process.env.ANYTASKVIEW_SESSION || "";
+const ENV_SESSION = KNOWN_SESSION || "mcp-" + crypto.randomBytes(8).toString("hex");
+// Codex 는 플러그인 폴더에서 이 서버를 띄운다(.codex-mcp.json 의 cwd "."). 그때는 작업 폴더를 모르므로 비워 두고 훅의 값을 쓴다.
+// Codex 인지는 initialize 의 clientInfo 로 안다
+let codexClient = false;
+const cwdNow = () => process.env.CLAUDE_PROJECT_DIR || (codexClient && process.cwd() === ROOT ? "" : process.cwd());
 const AUTOSTART = process.env.ANYTASKVIEW_AUTOSTART !== "0";
 const OFF = `화판 꺼짐(127.0.0.1:${PORT}). 이번 호출은 건너뛰고 하던 일을 계속하세요.`;
 const FOREIGN = `화판 포트(127.0.0.1:${PORT})를 다른 사용자의 프로그램이 쓰고 있어 열쇠를 보내지 않았습니다. 이번 호출은 건너뛰고, 사용자께 알리세요.`;
@@ -68,7 +75,7 @@ async function startBoardIfDown() {
   return false;
 }
 
-async function post(tool, input, timeoutMs = 3000) {
+async function post(tool, input, timeoutMs = 3000, sid = null) {
   if (!keys) keys = readKeys(HOME);
   // 다른 사용자의 프로그램에 열쇠를 보내지 않는다. 듣는 소켓이 없으면 먼저 띄워 본다
   const owner = portOwner(PORT);
@@ -84,7 +91,7 @@ async function post(tool, input, timeoutMs = 3000) {
       r = await fetch(`http://127.0.0.1:${PORT}/api/mcp`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-atv-key": keys ? keys.write : "" },
-        body: JSON.stringify({ pid: PID, env: ENV_SESSION, cwd: CWD, tool, input, proto: PROTOCOL }),
+        body: JSON.stringify({ pid: PID, env: tool === "hello" && codexClient ? KNOWN_SESSION : ENV_SESSION, ...(sid && { sid }), cwd: cwdNow(), tool, input, proto: PROTOCOL }),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (e) {
@@ -126,6 +133,8 @@ async function onRequest(m) {
   const isRequest = m.id !== undefined && m.id !== null;
   switch (m.method) {
     case "initialize":
+      codexClient = m.params?.clientInfo?.name === "codex-mcp-client";
+      hello().catch(() => {});
       // 클라이언트가 고른 약속 판을 그대로 쓴다(이 서버는 도구만 쓴다)
       return reply(m.id, {
         protocolVersion: String(m.params?.protocolVersion || "2025-06-18"),
@@ -140,7 +149,10 @@ async function onRequest(m) {
     case "tools/call": {
       const name = m.params?.name, args = m.params?.arguments || {};
       if (!TOOLS.some((t) => t.name === name)) return reply(m.id, { content: [{ type: "text", text: `도구 '${name}' 없음` }], isError: true });
-      const r = await post(name, args);
+      // Codex: _meta["x-codex-turn-metadata"].session_id(호출한 세션). 동시에 오는 호출이 섞이지 않게 호출마다 넘긴다
+      const meta = m.params?._meta?.["x-codex-turn-metadata"];
+      const sid = typeof meta?.session_id === "string" ? meta.session_id : null;
+      const r = await post(name, args, 3000, sid);
       return reply(m.id, { content: [{ type: "text", text: r.text + stale }] });
     }
     default:
@@ -166,4 +178,3 @@ process.stdin.on("data", (chunk) => {
 // claude 가 끝나면 stdin 이 닫힌다. 화판에 알리고 끝낸다
 process.stdin.on("end", () => { post("bye", null, 500).finally(() => process.exit(0)); });
 
-hello().catch(() => {});

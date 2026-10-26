@@ -1,6 +1,6 @@
 # 보안
 
-**English summary.** anytaskview is a local tool. The board server binds to 127.0.0.1 only, checks the Host header, and requires a token on every request: a write key for hooks and the MCP server, a read token (HttpOnly cookie) for the browser, and a separate board key (kept in the page's localStorage and sent as a header from the same origin) for browser writes. Nothing is sent off the machine. Records live in `~/.local/state/anytaskview/` with owner-only permissions and contain prompts, command lines, file paths and short excerpts of Claude's answers; common secret patterns are masked but not all. Anyone who has the board URL can read every session and send instructions to Claude, so treat it like a password. On a computer shared with other user accounts, another user who takes port 4871 while your board server is down can capture your browser keys when you open the board; use it on a single-user machine. Report vulnerabilities privately through GitHub's Security tab.
+**English summary.** anytaskview is a local tool. The board server binds to 127.0.0.1 only, checks the Host header, and requires a token on every request: a write key for hooks and the MCP server, a read token (HttpOnly cookie) for the browser, and a separate board key (kept in the page's localStorage and sent as a header from the same origin) for browser writes. Nothing is sent off the machine. Records live in `~/.local/state/anytaskview/` with owner-only permissions and contain prompts, command lines, file paths and short excerpts of Claude's answers; common secret patterns are masked but not all. Anyone who has the board URL can read every session and send instructions to Claude or Codex, so treat it like a password. Messages to Codex sessions are passed to `codex queue` as a command-line argument (no shell), so other local users may see them briefly in the process list. On a computer shared with other user accounts, another user who takes port 4871 while your board server is down can capture your browser keys when you open the board; use it on a single-user machine. Report vulnerabilities privately through GitHub's Security tab.
 
 ## 무엇을 지키는가
 
@@ -22,6 +22,8 @@
 - 훅은 도구의 출력과 파일 내용을 보내지 않습니다. 사용자 입력(300자), 명령 줄(200자), 파일 경로, Claude 의 마지막 답 앞부분(200자) 같은 짧은 사실만 보내고, 그 안의 흔한 비밀 모양(개인 키, `Authorization` 값, JWT, `token=`·`password=` 같은 값, 잘 알려진 토큰 접두, 주소 안의 비밀번호)을 가립니다.
 - 받은 글은 화면에 글자로만 넣습니다. HTML 을 넣는 곳은 Mermaid 가 `strict` 로 만든 SVG 하나이고, 그 안의 링크는 벗겨 냅니다. 누르면 복사되는 경로에는 제어 문자를 받지 않습니다.
 - 화판에서 Claude 에 보낸 글은 「사용자가 이 PC 의 화판에서 직접 쓴 글」 이라는 출처를 붙여 넘기며, Claude Code 는 이것을 승인으로 쓰지 않습니다.
+- Codex 세션에 보내는 글은 화판 서버가 `codex queue --thread <세션> --message <글>` 을 셸 없이 인자 배열로 불러 넘깁니다. 실행 파일은 그 세션을 띄운 codex(이름이 `codex` 인 것만)이고, 안 되면 `PATH` 의 codex 입니다. Codex 에서는 이 글이 사용자 입력과 같은 차례로 들어갑니다(승인 창을 대신하지는 못합니다).
+- Codex 의 그리기 도구 허용(INSTALL 의 C2)은 화판에 쓰는 다섯 도구에만 겁니다. Codex 는 플러그인 훅을 사용자가 `/hooks` 에서 믿기 전에는 돌리지 않습니다.
 - 이 PC 밖으로 보내는 것은 없습니다.
 
 ## 남은 한계
@@ -32,6 +34,7 @@
 - **여러 사용자 계정이 쓰는 컴퓨터에서는 쓰지 않는 것이 좋습니다.** 화판 서버가 꺼져 있는 사이 다른 사용자가 4871 포트를 잡으면, 그 뒤 브라우저로 `http://127.0.0.1:4871/` 을 열 때 읽기 쿠키가 그쪽으로 가고, 그쪽 페이지가 같은 주소의 localStorage 에 든 화판 쓰기 열쇠와 쓰다 둔 글을 읽을 수 있습니다. 로컬 HTTP 의 한계라 이 도구로는 막지 못합니다(`--url` 이 남이 잡은 포트에는 주소를 주지 않는 것까지만 합니다).
 - macOS 등 `/proc` 가 없는 시스템에서는 포트 주인을 확인하지 못해, 다른 사용자가 포트를 먼저 잡으면 훅·MCP 의 쓰기 열쇠도 그쪽으로 갈 수 있습니다.
 - 같은 PC 의 다른 로컬 웹 서버(다른 포트)가 악의적이면 읽기 쿠키를 받을 수 있습니다(쿠키는 포트를 가리지 않음). 쓰기에는 별도 열쇠가 필요합니다.
+- Codex 에 보내는 글은 `codex queue` 의 명령 줄 인자로 넘어가므로, 보내는 1초 남짓 동안 같은 PC 의 다른 사용자가 프로세스 목록(`/proc/<pid>/cmdline`)으로 볼 수 있습니다(`hidepid` 를 켜지 않은 Linux). `codex queue` 가 글을 표준 입력으로 받지 않아 이렇게 합니다.
 
 ## 열쇠 바꾸기
 

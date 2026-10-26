@@ -492,7 +492,7 @@ function render() {
   renderBasket();
   const hasParts = Object.values(scene.items).some((it) => it.kind !== "step");
   $("empty").hidden = hasParts;
-  $("empty").textContent = isProj(state.sid) ? "아직 큰 그림이 없습니다. 이 프로젝트에 든 대화의 Claude 가 작업 단위를 시작·끝낼 때 그립니다." : "아직 그림이 없습니다. Claude 가 draw 로 그리면 여기에 나타납니다.";
+  $("empty").textContent = isProj(state.sid) ? "아직 큰 그림이 없습니다. 이 프로젝트에 든 대화의 Claude·Codex 가 작업 단위를 시작·끝낼 때 그립니다." : `아직 그림이 없습니다. ${agentName(state.sessions.get(state.sid))} 가 draw 로 그리면 여기에 나타납니다.`;
   if (!ONLY_TL) canvas.render(scene).then(() => { followNow(); placeComposer(); }).catch((e) => console.error("그림 실패", e));
   markSeen();
 }
@@ -511,7 +511,7 @@ function sessRow(thread, now) {
   const r1 = el("div", "row1");
   r1.append(el("span", `sico ${s.status}`, SESS_ICO[s.status] || "○"), el("span", "txt", sessName(s)));
   const more = thread.length > 1 ? ` · 대화 ${thread.length}` : "";
-  const r2 = el("div", "row2 txt", `${SESS_KO[s.status] || s.status} · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
+  const r2 = el("div", "row2 txt", `${s.agent === "codex" ? "Codex · " : ""}${SESS_KO[s.status] || s.status} · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
   b.title = `${sessName(s)}\n${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
   b.append(r1, r2);
   b.addEventListener("click", () => { if (s.id !== state.sid) connect(s.id); }); // 앞 대화를 보는 중이어도 줄이 보이는 대화로 간다
@@ -634,7 +634,7 @@ function renderSessions(now) {
       if (open) for (const p of done) out.push(projSection(p, by.get(p), now));
     }
   }
-  if (!list.length) out.push(el("p", "row2 txt", "아직 세션이 없습니다. Claude Code 세션을 시작하면 여기에 나타납니다."));
+  if (!list.length) out.push(el("p", "row2 txt", "아직 세션이 없습니다. Claude Code·Codex 세션을 시작하면 여기에 나타납니다."));
   // 목록은 사건마다 새로 만든다. 키보드 초점이 목록 안에 있었으면 같은 세션·프로젝트의 같은 단추로 되돌린다
   const act = document.activeElement;
   let keep = null, gone = false;
@@ -715,7 +715,9 @@ function renderTop(scene, now) {
   renderProjLink(s);
   // 프로젝트 화판은 대화가 아니라 받을 Claude 가 없다. 대화를 골라 보낸다
   $("compose").disabled = !canWrite() || !!proj;
-  $("compose").title = proj ? "프로젝트 화판에서는 보내지 않습니다. 오른쪽 아래 대화 이력에서 대화를 골라 보내세요" : canWrite() ? "지금 보는 세션 전체에 대해 의견·지시를 써서 Claude 에 보냅니다. 상자·단계에 대해서는 그 위의 「보내기」 를 누릅니다" : $("nokey").title;
+  const who = agentName(state.sessions.get(state.sid));
+  $("compose").textContent = `${who} 에 보내기`;
+  $("compose").title = proj ? "프로젝트 화판에서는 보내지 않습니다. 오른쪽 아래 대화 이력에서 대화를 골라 보내세요" : canWrite() ? `지금 보는 세션 전체에 대해 의견·지시를 써서 ${who} 에 보냅니다. 상자·단계에 대해서는 그 위의 「보내기」 를 누릅니다` : $("nokey").title;
   renderComposer(scene);
   const needs = band.some((x) => x.kind === "input" || x.kind === "wait");
   const prefix = needs ? "● 입력 필요 · " : band.some((x) => x.kind === "blocked") ? "막힘 · " : "";
@@ -997,7 +999,7 @@ function renderTimeline(scene, now) {
       const m = own(scene.msgs || {}, e.mid);
       if (!m) continue;
       li.append(el("span", `k ${m.state}`, MSG_STATE_KO[m.state] || m.state));
-      li.append(document.createTextNode(`화판 → Claude (${MSG_KIND_KO[m.kind]}${m.target ? " · " + m.target.id : ""}): ${m.text}`));
+      li.append(document.createTextNode(`화판 → ${agentName(state.sessions.get(state.sid))} (${MSG_KIND_KO[m.kind]}${m.target ? " · " + m.target.id : ""}): ${m.text}`));
       li.classList.add("prompt");
       li.title = m.text;
     } else if (e.type === "note") {
@@ -1303,7 +1305,7 @@ function messageItem(sid) {
     b.title = "끝난 대화에는 보낼 수 없습니다";
     return b;
   }
-  b.title = "이 세션의 Claude 에 의견·지시를 보냅니다. 보던 화면은 그대로입니다";
+  b.title = `이 세션의 ${agentName(s)} 에 의견·지시를 보냅니다. 보던 화면은 그대로입니다`;
   b.addEventListener("click", () => {
     closeGroupMenu(false);
     openComposer({
@@ -1508,6 +1510,12 @@ const SEND_HINT = {
   idle: "쉬는 중이라 보내면 바로 깨웁니다.",
   working: "일하는 중이라 이번 차례 안에서 받습니다.",
 };
+// Codex 는 화판 서버가 codex queue 로 보낸다. 일하는 중이면 이번 차례가 끝난 직후 새 차례로 받는다
+const SEND_HINT_CODEX = {
+  idle: "쉬는 중이라 보내면 바로 깨웁니다.",
+  working: "일하는 중이라 이번 차례가 끝난 뒤 새 차례로 받습니다.",
+};
+const agentName = (s) => (s?.agent === "codex" ? "Codex" : "Claude");
 function renderComposer(scene, force = false) {
   if (composer.hidden || !ask) return;
   const mine = ask.sid === state.sid;
@@ -1528,7 +1536,13 @@ function renderComposer(scene, force = false) {
   const ended = !s || s.status === "ended";
   $("c-send").disabled = sending || ended || (mine && !!state.replay);
   $("c-collect").disabled = $("c-send").disabled;
+  const codex = s?.agent === "codex";
+  const head = `${agentName(s)} 에 보내기`;
+  if ($("composer").querySelector("h2").textContent !== head) { $("composer").querySelector("h2").textContent = head; $("composer").setAttribute("aria-label", head); }
   $("c-hint").textContent = (compose.saved ? "" : "저장되지 않음: 이 탭을 닫으면 쓰던 글이 사라집니다. ") + (ended ? "끝난 세션에는 보낼 수 없습니다."
+    : codex && s.qerr ? `Codex 에 보내지 못했습니다(${s.qerr}). 다음에 보낼 때나 그 세션의 차례가 끝날 때 다시 보냅니다.`
+    : codex ? (s.inbox ? SEND_HINT_CODEX[s.status] || "Codex 가 받을 준비가 됐습니다. 승인 창은 대신하지 못하니 Codex 화면에서 답하세요."
+      : "이 대화는 그 Codex 화면에 더는 없습니다(/clear 로 새 대화가 시작됨). 보낸 글은 대기로 남습니다.")
     : s.inbox ? SEND_HINT[s.status] || "Claude 가 받을 준비가 됐습니다. 승인 창은 대신하지 못하니 터미널에서 답하세요."
     : "받을 훅이 아직 없습니다. 플러그인으로 설치한 세션에서 차례가 한 번 끝나면 준비됩니다. 그전에 보낸 글은 대기로 남습니다.");
   // 보낸 글은 보는 세션 것만 안다(다른 세션의 장면은 받지 않는다). 대상이 있으면 그 대상에 보낸 것만
@@ -1738,7 +1752,8 @@ function showAsk(hit) {
   if (!canWrite() || state.replay || !state.sid || isProj(state.sid)) return;
   clearTimeout(askHide);
   askFor = hit;
-  askBtn.setAttribute("aria-label", hit.matches("li") ? "이 단계에 대해 Claude 에 보내기" : "이 상자에 대해 Claude 에 보내기");
+  const who = agentName(state.sessions.get(state.sid));
+  askBtn.setAttribute("aria-label", hit.matches("li") ? `이 단계에 대해 ${who} 에 보내기` : `이 상자에 대해 ${who} 에 보내기`);
   askBtn.hidden = false;
   // 상자는 오른쪽 위 가장자리에 걸쳐 올려 이름을 가리지 않는다(위가 화판 밖이면 안쪽). 상자와 맞닿게 두어야
   // 말풍선으로 옮겨 가는 사이에 바깥 묶음을 지나지 않는다(지나면 묶음의 말풍선으로 바뀐다). 계획 단계는 줄 안 오른쪽에 둔다

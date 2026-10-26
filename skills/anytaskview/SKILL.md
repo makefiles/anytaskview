@@ -42,4 +42,6 @@ plan: {"steps":[{"id":"s1","status":"done"},{"id":"s2","status":"doing"}]}
 
 ## Opening the board
 
-The board runs at `http://127.0.0.1:4871/` and starts automatically with the first session. A browser needs the read token once: tell the user to run `"${CLAUDE_PLUGIN_ROOT}/scripts/atv" board --url` in their own terminal and open the printed address. Never run it yourself or print the token. After a plugin update, if a tool result says the board server is a different version, tell the user to run `"${CLAUDE_PLUGIN_ROOT}/scripts/atv" board --stop`; the next tool call starts the new version.
+The board runs at `http://127.0.0.1:4871/` and starts automatically with the first session. A browser needs the read token once: tell the user to run `<plugin folder>/scripts/atv board --url` in their own terminal and open the printed address. Never run it yourself or print the token. After a plugin update, if a tool result says the board server is a different version, tell the user to run `<plugin folder>/scripts/atv board --stop`; the next tool call starts the new version.
+
+The plugin folder is `${CLAUDE_PLUGIN_ROOT}` in Claude Code. In Codex that variable is not filled in here; the folder is the newest of `~/.codex/plugins/cache/anytaskview/anytaskview/*/`, so give the user `"$(ls -td ~/.codex/plugins/cache/anytaskview/anytaskview/*/ | head -1)scripts/atv" board --url`.

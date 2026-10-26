@@ -663,6 +663,25 @@ async function main() {
     await waitFor(`window.__atv.sid === '${sid}' && document.querySelectorAll('#canvas .part').length > 0`);
     await post("/api/hook", { sid: other, pid: process.pid + 7, fact: { f: "end", reason: "other" } });
   });
+  await check("Codex 세션: 목록 줄에 「Codex」, 보내기 창 제목·안내가 받는 쪽 이름으로 바뀜", async () => {
+    const cx = `codex-${process.pid}`;
+    await post("/api/hook", { sid: cx, pid: process.pid + 9, fact: { f: "start", cwd: "/tmp/코덱스", source: "startup", via: "codex" } });
+    await post("/api/hook", { sid: cx, pid: process.pid + 9, fact: { f: "prompt", text: "코덱스 세션의 일" } });
+    await post("/api/hook", { sid: cx, pid: process.pid + 9, fact: { f: "stop", last: "" } });
+    await waitFor(`document.querySelector('#sess-body .sess[data-sid="${cx}"] .row2')?.textContent.startsWith('Codex · ')`);
+    await evaluate(`document.querySelector('#sess-body .smenu[data-sid="${cx}"]').click()`);
+    await waitFor(`!document.getElementById('group-menu').hidden && document.querySelector('#group-menu .gm-item')?.textContent === '메시지 보내기…'`);
+    await evaluate(`document.querySelector('#group-menu .gm-item').click()`);
+    await waitFor(`!document.getElementById('composer').hidden && document.querySelector('#composer h2').textContent === 'Codex 에 보내기' && document.getElementById('c-hint').textContent.includes('바로 깨웁니다')`);
+    await key("Escape", "Escape", 27);
+    await waitFor(`document.getElementById('composer').hidden`);
+    // Claude 세션의 보내기 창은 제목이 다시 Claude 로 돌아온다
+    await evaluate(`document.getElementById('compose').click()`);
+    await waitFor(`!document.getElementById('composer').hidden && document.querySelector('#composer h2').textContent === 'Claude 에 보내기'`);
+    await key("Escape", "Escape", 27);
+    await waitFor(`document.getElementById('composer').hidden`);
+    await post("/api/hook", { sid: cx, pid: process.pid + 9, fact: { f: "end", reason: "other" } });
+  });
 
   await check("모아 보내기: 보내기 창의 「모아 두기」 로 상자·단계 글을 모으고, 아래 띠에서 빼기·한꺼번에 보내기, 다른 세션 글은 섞지 않음", async () => {
     const collect = async (focusSel, text) => {

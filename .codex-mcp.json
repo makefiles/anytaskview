@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "anytaskview": {
+      "command": "./scripts/atv",
+      "args": [
+        "mcp"
+      ],
+      "cwd": "."
+    }
+  }
+}

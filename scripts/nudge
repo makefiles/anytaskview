@@ -1,13 +1,20 @@
 #!/bin/sh
 # 그리기 알림: 사용자 입력 뒤 도구를 8번 넘게 썼는데 이 대화의 화판에 그림이 없으면, 그 대화에 한 번만 알린다.
-# 도구를 쓸 때마다 동기로 도는 훅이라 node 를 띄우지 않고 sh 와 작은 파일만 쓴다(파일은 claude 프로세스 번호로 가른다).
-# 쓰는 법: nudge prompt|tool. stdin 은 훅 입력(JSON)이다.
+# 도구를 쓸 때마다 동기로 도는 훅이라 node 를 띄우지 않고 sh 와 작은 파일만 쓴다.
+# 파일은 Claude 면 claude 프로세스 번호로, Codex 면 세션 id 로 가른다(데스크톱 앱·VS Code 는 한 프로세스에 세션이 여럿).
+# 쓰는 법: nudge prompt|tool [codex]. stdin 은 훅 입력(JSON)이다.
 # 대화가 새로 시작하거나 끝날 때 파일을 지우고, 이미 그림이 있는 대화(재개·압축)에 「끝」을 남기는 일은 hook/hook.js 가 한다.
 D=${ANYTASKVIEW_HOME:-$HOME/.local/state/anytaskview}/nudge
-P=$CLAUDE_PID
 LIMIT=${ANYTASKVIEW_NUDGE_AFTER:-8}
 in=$(cat)
-case "$P" in ''|*[!0-9]*) exit 0 ;; esac
+if [ "$2" = codex ]; then
+  # Codex 는 session_id 를 맨 앞에 쓴다. Claude 세션 안에서 띄운 codex 에 물려 온 CLAUDE_PID 는 보지 않는다
+  P=$(printf '%s\n' "$in" | grep -o '"session_id": *"[^"]*"' | head -n 1 | sed 's/^.*"\([^"]*\)"$/\1/')
+  case "$P" in ''|*[!A-Za-z0-9_-]*) exit 0 ;; esac
+else
+  P=$CLAUDE_PID
+  case "$P" in ''|*[!0-9]*) exit 0 ;; esac
+fi
 # 최상위 키만 본다. 문자열 안의 따옴표는 \" 로 이스케이프되어 있어 아래 모양에 걸리지 않는다
 case "$1" in
   prompt)
@@ -18,10 +25,11 @@ case "$1" in
   *) exit 0 ;;
 esac
 [ -e "$D/$P.done" ] && exit 0
-# 하위 에이전트의 도구는 같은 claude 프로세스에서 돈다. 세지 않는다(알림이 하위 에이전트로 가지 않게)
+# 하위 에이전트의 도구는 같은 claude 프로세스에서 돈다. 세지 않는다(알림이 하위 에이전트로 가지 않게).
+# Codex 는 하위 에이전트의 도구 사건에 agent_id 를 싣지 않아 함께 센다
 case "$in" in *'"agent_id":'*) exit 0 ;; esac
 mkdir -p -m 700 "$D" || exit 0
-# 첫 tool_name 이 최상위 값이다(Claude Code 는 tool_name 을 tool_input·tool_response 보다 앞에 쓴다)
+# 첫 tool_name 이 최상위 값이다(Claude Code·Codex 모두 tool_name 을 tool_input·tool_response 보다 앞에 쓴다)
 name=$(printf '%s\n' "$in" | grep -o '"tool_name": *"[^"]*"' | head -n 1 | sed 's/^.*"\([^"]*\)"$/\1/')
 case "$name" in
   # 실제로 적용된 그리기만 그림으로 친다(결과 글이 「적용 N」, N≥1). 모두 거부됐거나 화판이 꺼져 있었으면 도구로 센다.
