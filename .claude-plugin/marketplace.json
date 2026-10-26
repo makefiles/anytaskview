@@ -1,0 +1,14 @@
+{
+  "name": "anytaskview",
+  "description": "anytaskview 플러그인 하나를 담은 마켓플레이스",
+  "owner": {
+    "name": "makefiles"
+  },
+  "plugins": [
+    {
+      "name": "anytaskview",
+      "source": ".",
+      "description": "LLM 작업 진행 화판(로컬 브라우저)"
+    }
+  ]
+}

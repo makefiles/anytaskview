@@ -1,0 +1,289 @@
+/* 색은 모두 여기 토큰으로 정한다. 입력 칸·버튼도 바탕색과 글자색을 정해 둔다(다크 테마에서 흰 바탕 흰 글자 방지) */
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --panel-2: #f0f0ec; --fg: #1f2328; --muted: #5c6370; --line: #d4d4cd;
+  --accent: #1f5fd1; --focus: #1f5fd1; --flash: #fff3b0;
+  --s-todo: #7b818c; --s-doing: #1f5fd1; --s-done: #1a7f37; --s-fail: #c42b1c; --s-blocked: #c2410c; --s-wait: #9a6700;
+  --band-bg: #fff4e5; --band-fg: #6b3500; --edge: #6b7280; --input-bg: #ffffff; --input-fg: #1f2328;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a; --panel: #1d2024; --panel-2: #24282d; --fg: #e6e8eb; --muted: #a0a7b1; --line: #3a3f46;
+    --accent: #6ea8ff; --focus: #6ea8ff; --flash: #4a4320;
+    --s-todo: #9aa1ab; --s-doing: #6ea8ff; --s-done: #56c26a; --s-fail: #ff6b5e; --s-blocked: #ff9a52; --s-wait: #e3b341;
+    --band-bg: #3a2a12; --band-fg: #ffd9a8; --edge: #8b939e; --input-bg: #24282d; --input-fg: #e6e8eb;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171a; --panel: #1d2024; --panel-2: #24282d; --fg: #e6e8eb; --muted: #a0a7b1; --line: #3a3f46;
+  --accent: #6ea8ff; --focus: #6ea8ff; --flash: #4a4320;
+  --s-todo: #9aa1ab; --s-doing: #6ea8ff; --s-done: #56c26a; --s-fail: #ff6b5e; --s-blocked: #ff9a52; --s-wait: #e3b341;
+  --band-bg: #3a2a12; --band-fg: #ffd9a8; --edge: #8b939e; --input-bg: #24282d; --input-fg: #e6e8eb;
+  color-scheme: dark;
+}
+
+/* 글자는 14(본문)·13(타임라인·코드)·12(보조) 셋만 쓰고, 줄 높이는 px 로 4px 격자에 맞춘다 */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; } /* display 를 정한 요소도 hidden 이면 숨긴다 */
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--fg); font: 14px/20px system-ui, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+  display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden;
+}
+button, input, select {
+  font: inherit; color: var(--input-fg); background: var(--input-bg); border: 1px solid var(--line); border-radius: 6px;
+}
+button { padding: 3px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: .55; cursor: default; border-color: var(--line); } /* 쓰기 열쇠가 없거나 프로젝트 화판의 「Claude 에 보내기」 */
+button.mini { padding: 0 8px; font-size: 12px; line-height: 22px; }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+code, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; }
+h2 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--muted); margin: 0; }
+.muted { color: var(--muted); font-size: 12px; line-height: 16px; }
+.phead { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }
+.phead h2 { flex: none; }
+
+/* 띠(#band)가 숨으면 칸을 차지하지 않으므로, 각 영역의 행을 못박아 둔다 */
+#top { grid-row: 1; } #band { grid-row: 2; } main { grid-row: 3; } #replay { grid-row: 4; }
+#top { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 42px; }
+#headline { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#stall { color: var(--s-blocked); font-weight: 600; }
+.grow { flex: 1; }
+.chip { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; line-height: 18px; border: 1px solid currentColor; white-space: nowrap; }
+.chip.warn { color: var(--s-blocked); }
+.chip.working { color: var(--s-doing); } .chip.input { color: var(--s-wait); } .chip.idle { color: var(--s-todo); } .chip.ended { color: var(--muted); }
+.chip.proj { color: var(--accent); } .chip.proj.ended { color: var(--muted); }
+#proj-link { flex: none; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#proj-link.none { color: var(--muted); border-style: dashed; }
+
+/* 주의 띠: 승인 대기 → 막힘 → 실패 순서. 항목마다 「보기」로 그 자리에 간다 */
+#band { padding: 6px 14px; background: var(--band-bg); color: var(--band-fg); border-bottom: 1px solid var(--line); font-weight: 600; }
+#band .bi { display: flex; align-items: center; gap: 8px; }
+#band .bi + .bi { margin-top: 2px; }
+#band .bi .ico { flex: none; width: 16px; text-align: center; }
+#band .bi .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#band button { color: var(--band-fg); background: transparent; border-color: currentColor; }
+
+/* 세 칸과 그 사이 경계선. 폭은 app.js 가 변수로 정한다 */
+main { display: grid; grid-template-columns: var(--w-left, 220px) 6px minmax(0, 1fr) 6px var(--w-right, 30%); min-height: 0; }
+/* 숨긴(display:none) 경계선은 격자 칸을 차지하지 않으므로, 접을 때는 칸 목록에서도 그 칸을 뺀다 */
+main.fold-left { grid-template-columns: 40px minmax(0, 1fr) 6px var(--w-right, 30%); }
+main.fold-left #split-left { display: none; }
+.split { --sl: var(--line); touch-action: none; background: linear-gradient(var(--sl), var(--sl)) center / 1px 100% no-repeat; }
+.split.h { background-size: 100% 1px; }
+.split.v { cursor: col-resize; }
+.split.h { cursor: row-resize; }
+.split:hover, .split:focus-visible, .split.drag { --sl: var(--accent); background-size: 2px 100%; }
+.split.h:hover, .split.h:focus-visible, .split.h.drag { background-size: 100% 2px; }
+
+#sessions { overflow: auto; padding: 8px; background: var(--panel); min-width: 0; }
+main.fold-left #sessions { padding: 8px 4px; }
+main.fold-left #sessions h2, main.fold-left .sess .txt, main.fold-left #group-add, main.fold-left .smenu, main.fold-left .gempty { display: none; }
+main.fold-left #sessions .phead { justify-content: center; }
+main.fold-left .sess { padding: 6px 0; text-align: center; }
+.sess { display: block; width: 100%; text-align: left; padding: 6px 8px; margin: 0 0 4px; background: transparent; border: 1px solid transparent; }
+.sess:hover { border-color: var(--line); }
+.sess.sel { background: var(--panel-2); border-color: var(--accent); }
+.sess.ended { opacity: .6; }
+.sess .row1 { display: flex; gap: 6px; align-items: baseline; font-weight: 600; line-height: 18px; }
+.sess .row1 .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess .row2 { color: var(--muted); font-size: 12px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sico { flex: none; width: 14px; text-align: center; color: var(--s-todo); }
+.sico.working { color: var(--s-doing); } .sico.input { color: var(--s-wait); } .sico.ended { color: var(--muted); }
+
+/* 그림: 바깥 칸이 스크롤하고, 안쪽 크기 상자(#zoom-sizer)가 배율을 곱한 크기를 차지한다 */
+#canvas-wrap { position: relative; display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0; }
+#zoombar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+#zoom-label { min-width: 40px; text-align: right; }
+#follow { margin-left: 8px; }
+#canvas-scroll { position: relative; overflow: auto; min-height: 0; }
+#canvas-scroll { grid-row: 2; grid-column: 1; }
+#zoom-sizer { position: relative; }
+#canvas { position: absolute; left: 16px; top: 16px; transform-origin: 0 0; }
+#empty { position: absolute; inset: 40% 0 auto; text-align: center; color: var(--muted); }
+#canvas svg.edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+#canvas svg path { fill: none; stroke: var(--edge); stroke-width: 1.5; }
+#canvas svg path.st-doing { stroke: var(--s-doing); stroke-width: 2.5; }
+#canvas svg path.st-done { stroke: var(--s-done); } #canvas svg path.st-fail { stroke: var(--s-fail); }
+#canvas svg path.st-blocked { stroke: var(--s-blocked); stroke-dasharray: 5 4; } #canvas svg path.st-wait { stroke: var(--s-wait); stroke-dasharray: 2 3; }
+#canvas svg marker path { fill: var(--edge); stroke: none; }
+.elabel { position: absolute; font-size: 12px; line-height: 16px; color: var(--muted); background: var(--bg); padding: 0 3px; white-space: nowrap; }
+
+.part { position: absolute; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--s-todo); border-radius: 6px; padding: 6px 30px 6px 9px; max-width: 260px; }
+.part.nostatus { border-left-color: var(--line); }
+.part.group { background: transparent; border-style: dashed; border-left-style: solid; padding: 0; max-width: none; }
+.part.group > .lbl { padding: 4px 30px 0 9px; color: var(--muted); }
+.part .lbl { font-weight: 600; overflow-wrap: anywhere; }
+.part .ref { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 16px; color: var(--muted); overflow-wrap: anywhere; }
+.part .pnote { font-size: 12px; line-height: 16px; color: var(--muted); }
+.part .stchip { position: absolute; right: 5px; top: 5px; font-size: 12px; line-height: 16px; width: 22px; text-align: center; color: var(--s-todo); }
+.part .badges { position: absolute; right: 6px; bottom: -9px; display: flex; gap: 4px; }
+.badge { font-size: 12px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--panel); line-height: 16px; }
+.badge.edited { background: var(--s-done); }
+.part.has-ref { cursor: copy; }
+.part.text .body { white-space: pre-wrap; font-size: 13px; max-width: 320px; }
+.part.text { max-width: 340px; }
+.part.mermaid { max-width: none; }
+.part.mermaid .merr { color: var(--s-fail); font-size: 12px; line-height: 16px; white-space: pre-wrap; max-width: 320px; }
+.part.progress .bar { width: 180px; height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+.part.progress .bar > i { display: block; height: 100%; background: var(--s-doing); }
+.part.progress .num { font-size: 12px; line-height: 16px; color: var(--muted); }
+.part ul { list-style: none; margin: 4px 0 0; padding: 0 0 0 2px; }
+.part ul ul { padding-left: 16px; }
+.part li { font-size: 13px; line-height: 18px; }
+.part li > .row { display: flex; gap: 6px; }
+.part .row > .ico, .tree .ico { flex: none; width: 14px; text-align: center; }
+.part .row.has-ref { cursor: copy; }
+
+.st-todo { --st: var(--s-todo); } .st-doing { --st: var(--s-doing); } .st-done { --st: var(--s-done); }
+.st-fail { --st: var(--s-fail); } .st-blocked { --st: var(--s-blocked); } .st-wait { --st: var(--s-wait); }
+.part[class*="st-"] { border-left-color: var(--st); }
+.part[class*="st-"] > .stchip, .row[class*="st-"] > .ico, .tree [class*="st-"] > .ico, #plan-now [class*="st-"] > .ico { color: var(--st); }
+.part.st-doing { box-shadow: 0 0 0 1px var(--s-doing); }
+.flash { animation: flash 2s ease-out; }
+@keyframes flash { from { background: var(--flash); } to { background: var(--panel); } }
+.part.group.flash { animation: none; }
+
+/* 오른쪽: 계획(위)과 타임라인(아래). 높이는 app.js 가 변수로 정하고, 접으면 머리줄만 남는다 */
+#side { background: var(--panel); display: grid; grid-template-rows: var(--h-plan, 40%) 6px minmax(0, 1fr); min-height: 0; min-width: 0; }
+#side.fold-plan { grid-template-rows: auto minmax(0, 1fr); }
+#side.fold-tl { grid-template-rows: minmax(0, 1fr) auto; }
+#side.fold-plan.fold-tl { grid-template-rows: auto auto; align-content: start; }
+#side.fold-plan #split-side, #side.fold-tl #split-side { display: none; }
+#side.fold-plan #plan > :not(.phead), #side.fold-tl #timeline > :not(.phead) { display: none; }
+#side.fold-plan #plan .phead, #side.fold-tl #timeline .phead { margin: 0; }
+#plan, #timeline { padding: 10px 12px; overflow: auto; min-height: 0; }
+#plan-now { position: sticky; top: -10px; z-index: 1; margin: -4px -12px 6px; padding: 4px 12px; background: var(--panel); border-bottom: 1px solid var(--panel-2); font-weight: 600; display: flex; gap: 6px; }
+#plan-now .ico { flex: none; width: 14px; text-align: center; }
+.tree { list-style: none; margin: 0; padding: 0; }
+.tree .tree { padding-left: 16px; }
+.tree .step { padding: 2px 4px; border-radius: 4px; }
+.tree .step.cur { background: var(--panel-2); outline: 1px solid var(--s-doing); }
+.tree .head { display: flex; gap: 6px; }
+.tree .title { font-weight: 600; }
+.tree .stats, .tree .snote { color: var(--muted); font-size: 12px; line-height: 16px; padding-left: 20px; }
+.tag { font-size: 12px; line-height: 16px; padding: 0 5px; border-radius: 4px; background: var(--panel-2); color: var(--muted); margin-left: 4px; }
+
+#tl-filters { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
+#tl-new { position: sticky; top: -10px; z-index: 1; width: 100%; margin: 0 0 4px; font-size: 12px; line-height: 20px; padding: 0 8px; color: var(--accent); border-color: var(--accent); }
+#tl-body { list-style: none; margin: 0; padding: 0; }
+#tl-body li { padding: 2px 0; border-bottom: 1px solid var(--panel-2); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
+#tl-body li.sub { padding-left: 14px; color: var(--muted); }
+#tl-body li .when { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+#tl-body li.prompt { font-weight: 600; }
+#tl-body li.prompt, #tl-body li.sys { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+#tl-body li.sys { color: var(--muted); }
+#tl-body li.new-mark { border: 0; border-top: 2px solid var(--accent); color: var(--accent); font-size: 12px; line-height: 16px; padding: 0; margin: 4px 0; }
+#tl-body .k { font-size: 12px; line-height: 16px; padding: 0 5px; border-radius: 4px; margin-right: 4px; border: 1px solid currentColor; }
+#tl-body .k.why, #tl-body .k.decision { color: var(--accent); }
+#tl-body .k.blocked, #tl-body .k.fail { color: var(--s-fail); }
+#tl-body .k.wait { color: var(--s-wait); } #tl-body .k.running { color: var(--s-doing); } #tl-body .k.done { color: var(--s-done); }
+#tl-body .k.unknown, #tl-body .k.background { color: var(--muted); }
+#tl-body .times { color: var(--muted); font-size: 12px; margin-left: 4px; }
+#tl-body .copy { cursor: copy; text-decoration: underline dotted; }
+
+#replay { display: flex; align-items: center; gap: 10px; padding: 6px 14px; background: var(--panel); border-top: 1px solid var(--line); }
+#slider { flex: 1; accent-color: var(--accent); background: transparent; border: 0; }
+#replay-label { color: var(--muted); font-size: 12px; min-width: 170px; }
+#toast { position: fixed; z-index: 16; right: 16px; bottom: 56px; background: var(--fg); color: var(--bg); padding: 6px 12px; border-radius: 6px; font-size: 13px; }
+#measure { position: absolute; left: -10000px; top: 0; visibility: hidden; }
+
+/* 맨 위 줄의 세션 이름(눌러서 바꾸기)과 묶음·보내기 */
+#sess-name { border: 0; background: transparent; padding: 0 2px; font-weight: 600; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+#sess-name:hover { text-decoration: underline dotted; }
+#name-form { display: flex; gap: 4px; }
+#name-input { width: 24ch; padding: 0 6px; }
+
+/* 세션 목록의 프로젝트 머리: 접기 ▾, 이름(누르면 큰 그림), ⋯(마우스를 올리거나 초점이 있을 때) */
+.ghead { display: flex; align-items: center; gap: 2px; margin: 8px 0 4px; }
+.ghead .gtog { flex: none; border: 0; background: transparent; padding: 0 2px; font-size: 12px; line-height: 20px; color: var(--muted); }
+.ghead .gfold { flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; padding: 0 2px; font-size: 12px; line-height: 20px; font-weight: 600; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ghead button.gfold:hover { color: var(--fg); text-decoration: underline dotted; }
+.ghead .gfold.sel { color: var(--accent); }
+.ghead .pmenu { flex: none; opacity: 0; }
+.ghead:hover > .pmenu, .ghead:focus-within > .pmenu, .pmenu[aria-expanded="true"] { opacity: 1; }
+#tl-body .hist { border: 0; background: transparent; padding: 0; font-weight: 600; text-align: left; color: var(--fg); }
+#tl-body .hist:hover { text-decoration: underline; }
+main.fold-left .ghead { display: none; }
+
+/* Claude 에 보내기: 오른쪽 아래에 떠 있는 작은 창 */
+#composer { position: fixed; left: 8px; top: 8px; z-index: 15; width: min(380px, calc(100vw - 16px)); max-height: 60vh; overflow: auto; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+#composer .to { margin: 0; font-size: 13px; line-height: 18px; color: var(--muted); overflow-wrap: anywhere; }
+#ask { position: fixed; z-index: 14; padding: 0 8px; font-size: 12px; line-height: 20px; border-radius: 10px; border-color: var(--accent); color: var(--accent); background: var(--panel); box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
+#composer .crow button { flex: none; }
+#composer .field { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+#composer textarea { font: inherit; width: 100%; resize: vertical; color: var(--input-fg); background: var(--input-bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#composer .crow { display: flex; align-items: center; gap: 8px; }
+#composer .crow .muted { flex: 1; }
+#c-list { list-style: none; margin: 0; padding: 0; }
+/* 모은 글 띠: 화면 아래 가운데, 재생 막대 위 */
+#basket { position: fixed; left: 50%; transform: translateX(-50%); bottom: 56px; z-index: 13; width: min(480px, calc(100vw - 32px)); max-height: 45vh; overflow: auto; padding: 8px 12px; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); display: grid; gap: 6px; }
+#basket .crow { display: flex; align-items: center; gap: 6px; }
+#b-sum { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+#b-list { list-style: none; margin: 0; padding: 0; }
+#b-list li { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; line-height: 20px; border-top: 1px solid var(--panel-2); padding: 2px 0; overflow-wrap: anywhere; }
+#b-list li span { flex: 1; min-width: 0; }
+/* 보낸 글 수(상자·단계). 대기 중인 글이 있으면 대기 색 */
+.badge.mail { cursor: pointer; background: var(--s-done); }
+.badge.mail.queued { background: var(--s-wait); }
+.tree .head .mail { margin-left: 6px; font-size: 12px; line-height: 16px; padding: 0 5px; border-radius: 999px; color: var(--panel); background: var(--s-done); cursor: pointer; border: 0; }
+.tree .head .mail.queued { background: var(--s-wait); }
+#c-list li { font-size: 13px; line-height: 20px; border-top: 1px solid var(--panel-2); padding: 2px 0; overflow-wrap: anywhere; }
+#c-list .k, #tl-body .k.queued, #tl-body .k.sent, #tl-body .k.expired { font-size: 12px; line-height: 16px; padding: 0 5px; border-radius: 4px; margin-right: 4px; border: 1px solid currentColor; }
+.k.queued { color: var(--s-wait); } .k.sent { color: var(--s-done); } .k.expired { color: var(--muted); }
+.part.target, .tree .step.target { outline: 2px dashed var(--accent); outline-offset: 2px; }
+
+/* 새 창으로 뗀 타임라인: 맨 위 한 줄과 타임라인만 남긴다 */
+body.only-tl { grid-template-rows: auto auto 1fr; }
+body.only-tl main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+body.only-tl #sessions, body.only-tl .split, body.only-tl #canvas-wrap, body.only-tl #plan, body.only-tl #replay, body.only-tl #popout, body.only-tl #fold-tl, body.only-tl #theme, body.only-tl #compose, body.only-tl #thread-nav, body.only-tl #proj-link, body.only-tl #settings-open, body.only-tl #basket { display: none; }
+body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
+
+@media (max-width: 900px) {
+  main, main.fold-left { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(320px, 1fr) auto; overflow: auto; }
+  .split { display: none; }
+  #sessions { max-height: 140px; border-bottom: 1px solid var(--line); }
+  #fold-sessions { display: none; }
+  #side, #side.fold-plan, #side.fold-tl { border-top: 1px solid var(--line); grid-template-rows: auto auto; }
+}
+
+/* 이어진 대화 ◀ n/m ▶ */
+#thread-nav { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+
+/* 도움말 */
+#help, #settings { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 10px 16px 14px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
+#help::backdrop, #settings::backdrop { background: rgba(0, 0, 0, .35); }
+#help h3, #settings h3 { font-size: 14px; line-height: 20px; font-weight: 600; margin: 12px 0 4px; }
+#help p, #help li, #help dt, #help dd, #settings p { font-size: 13px; line-height: 20px; }
+#help p, #settings p { margin: 0; }
+#settings label { display: grid; gap: 2px; margin: 8px 0 4px; font-size: 13px; line-height: 20px; }
+#settings input { padding: 2px 6px; }
+#settings .crow { display: flex; margin-top: 10px; }
+#help ul { margin: 0; padding-left: 18px; }
+#help dl.keys { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+#help dd { margin: 0; color: var(--muted); }
+kbd { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; line-height: 16px; padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); }
+
+/* 세션 줄과 묶음: 줄을 끌어 묶음(머리나 그 아래 어디든)에 놓는다. ⋯ 는 줄에 마우스를 올리거나 초점이 있을 때 보인다 */
+.srow { display: flex; align-items: center; gap: 2px; margin: 0 0 4px; }
+.srow > .sess { flex: 1; min-width: 0; margin: 0; }
+.srow > .smenu { flex: none; opacity: 0; } /* 숨겨도 Tab 으로 갈 수 있게 visibility 가 아니라 opacity 로 감춘다 */
+.srow:hover > .smenu, .srow:focus-within > .smenu, .smenu[aria-expanded="true"] { opacity: 1; }
+.sess[draggable="true"] { cursor: grab; }
+.gsec { border-radius: 6px; padding: 0 2px; }
+body.dragging .gsec { outline: 1px dashed var(--line); outline-offset: 1px; }
+body.dragging .gsec.drop { outline: 2px solid var(--accent); background: var(--panel-2); }
+.gempty { font-size: 12px; line-height: 16px; color: var(--muted); padding: 2px 8px 6px; }
+#group-menu { position: fixed; z-index: 20; min-width: 180px; max-width: 280px; max-height: 60vh; overflow: auto; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
+#group-menu .gm-title { font-size: 12px; line-height: 16px; color: var(--muted); padding: 2px 8px 4px; }
+#group-menu .gm-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 4px 8px; font-size: 13px; line-height: 20px; }
+#group-menu .gm-item:hover, #group-menu .gm-item:focus-visible { background: var(--panel-2); }
+#group-menu .gm-item[aria-checked="true"]::before { content: "✓ "; }
+#group-menu input { width: 100%; }
+#group-menu .gm-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+#group-menu .gm-del { color: var(--s-fail); }
+#group-menu .gm-del.armed { font-weight: 600; }
+#group-menu .gm-item[aria-disabled="true"] { color: var(--muted); cursor: default; }

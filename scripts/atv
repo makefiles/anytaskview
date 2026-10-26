@@ -1,0 +1,49 @@
+#!/bin/sh
+# anytaskview 실행기: node 22.12 이상을 골라 훅·MCP·화판 서버를 실행한다.
+# PATH 의 node 가 오래된 판(예: /usr/local/bin/node v16)이어도 동작하도록, 쓸 수 있는 node 를 찾아 상태 폴더에 기억한다.
+# 쓰는 법: atv hook | atv mcp | atv board [인자]
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+STATE=${ANYTASKVIEW_HOME:-$HOME/.local/state/anytaskview}
+
+case "$1" in
+  hook) ENTRY=hook/hook.js ;;
+  mcp) ENTRY=mcp/server.js ;;
+  board) ENTRY=scripts/board.js ;;
+  *) echo "쓰는 법: atv hook|mcp|board [인자]" >&2; exit 2 ;;
+esac
+shift
+
+usable() {
+  [ -x "$1" ] && "$1" -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 12) ? 0 : 1)' 2>/dev/null
+}
+
+pick() {
+  if [ -n "$ANYTASKVIEW_NODE" ] && usable "$ANYTASKVIEW_NODE"; then echo "$ANYTASKVIEW_NODE"; return 0; fi
+  # 기억한 경로는 판을 다시 재지 않는다(훅마다 node 를 두 번 띄우지 않으려고)
+  if [ -r "$STATE/node-path" ]; then
+    n=$(cat "$STATE/node-path")
+    if [ -x "$n" ]; then echo "$n"; return 0; fi
+  fi
+  old_ifs=$IFS; IFS=:
+  for d in $PATH; do
+    if usable "$d/node"; then IFS=$old_ifs; remember "$d/node"; return 0; fi
+  done
+  IFS=$old_ifs
+  for n in $(ls -d "$HOME"/.nvm/versions/node/*/bin/node "$HOME"/.local/share/pi-node/*/bin/node 2>/dev/null | sort -rV); do
+    if usable "$n"; then remember "$n"; return 0; fi
+  done
+  return 1
+}
+
+remember() {
+  (umask 077; mkdir -p "$STATE" && printf '%s\n' "$1" > "$STATE/node-path") 2>/dev/null
+  echo "$1"
+}
+
+if ! NODE=$(pick); then
+  # 훅은 세션을 막지 않도록 조용히 끝낸다
+  [ "$ENTRY" = hook/hook.js ] && exit 0
+  echo "anytaskview: node 22.12 이상을 찾지 못했습니다. ANYTASKVIEW_NODE 에 node 경로를 넣어 주세요." >&2
+  exit 1
+fi
+exec "$NODE" "$ROOT/$ENTRY" "$@"

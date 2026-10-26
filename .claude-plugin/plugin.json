@@ -1,0 +1,16 @@
+{
+  "name": "anytaskview",
+  "description": "LLM 이 일하는 동안 지금 하는 일(계획·단계·그림·사실)을 이 PC 의 브라우저 화판에 실시간으로 보여 준다",
+  "author": {
+    "name": "makefiles"
+  },
+  "repository": "https://github.com/makefiles/anytaskview",
+  "license": "Apache-2.0",
+  "keywords": [
+    "progress",
+    "board",
+    "visualization",
+    "hooks",
+    "mcp"
+  ]
+}

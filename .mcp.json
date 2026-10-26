@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "anytaskview": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/atv",
+      "args": [
+        "mcp"
+      ],
+      "alwaysLoad": true
+    }
+  }
+}

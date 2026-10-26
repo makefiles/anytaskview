@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>anytaskview</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header id="top">
+  <span id="sess-chip" class="chip"></span>
+  <button id="sess-name" class="name" type="button" title="눌러서 이 세션의 이름을 바꿉니다"></button>
+  <form id="name-form" hidden><input id="name-input" maxlength="80" aria-label="세션 이름"><button type="submit" class="mini">저장</button><button type="button" id="name-cancel" class="mini">취소</button></form>
+  <span id="thread-nav" hidden title="/clear·이어받기 문구로 이어진 대화입니다. 그림은 대화마다 따로 있습니다"><button id="thread-prev" class="mini" type="button" title="앞 대화">◀</button><span id="thread-pos" class="muted"></span><button id="thread-next" class="mini" type="button" title="다음 대화">▶</button></span>
+  <button id="proj-link" class="mini" type="button" hidden></button>
+  <span id="headline">세션을 고르세요</span>
+  <span id="stall" hidden></span>
+  <span class="grow"></span>
+  <span id="nokey" class="chip warn" hidden title="이름 바꾸기·프로젝트·Claude 에 보내기·설정에는 화판 쓰기 열쇠가 필요합니다. 터미널에서 scripts/atv board --url 이 찍는 주소를 이 브라우저로 한 번 여세요">쓰기 열쇠 없음</span>
+  <button id="compose" type="button" title="지금 보는 세션 전체에 대해 의견·지시를 써서 Claude 에 보냅니다. 상자·단계에 대해서는 그 위의 「보내기」 를 누릅니다">Claude 에 보내기</button>
+  <button id="theme" type="button" title="테마 바꾸기">테마: 자동</button>
+  <button id="settings-open" type="button" title="이어받기 문구 설정">설정</button>
+  <button id="help-open" type="button" title="사용법과 단축키(?)">도움말</button>
+</header>
+<div id="band" hidden></div>
+<main>
+  <nav id="sessions" aria-label="세션 목록">
+    <div class="phead"><h2>세션</h2><span class="grow"></span><button id="group-add" class="mini" type="button" title="새 프로젝트를 만듭니다. 세션 줄을 끌어 프로젝트에 넣거나, 줄의 ⋯ 로 옮깁니다">+ 프로젝트</button><button id="fold-sessions" class="mini" type="button" title="세션 목록 접기">◀</button></div>
+    <div id="sess-body"></div>
+  </nav>
+  <div class="split v" id="split-left" role="separator" aria-orientation="vertical" aria-label="세션 목록 폭" tabindex="0"></div>
+  <section id="canvas-wrap" aria-label="그림">
+    <div id="zoombar" role="toolbar" aria-label="그림 배율">
+      <button id="zoom-out" class="mini" type="button" title="축소">−</button>
+      <button id="zoom-fit" class="mini" type="button" title="화면에 맞추기">맞춤</button>
+      <button id="zoom-100" class="mini" type="button" title="100% 로 되돌리기">원래 크기</button>
+      <button id="zoom-in" class="mini" type="button" title="확대">+</button>
+      <span id="zoom-label" class="muted"></span>
+      <button id="follow" class="mini" type="button" aria-pressed="true" title="진행 중인 상자를 따라 화면을 옮깁니다. 직접 움직이면 꺼집니다">따라가기</button>
+    </div>
+    <div id="canvas-scroll">
+      <div id="zoom-sizer"><div id="canvas"></div></div>
+      <p id="empty">아직 그림이 없습니다. Claude 가 draw 로 그리면 여기에 나타납니다.</p>
+    </div>
+  </section>
+  <div class="split v" id="split-right" role="separator" aria-orientation="vertical" aria-label="오른쪽 패널 폭" tabindex="0"></div>
+  <aside id="side">
+    <section id="plan" aria-label="계획">
+      <div class="phead"><h2>계획</h2><span class="grow"></span><button id="toggle-done" class="mini" type="button"></button><button id="fold-plan" class="mini" type="button" title="계획 접기">▾</button></div>
+      <div id="plan-now" hidden></div>
+      <div id="plan-body"></div>
+    </section>
+    <div class="split h" id="split-side" role="separator" aria-orientation="horizontal" aria-label="계획과 타임라인 높이" tabindex="0"></div>
+    <section id="timeline" aria-label="타임라인">
+      <div class="phead"><h2 id="tl-title">타임라인</h2><span class="grow"></span><button id="popout" class="mini" type="button" title="타임라인을 새 창으로 떼어 봅니다">새 창</button><button id="fold-tl" class="mini" type="button" title="타임라인 접기">▾</button></div>
+      <div id="tl-filters" role="group" aria-label="타임라인 거르기"></div>
+      <button id="tl-new" type="button" hidden></button>
+      <ol id="tl-body"></ol>
+    </section>
+  </aside>
+</main>
+<footer id="replay">
+  <label for="slider">재생</label>
+  <input id="slider" type="range" min="0" max="0" value="0">
+  <span id="replay-label">실시간</span>
+  <button id="live" type="button">실시간</button>
+</footer>
+<form id="composer" hidden aria-label="Claude 에 보내기">
+  <div class="phead"><h2>Claude 에 보내기</h2><span class="grow"></span><button type="button" id="composer-close" class="mini">닫기</button></div>
+  <p id="c-to" class="to"></p>
+  <div class="field" role="radiogroup" aria-label="종류">
+    <label><input type="radio" name="c-kind" value="comment" checked> 의견</label>
+    <label><input type="radio" name="c-kind" value="instruction"> 지시</label>
+  </div>
+  <textarea id="c-text" rows="3" aria-label="보낼 글" placeholder="Enter 로 보내고 Shift+Enter 로 줄을 바꿉니다"></textarea>
+  <div class="crow"><span id="c-hint" class="muted"></span><button type="button" id="c-collect" title="보내지 않고 모아 두었다가 화면 아래 띠에서 한꺼번에 보냅니다">모아 두기</button><button type="submit" id="c-send">보내기</button></div>
+  <ol id="c-list"></ol>
+</form>
+<section id="basket" hidden aria-label="모은 글">
+  <div class="crow"><span id="b-sum"></span><button type="button" id="b-view" class="mini" aria-expanded="false" aria-controls="b-list">보기</button><button type="button" id="b-send" class="mini">한꺼번에 보내기</button><button type="button" id="b-clear" class="mini">비우기</button></div>
+  <ol id="b-list" hidden></ol>
+</section>
+<dialog id="help" aria-labelledby="help-title">
+  <div class="phead"><h2 id="help-title">도움말</h2><span class="grow"></span><button type="button" id="help-close" class="mini">닫기</button></div>
+  <h3>이 화판은</h3>
+  <p>Claude 가 일하면서 올린 계획·그림·메모와, 훅이 자동으로 올린 명령·파일 수정·하위 에이전트를 한 화면에 보여 줍니다. 여러 단계짜리 작업이면 Claude 가 계획을 올린 뒤 문제 구조를 한 번 그립니다. 그림 없이 도구를 8번 넘게 쓰면 그 대화의 Claude 에 한 번 알림이 갑니다.</p>
+  <h3>주소</h3>
+  <p>처음 한 번만 터미널에서 플러그인 폴더의 <code>scripts/atv board --url</code> 이 찍는 주소로 엽니다. 그 뒤로는 이 브라우저에서 <code>http://127.0.0.1:4871/</code> 만 열면 됩니다(읽기 쿠키는 1년, 쓰기 열쇠는 이 브라우저에 남습니다). 다른 브라우저나 시크릿 창을 쓰거나 쿠키를 지웠을 때만 다시 받습니다.</p>
+  <h3>세션 목록</h3>
+  <ul>
+    <li>입력이 필요한 세션이 맨 위, 끝난 세션이 맨 아래에 옵니다.</li>
+    <li><code>/clear</code> 나 이어받기 문구(설정)로 이어진 대화는 한 줄로 모입니다. 맨 위 이름 옆 ◀ ▶ 로 앞뒤 대화를 봅니다. resume·continue 는 같은 대화로 이어집니다.</li>
+    <li>세션 목록 위 「+ 프로젝트」 로 프로젝트를 만들고, 세션 줄을 끌어 프로젝트에 놓으면 들어갑니다. 「프로젝트 없음」 에 놓으면 빠지고, 뺀 대화는 자동으로 다시 넣지 않습니다. 키보드로는 줄 오른쪽 ⋯ 메뉴를 씁니다. 이어진 대화는 함께 옮겨 갑니다.</li>
+    <li>맨 위 이름을 누르면 세션 이름을 바꿉니다.</li>
+    <li>입력도 그림도 없이 끝난 세션(CLI 명령이 잠깐 띄운 것)은 목록에서 숨깁니다.</li>
+    <li>필요 없는 줄은 ⋯ 메뉴의 「지우기」 를 두 번 눌러 지웁니다. 끝난 대화만 지우고 진행 중인 대화는 남깁니다. 기록은 상태 폴더의 <code>trash</code> 에 30일 동안 남았다가 비워집니다.</li>
+  </ul>
+  <h3>프로젝트</h3>
+  <ul>
+    <li>여러 대화에 걸친 일 하나가 프로젝트입니다. 프로젝트마다 큰 그림 화판(작업 단위, 지금 위치, 남은 일, 결정 대기)이 있고, 프로젝트에 든 대화의 Claude 가 단위를 시작·끝낼 때와 결정 때 고칩니다. 목록에서 프로젝트 이름을 누르면 큰 그림이 보이고, 오른쪽 아래 「대화 이력」 에서 대화를 누르면 그 대화의 화판으로 갑니다.</li>
+    <li>대화가 프로젝트에 드는 길: 사용자가 끌어 놓기 → 이어받기 문구(설정) → Claude 가 새 대화를 시작할 때 받은 후보에서 고르기 순서로 앞선 쪽을 따릅니다. 어느 것에도 맞지 않으면 「프로젝트 없음」 입니다. <code>/clear</code> 로 이어진 대화는 앞 대화의 프로젝트를 물려받고, 사용자가 뺀 줄은 빠진 채로 이어집니다.</li>
+    <li>세션 화판 맨 위의 「프로젝트 …」 를 누르면 그 프로젝트의 큰 그림으로, 「프로젝트 없음」 을 누르면 넣을 프로젝트를 고릅니다.</li>
+    <li>프로젝트 이름 옆 ⋯ 로 이름을 바꾸거나 「끝」 으로 표시합니다. 끝난 프로젝트는 목록 맨 아래에 접혀 있습니다. 끌어 놓기·이어받기 문구·Claude 로 대화가 들어오면 다시 진행으로 돌아가고, <code>/clear</code> 로 이어진 대화는 끝난 프로젝트를 물려받지 않습니다. 「풀기」 는 프로젝트만 없애고 대화는 남깁니다.</li>
+  </ul>
+  <h3>그림</h3>
+  <ul>
+    <li>화판이 여러 배치(가로·세로·줄 바꿈, 묶음 안팎 방향 섞기)를 재 보고, 화면에 가장 크게 들어가면서 칸 모양에 가까운 것을 고릅니다.</li>
+    <li>「맞춤」 은 화면에 맞추고 「원래 크기」 는 100% 로 돌립니다.</li>
+    <li>「따라가기」 를 켜면 진행 중인 상자로 화면이 옮겨 갑니다. 직접 스크롤하거나 누르면 꺼집니다.</li>
+    <li>파일 위치가 붙은 상자나 항목을 누르면 그 위치(경로:줄)가 복사됩니다. 상자에는 파일 이름만 보이고, 마우스를 올리면 전체 경로가 보입니다.</li>
+    <li>「수정됨」 은 Claude 가 그 상자의 파일을 고쳤다는 표시이고, 「이유 n」 은 그 상자에 붙은 메모 수입니다.</li>
+  </ul>
+  <h3>계획·타임라인·재생</h3>
+  <ul>
+    <li>끝난 단계는 숨기고 개수만 보입니다. 「끝난 단계 n개 보기」 로 폅니다.</li>
+    <li>타임라인 위 단추로 종류별로 거르고, 「새 창」 으로 떼어 봅니다.</li>
+    <li>아래 재생 막대를 끌면 그때의 화판을 다시 봅니다. 「실시간」 으로 돌아옵니다.</li>
+  </ul>
+  <h3>Claude 에 보내기</h3>
+  <ul>
+    <li>그림의 상자나 계획의 단계에 마우스를 올리면 오른쪽 위에 「보내기」 가 뜹니다. 누르면 그 옆에 창이 열리고, 그 상자에 대한 의견·지시를 보냅니다. 키보드로는 <kbd>Tab</kbd> 으로 상자·단계에 간 뒤 <kbd>Enter</kbd> 를 누릅니다.</li>
+    <li>다른 세션에는 세션 줄 ⋯ 메뉴의 「메시지 보내기…」 로 보냅니다. 보던 화면은 그대로입니다. 보는 세션 전체에는 맨 위 「Claude 에 보내기」 로 보냅니다.</li>
+    <li><kbd>Enter</kbd> 로 보내고 <kbd>Shift</kbd> + <kbd>Enter</kbd> 로 줄을 바꿉니다. 쉬는 세션은 깨우고, 일하는 중이면 그 차례 안에서 받습니다. 승인을 대신하지는 못합니다. 보낸 글의 상태(대기·보냄·만료)는 타임라인에 남습니다. 쓰다 닫은 글은 받는 곳(세션·상자)마다 남아 다시 열면 이어 씁니다. 탭이나 브라우저를 닫아도 남습니다.</li>
+    <li>여러 상자·단계에 할 말을 한 번에 보내려면 창의 「모아 두기」 를 누릅니다. 모은 글은 화면 아래 띠에 보이고, 「보기」 로 확인해 뺄 수 있으며 「한꺼번에 보내기」 로 함께 보냅니다(하나라도 보낼 수 없으면 하나도 보내지 않습니다). 한 세션에 보낼 글만 모읍니다. 모은 글은 탭이나 브라우저를 닫아도 남고 다른 탭에서도 보입니다. 받을 대화가 끝났거나 지워졌으면 보낼 수 없으니 빼거나 비웁니다. 보내는 사이 탭이 닫혀 다시 보내도 한 번만 들어갑니다.</li>
+    <li>글을 보낸 상자·단계에는 <code>✉</code> 와 보낸 글 수가 붙습니다. 아직 Claude 가 받지 않은 글이 있으면 승인 대기와 같은 색이고, 누르면 그 대상의 보내기 창이 열립니다.</li>
+  </ul>
+  <h3>단축키·마우스</h3>
+  <dl class="keys">
+    <dt><kbd>?</kbd></dt><dd>도움말 열기·닫기</dd>
+    <dt><kbd>Esc</kbd></dt><dd>도움말·보내기 창·이름 입력 닫기</dd>
+    <dt><kbd>Ctrl</kbd> + 휠</dt><dd>그림 확대·축소(마우스 자리를 중심으로)</dd>
+    <dt>경계선 끌기</dt><dd>패널 폭·높이 바꾸기. 두 번 누르면 기본값</dd>
+    <dt>경계선에서 <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>16px 씩 옮기기(<kbd>Tab</kbd> 으로 경계선에 갑니다)</dd>
+    <dt><kbd>Enter</kbd></dt><dd>세션·프로젝트 이름 저장, 보내기 창에서 보내기</dd>
+    <dt>상자·단계에서 <kbd>Enter</kbd></dt><dd>그 상자·단계에 대해 Claude 에 보내기</dd>
+  </dl>
+</dialog>
+<dialog id="settings" aria-labelledby="settings-title">
+  <form id="settings-form">
+    <div class="phead"><h2 id="settings-title">설정</h2><span class="grow"></span><button type="button" id="settings-close" class="mini">닫기</button></div>
+    <h3>이어받기 문구</h3>
+    <p>자기만의 인계 절차가 있으면 정합니다. 새 대화의 첫 입력이 이 문구로 시작하면 그 키를 가진 앞 대화에 잇고, 그 키의 프로젝트에 넣습니다(처음 보는 키는 그 이름으로 새 프로젝트). <code>&lt;키&gt;</code> 자리에 공백 없는 이름이 오고, <code>&lt;키&gt;</code> 뒤에 글을 두면 그 글까지 맞아야 합니다. 쓰지 않으면 비워 둡니다.</p>
+    <label>첫 입력 문구<input id="cfg-phrase" maxlength="60" placeholder="예: 이어서 <키>" autocomplete="off"></label>
+    <label>인계 문서 경로(고르기)<input id="cfg-doc" maxlength="120" placeholder="예: /handoff/<키>.md" autocomplete="off"></label>
+    <p class="muted">이 경로의 문서를 고친 대화는 그 키를 갖게 되어, 다음에 그 키로 이어받는 대화가 이 대화에 이어집니다. 프로젝트에 든 대화가 고치면 키가 그 프로젝트에 붙습니다.</p>
+    <div class="crow"><span class="grow"></span><button type="submit">저장</button></div>
+  </form>
+</dialog>
+<div id="group-menu" role="menu" aria-label="메시지·프로젝트·지우기" hidden></div>
+<button id="ask" type="button" hidden>보내기</button>
+<div id="toast" role="status" hidden></div>
+<script src="/vendor/elk.js"></script>
+<script src="/vendor/mermaid.js"></script>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
