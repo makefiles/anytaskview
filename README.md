@@ -55,7 +55,7 @@ INSTALL.md 는 에이전트가 그대로 따라 할 수 있도록 명령과 확�
 2. 터미널에서 아래 명령이 찍는 주소를 이 PC 의 브라우저로 한 번 엽니다.
 
    ```sh
-   "$(ls -td ~/.claude/plugins/cache/anytaskview/anytaskview/*/ | head -1)scripts/atv" board --url
+   "$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)scripts/atv" board --url
    ```
 
 3. 그 뒤로는 그 브라우저에서 `http://127.0.0.1:4871/` 만 열면 됩니다.

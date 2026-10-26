@@ -44,11 +44,11 @@ claude plugin install anytaskview@anytaskview
 플러그인 폴더(아래에서 `$ATV`)는 이렇게 찾습니다.
 
 ```sh
-ATV="$(ls -td ~/.claude/plugins/cache/anytaskview/anytaskview/*/ | head -1)"
+ATV="$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)"
 echo "$ATV"
 ```
 
-확인: `$ATV` 가 `.../anytaskview/anytaskview/<판>/` 이고 `ls "$ATV/scripts/atv"` 가 파일을 찾습니다.
+확인: `$ATV` 가 `.../anytaskview/anytaskview/<판>/` 이고 `ls "$ATV/scripts/atv"` 가 파일을 찾습니다. 갱신하면 옛 판 폴더에 `.orphaned_at` 이 생기고 그 폴더의 수정 시각도 새로워지므로, 수정 시각이 아니라 이 표시가 없는 폴더로 지금 판을 고릅니다.
 
 ## 3. 화판 서버 띄우기와 확인
 
@@ -67,7 +67,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4871/
 사용자에게 아래 명령을 터미널에서 직접 실행하고, 찍힌 주소를 이 PC 의 브라우저로 한 번 열라고 안내합니다. 에이전트는 이 명령을 실행해 출력을 읽지 않습니다.
 
 ```sh
-"$(ls -td ~/.claude/plugins/cache/anytaskview/anytaskview/*/ | head -1)scripts/atv" board --url
+"$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)scripts/atv" board --url
 ```
 
 그 뒤로는 그 브라우저에서 `http://127.0.0.1:4871/` 만 열면 됩니다(읽기 쿠키는 1년, 쓰기 열쇠는 그 브라우저에 남습니다).
@@ -87,7 +87,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4871/
 ## 갱신
 
 ```sh
-OLD="$(ls -td ~/.claude/plugins/cache/anytaskview/anytaskview/*/ | head -1)"
+OLD="$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)"
 claude plugin marketplace update anytaskview
 claude plugin update anytaskview@anytaskview
 "$OLD/scripts/atv" board --stop
@@ -98,7 +98,7 @@ claude plugin update anytaskview@anytaskview
 ## 삭제
 
 ```sh
-"$(ls -td ~/.claude/plugins/cache/anytaskview/anytaskview/*/ | head -1)scripts/atv" board --stop
+"$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)scripts/atv" board --stop
 claude plugin uninstall anytaskview@anytaskview
 claude plugin marketplace remove anytaskview
 ```
@@ -107,7 +107,7 @@ claude plugin marketplace remove anytaskview
 
 ## Codex 에 설치
 
-같은 저장소가 OpenAI Codex 의 플러그인이기도 합니다(`.codex-plugin/`). 터미널의 `codex`(대화형·`codex exec`), ChatGPT 데스크톱 앱과 VS Code 의 Codex 가 같은 `~/.codex` 설치를 씁니다. 화판 서버·상태 폴더·브라우저 주소는 Claude Code 와 같아서, 두 쪽을 함께 쓰면 한 화판에 함께 보입니다. 화판을 처음 띄우고 여는 일은 위 3·4단계와 같습니다(플러그인 폴더만 `~/.codex/plugins/cache/anytaskview/anytaskview/*/` 입니다).
+같은 저장소가 OpenAI Codex 의 플러그인이기도 합니다(`.codex-plugin/`). 터미널의 `codex`(대화형·`codex exec`), ChatGPT 데스크톱 앱과 VS Code 의 Codex 가 같은 `~/.codex` 설치를 씁니다. 화판 서버·상태 폴더·브라우저 주소는 Claude Code 와 같아서, 두 쪽을 함께 쓰면 한 화판에 함께 보입니다. 화판을 처음 띄우고 여는 일은 위 3·4단계와 같습니다(플러그인 폴더만 `~/.codex/plugins/cache/anytaskview/anytaskview/local/` 입니다. 0.163 은 git 마켓플레이스로 설치해도 이 이름을 씁니다).
 
 두 쪽을 함께 쓰면 Claude Code 플러그인도 같은 판으로 갱신합니다. 화판 서버는 하나라서, 옛 판 서버가 떠 있으면 Codex 세션을 알아보지 못합니다(도구 결과에 「화판 서버가 다른 판입니다」 가 붙으면 위 「갱신」 처럼 서버를 내립니다).
 
@@ -170,7 +170,7 @@ codex plugin marketplace upgrade anytaskview
 갱신한 뒤 새 세션을 열고, 훅 정의가 바뀌었으면 `/hooks` 에서 다시 믿습니다. 화판 서버를 내리는 일은 위 「갱신」 과 같습니다.
 
 ```sh
-"$(ls -td ~/.codex/plugins/cache/anytaskview/anytaskview/*/ | head -1)scripts/atv" board --stop
+"$HOME/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv" board --stop
 codex plugin remove anytaskview@anytaskview
 codex plugin marketplace remove anytaskview
 ```
