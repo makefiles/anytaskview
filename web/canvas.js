@@ -3,7 +3,7 @@
 // 받은 글은 textContent 로만 넣는다. HTML 을 넣는 곳은 Mermaid 가 strict 로 그린 SVG 하나뿐이다(표 칸도 글로만 넣는다).
 
 import { own } from "/lib/scene.js";
-import { crossLines } from "/route.js";
+import { crossLines, pickRoute, midPoint } from "/route.js";
 
 // 복사해도 되는 자리인가(제어 문자가 있으면 터미널에 붙였을 때 명령이 될 수 있다)
 export const safeRef = (ref) => typeof ref === "string" && ref !== "" && !/[\x00-\x1f\x7f]/.test(ref);
@@ -53,6 +53,9 @@ function layoutKey(scene, parts) {
 const OTHER_DIR = { RIGHT: "DOWN", DOWN: "RIGHT" };
 // 섞기에서 묶음 경계를 넘는 선 대신 배치에만 넣는 선의 id 앞머리. 부품 id 에는 ~ 가 들어갈 수 없다
 const LIFT = "~lift~";
+// 묶음 안쪽 여백(ELK 의 elk.padding 과 같다). 화면에서 옮긴 도형을 묶음 안에 둘 때도 쓴다
+const GROUP_PAD = { top: 30, left: 12, bottom: 14, right: 12 };
+const MOVE_STEP = 10; // Shift + 화살표 한 번에 옮기는 px
 const LAYERED = {
   "elk.algorithm": "layered", "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES", "elk.spacing.nodeNode": "24",
   "elk.layered.spacing.nodeNodeBetweenLayers": "44", "elk.edgeLabels.placement": "CENTER",
@@ -60,7 +63,10 @@ const LAYERED = {
 
 // getViewport: 그림이 들어갈 칸의 크기 { w, h }(px). 모르면 LLM 이 준 방향 하나로만 배치한다.
 // mailFor: 그 부품에 보낸 글 수 표시({ text, queued, title }, 없으면 null), onMail: 그 표시를 눌렀을 때(부품 id)
-export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onMail = () => {}, getTheme, getViewport }) {
+// 도형 옮기기: canMove() 는 옮길 수 없으면 까닭(글), onMove(id, pos|null) 은 옮긴 자리를 기록하고 성공 여부를 돌려준다(Promise),
+// onRefuse(까닭) 은 옮기지 않을 때 알린다, getZoom() 은 그림 배율
+export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onMail = () => {}, getTheme, getViewport,
+  canMove = () => null, onMove = async () => false, onRefuse = () => {}, getZoom = () => 1, onPlaced = () => {} }) {
   const elk = new window.ELK();
   const groupLayer = el("div", "layer groups"), partLayer = el("div", "layer parts");
   const svg = document.createElementNS(SVGNS, "svg");
@@ -76,6 +82,11 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   // pendingKey: 지금 재고 있는 배치의 열쇠. 같은 구조로 다시 불리면 그 배치를 버리고 새로 시작하지 않는다
   // (사건이 잦으면 배치가 끝나기 전에 계속 새로 시작해 자리 잡기가 늦어지고 ELK 계산이 쌓였다)
   let lastKey = null, pendingKey = null, rev = 0, prevJson = new Map(), mermaidTheme = null, mermaidSeq = 0;
+  // layout: 마지막 ELK 배치(옮긴 자리를 덮기 전). lastScene: 마지막으로 그린 장면. used: 놓은 자리(pos 와 같은 기준, 묶음 안이면 묶음 기준)
+  // pending: 놓았으나 기록이 아직 장면에 오지 않은 자리 { pos(null 은 자동 자리로), ref(놓을 때의 부품), acked(서버가 기록함) }.
+  // drag: 끄는 중인 도형
+  let layout = null, lastScene = null, placedSig = null, used = new Map(), drag = null;
+  const pending = new Map();
 
   // Mermaid(5.5MB)는 mermaid 부품이 처음 나올 때 불러온다. 그림이 없는 화판은 열 때마다 받고 읽느라 늦어지지 않는다
   // 받지 못했으면 오류를 그린 배치를 확정하지 않아, 다음 그리기(다음 사건) 때 다시 배치하며 다시 받는다. 쉬는 화판은 사건이 올 때까지 기다린다
@@ -146,7 +157,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
         id: p.id,
         // 비었거나 제목이 자식보다 넓은 묶음도 제목이 다 보이게 최소 크기를 준다
         layoutOptions: {
-          "elk.padding": "[top=30,left=12,bottom=14,right=12]", "elk.nodeSize.constraints": "MINIMUM_SIZE", "elk.nodeSize.minimum": shape.groupMin.get(p.id),
+          "elk.padding": `[top=${GROUP_PAD.top},left=${GROUP_PAD.left},bottom=${GROUP_PAD.bottom},right=${GROUP_PAD.right}]`, "elk.nodeSize.constraints": "MINIMUM_SIZE", "elk.nodeSize.minimum": shape.groupMin.get(p.id),
           ...(sep && { ...LAYERED, "elk.direction": inner, ...pack(p.id) }),
         },
         children: (shape.byParent.get(p.id) || []).map(node),
@@ -292,7 +303,8 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
 
   // 상태·표시처럼 크기를 바꾸지 않는 것
   function decorate(e, p) {
-    e.className = `part ${p.kind}` + (p.status ? ` st-${p.status}` : " nostatus") + (p.ref ? " has-ref" : "") + (shaped(p) ? ` shaped shape-${p.shape}` : "");
+    e.className = `part ${p.kind}` + (p.status ? ` st-${p.status}` : " nostatus") + (p.ref ? " has-ref" : "") + (shaped(p) ? ` shaped shape-${p.shape}` : "") +
+      (drag && drag.moved && drag.id === p.id ? " dragging" : "") + ((pending.has(p.id) ? pending.get(p.id).pos : p.pos) ? " moved" : ""); // 끄는 중에 다시 그려도 들린 모양을 지킨다
     const chip = e.querySelector(":scope > .stchip");
     if (chip) chip.textContent = p.status ? ST_ICO[p.status] : "";
     const badges = e.querySelector(":scope > .badges");
@@ -355,7 +367,8 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
       // 기다리는 사이 구조가 같은 그리기가 상태를 바꿨을 수 있으므로 지금의 부품으로 꾸민다(구조가 같으니 부품 목록은 같다)
       p = own(scene.items, p.id) || p;
       decorate(e, p);
-      const json = JSON.stringify(p) + (p.kind === "list" ? JSON.stringify(listItems(scene, p.id)) : "");
+      // 옮긴 자리(pos)만 바뀐 것은 깜빡이지 않는다
+      const json = JSON.stringify(p, (k, v) => (k === "pos" ? undefined : v)) + (p.kind === "list" ? JSON.stringify(listItems(scene, p.id)) : "");
       if (animate && prevJson.has(p.id) && prevJson.get(p.id) !== json && p.kind !== "group") {
         e.classList.remove("flash");
         void e.offsetWidth;
@@ -369,7 +382,9 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
       const ed = own(scene.items, path.dataset.id);
       if (ed) path.setAttribute("class", ed.status ? `st-${ed.status}` : "");
     }
-    if (!relayout) return;
+    lastScene = scene;
+    // 구조가 같으면 ELK 를 다시 돌리지 않는다. 옮긴 자리만 바뀌었으면 놓기와 선만 다시 한다
+    if (!relayout) { if (layout && pendingKey === null && posSig(scene) !== placedSig) place(scene); return; }
 
     // 배치: 묶음은 ELK 의 중첩 노드, 나머지는 크기를 잰 잎 노드
     const byParent = new Map();
@@ -420,24 +435,78 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     mermaidRetry = false;
     pendingKey = null;
 
-    const out = best.out;
-    const place = (n) => {
-      const e = nodes.get(n.id);
-      if (e) {
-        e.style.left = `${n.x}px`; e.style.top = `${n.y}px`;
-        if (own(scene.items, n.id)?.kind === "group") { e.style.width = `${n.width}px`; e.style.height = `${n.height}px`; }
-      }
-      (n.children || []).forEach(place);
-    };
-    (out.children || []).forEach(place);
-    // 직접 그린 선의 이름표까지 들어가는 크기
-    root.style.width = `${best.w}px`;
-    root.style.height = `${best.h}px`;
-    svg.setAttribute("width", best.w);
-    svg.setAttribute("height", best.h);
+    layout = { out: best.out, lines: best.lines, w: best.w, h: best.h, edges };
+    place(lastScene || scene); // 재는 사이에 온 자리·상태까지(구조가 바뀌었으면 rev 로 이미 버렸다)
+  }
 
+  // 옮긴 자리를 정하는 값(바뀌었을 때만 다시 놓는다)
+  function posSig(scene) {
+    const out = [];
+    for (const p of Object.values(scene.items)) if (p.pos) out.push([p.id, p.pos.x, p.pos.y]);
+    return JSON.stringify([out, [...pending].map(([id, p]) => [id, p.pos]), drag && drag.moved ? [drag.id, drag.pos] : null]);
+  }
+
+  // ELK 배치 위에 옮긴 자리(pos)를 덮어 놓고 선을 긋는다(다시 배치해도 놓은 자리 그대로).
+  // 맨 바깥 도형은 그림 안(0 아래로는 안 감), 묶음 안 도형은 그 묶음 안에서만 놓이고, 묶음을 옮기면 안의 도형이 함께 간다.
+  // 옮긴 도형(옮긴 묶음 안의 도형 포함)에 닿는 선만 다시 긋는다: 두 끝이 같은 만큼 옮겨졌으면 ELK 의 선을 그만큼 옮기고,
+  // 아니면 다른 상자를 덜 지나는 길을 새로 찾는다
+  function place(scene) {
+    if (!layout) return;
+    // 놓은 자리의 기록이 왔거나(같은 자리), 서버가 기록한 뒤 그 부품의 기록이 새로 왔으면(다른 탭이 바로 이어 옮김 따위) 장면을 따른다
+    for (const [id, p] of pending) {
+      const it = own(scene.items, id), same = p.pos === null ? !it?.pos : it?.pos && it.pos.x === p.pos.x && it.pos.y === p.pos.y;
+      if (!it || same || (p.acked && it !== p.ref)) pending.delete(id);
+    }
+    const posOf = (id) => (drag && drag.moved && drag.id === id ? drag.pos : pending.has(id) ? pending.get(id).pos : own(scene.items, id)?.pos || null);
+    const elkOf = new Map(), final = new Map();
+    used = new Map();
+    const visit = (n, g, gElk) => {
+      const elk = { x: n.x, y: n.y, width: n.width, height: n.height }, p = posOf(n.id);
+      elkOf.set(n.id, elk);
+      let rx, ry;
+      if (!g) { rx = Math.max(0, p ? p.x : elk.x); ry = Math.max(0, p ? p.y : elk.y); }
+      else if (!p) { rx = elk.x - gElk.x; ry = elk.y - gElk.y; }
+      else {
+        rx = Math.min(Math.max(p.x, GROUP_PAD.left), Math.max(GROUP_PAD.left, g.width - elk.width - GROUP_PAD.right));
+        ry = Math.min(Math.max(p.y, GROUP_PAD.top), Math.max(GROUP_PAD.top, g.height - elk.height - GROUP_PAD.bottom));
+      }
+      used.set(n.id, { x: rx, y: ry });
+      const r = { x: (g ? g.x : 0) + rx, y: (g ? g.y : 0) + ry, width: elk.width, height: elk.height };
+      final.set(n.id, r);
+      for (const c of n.children || []) visit(c, r, elk);
+    };
+    for (const n of layout.out.children || []) visit(n, null, null);
+    let w = layout.w, h = layout.h;
+    for (const [id, r] of final) {
+      const e = nodes.get(id);
+      if (e) {
+        e.style.left = `${r.x}px`; e.style.top = `${r.y}px`;
+        if (own(scene.items, id)?.kind === "group") { e.style.width = `${r.width}px`; e.style.height = `${r.height}px`; }
+        e.classList.toggle("moved", !!posOf(id));
+      }
+      w = Math.max(w, r.x + r.width + 8);
+      h = Math.max(h, r.y + r.height + 8);
+    }
+
+    const delta = (id) => { const a = final.get(id), b = elkOf.get(id); return a && b ? { x: a.x - b.x, y: a.y - b.y } : { x: 0, y: 0 }; };
+    const ends = new Map(layout.edges.map((e) => [e.id, e]));
+    const leaves = [...final].filter(([id]) => own(scene.items, id)?.kind !== "group").map(([, r]) => r);
+    const ctx = {};
+    // 선 하나를 어떻게 그을지: null 이면 ELK·직접 그린 길 그대로, {dx,dy} 면 그만큼 옮김, "route" 면 새로 찾음
+    const howOf = (id) => {
+      const e = ends.get(id);
+      if (!e) return null;
+      const a = delta(e.a), b = delta(e.b);
+      if (!a.x && !a.y && !b.x && !b.y) return null;
+      return a.x === b.x && a.y === b.y ? a : "route";
+    };
+    const shift = (pts, d) => (d ? pts.map((p) => ({ x: p.x + d.x, y: p.y + d.y })) : pts);
+
+    root.style.width = `${w}px`;
+    root.style.height = `${h}px`;
     edgeLayer.replaceChildren();
     labelLayer.replaceChildren();
+    const grow = (pts) => { for (const p of pts) { w = Math.max(w, p.x + 2); h = Math.max(h, p.y + 2); } };
     const drawEdge = (id, pts) => {
       const path = document.createElementNS(SVGNS, "path");
       path.setAttribute("d", pts.map((pt, i) => `${i ? "L" : "M"}${pt.x},${pt.y}`).join(" "));
@@ -446,29 +515,132 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
       const st = own(scene.items, id)?.status;
       if (st) path.setAttribute("class", `st-${st}`);
       edgeLayer.append(path);
+      grow(pts);
     };
     const drawLabel = (text, x, y) => {
       const l = el("span", "elabel", text);
       l.style.left = `${x}px`; l.style.top = `${y}px`;
       labelLayer.append(l);
     };
+    const routed = new Set();
+    const reroute = (id) => {
+      if (routed.has(id)) return;
+      routed.add(id);
+      const e = ends.get(id), a = final.get(e.a), b = final.get(e.b);
+      if (!a || !b) return;
+      const pts = pickRoute(a, b, leaves, ctx, `${e.a}\n${e.b}`).pts;
+      drawEdge(id, pts);
+      if (e.label) {
+        const m = midPoint(pts);
+        drawLabel(e.label.text, Math.max(0, m.x - e.label.width / 2), Math.max(0, m.y - e.label.height / 2));
+      }
+    };
     // ELK 가 경로를 낸 선(섞기에서는 묶음 안의 선이 그 묶음 아래에 온다). 배치에만 넣은 선은 그리지 않는다
     const walk = (n) => {
       for (const ed of n.edges || []) {
         const s = ed.sections && ed.sections[0];
         if (!s || ed.id.startsWith(LIFT)) continue;
-        drawEdge(ed.id, [s.startPoint, ...(s.bendPoints || []), s.endPoint]);
-        for (const lb of ed.labels || []) drawLabel(lb.text, lb.x, lb.y);
+        const how = howOf(ed.id);
+        if (how === "route") { reroute(ed.id); continue; }
+        drawEdge(ed.id, shift([s.startPoint, ...(s.bendPoints || []), s.endPoint], how));
+        for (const lb of ed.labels || []) drawLabel(lb.text, lb.x + (how ? how.x : 0), lb.y + (how ? how.y : 0));
       }
       (n.children || []).forEach(walk);
     };
-    walk(out);
+    walk(layout.out);
     // 섞기에서 묶음 경계를 넘는 선
-    for (const line of best.lines) {
-      drawEdge(line.id, line.pts);
-      if (line.label) drawLabel(line.label.text, line.label.x, line.label.y);
+    for (const line of layout.lines) {
+      const how = howOf(line.id);
+      if (how === "route") { reroute(line.id); continue; }
+      drawEdge(line.id, shift(line.pts, how));
+      if (line.label) drawLabel(line.label.text, line.label.x + (how ? how.x : 0), line.label.y + (how ? how.y : 0));
     }
+    // 옮긴 선이 그림 밖으로 나갔으면 그만큼 키운다
+    root.style.width = `${w}px`;
+    root.style.height = `${h}px`;
+    svg.setAttribute("width", w);
+    svg.setAttribute("height", h);
+    placedSig = posSig(scene);
+    onPlaced();
   }
+
+  // ---- 도형 옮기기: Ctrl + 오른쪽 버튼으로 끈다. 움직이지 않고 누르면 그 도형만 자동 자리로. 초점이 있으면 Shift + 화살표 ----
+  // 놓으면 바로 그 자리에 두고(pending) 기록이 오기를 기다린다. 기록하지 못하면 되돌린다
+  // inAt: 끌기 시작 때 그 부품의 묶음. 그사이 Claude 가 묶음을 바꿨으면 서버가 옛 묶음 기준의 자리를 받지 않는다
+  function commit(id, raw, inAt = own(lastScene?.items || {}, id)?.in ?? null) {
+    const ref = own(lastScene?.items || {}, id);
+    pending.set(id, { pos: raw, ref });
+    place(lastScene);
+    const p = raw && used.get(id); // 묶음 안·그림 안으로 줄인 자리
+    const entry = { pos: p ? { x: Math.round(p.x), y: Math.round(p.y) } : null, ref };
+    pending.set(id, entry);
+    place(lastScene);
+    Promise.resolve(onMove(id, entry.pos, inAt)).then((ok) => {
+      if (pending.get(id) !== entry) return;
+      if (ok) entry.acked = true; else pending.delete(id);
+      if (lastScene) place(lastScene);
+    });
+  }
+  const movable = (ev) => {
+    const e = ev.target.closest?.(".part");
+    return e && root.contains(e) && e.dataset.id ? e : null;
+  };
+  const refused = () => {
+    const why = canMove() || (!layout || pendingKey !== null ? "그림을 배치하는 중입니다. 잠시 뒤에 옮겨 주세요" : null);
+    if (why) onRefuse(why);
+    return !!why;
+  };
+  root.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 2 || !ev.ctrlKey) return;
+    const e = movable(ev);
+    if (!e) return;
+    ev.preventDefault();
+    if (refused()) return;
+    const id = e.dataset.id, base = used.get(id);
+    if (!base) return;
+    drag = { id, el: e, pointerId: ev.pointerId, start: local(ev), sx: ev.clientX, sy: ev.clientY, base, pos: base, moved: false, raf: 0, inAt: own(lastScene?.items || {}, id)?.in ?? null };
+    root.setPointerCapture(ev.pointerId);
+  });
+  root.addEventListener("pointermove", (ev) => {
+    if (!drag || ev.pointerId !== drag.pointerId) return;
+    if (!drag.moved && Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) < 4) return;
+    if (!drag.moved) { drag.moved = true; drag.el.classList.add("dragging"); }
+    const at = local(ev);
+    drag.pos = { x: drag.base.x + at.x - drag.start.x, y: drag.base.y + at.y - drag.start.y };
+    if (!drag.raf) drag.raf = requestAnimationFrame(() => { if (drag) { drag.raf = 0; place(lastScene); } });
+  });
+  const endDrag = (ev, cancel) => {
+    if (!drag || ev.pointerId !== drag.pointerId) return;
+    const d = drag;
+    drag = null;
+    menuGuardT = performance.now();
+    if (d.raf) cancelAnimationFrame(d.raf);
+    d.el.classList.remove("dragging");
+    if (cancel) { place(lastScene); return; }
+    if (d.moved) commit(d.id, d.pos, d.inAt);
+    else if (posOfScene(d.id)) commit(d.id, null, d.inAt); // 움직이지 않고 누름: 옮긴 도형이면 자동 자리로
+  };
+  // 화면 점을 그림 좌표로(스크롤·배율 반영). 그림이 움직여도 같은 그림 자리가 나온다
+  const local = (ev) => { const r = root.getBoundingClientRect(), z = getZoom() || 1; return { x: (ev.clientX - r.left) / z, y: (ev.clientY - r.top) / z }; };
+  const posOfScene = (id) => (pending.has(id) ? pending.get(id).pos : own(lastScene?.items || {}, id)?.pos || null);
+  root.addEventListener("pointerup", (ev) => endDrag(ev, false));
+  root.addEventListener("pointercancel", (ev) => endDrag(ev, true));
+  // Ctrl + 오른쪽 클릭의 브라우저 메뉴를 그림 어디서든 막는다(Linux·macOS 는 누를 때, Windows 는 뗄 때 뜬다).
+  // 끄는 동안은 포인터를 그림이 붙잡고 있어 메뉴 이벤트가 도형이 아니라 그림 자체로 온다
+  root.addEventListener("contextmenu", (ev) => { if (ev.ctrlKey || drag) ev.preventDefault(); });
+  // Windows 는 오른쪽 버튼을 뗄 때 메뉴가 뜨고, 그때 Ctrl 을 이미 뗐을 수 있다. 끌기를 끝낸 바로 뒤의 메뉴는 막는다
+  let menuGuardT = -1e9;
+  document.addEventListener("contextmenu", (ev) => { if (performance.now() - menuGuardT < 500) ev.preventDefault(); }, true);
+  root.addEventListener("keydown", (ev) => {
+    const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
+    if (!step || !ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+    const e = movable(ev);
+    if (!e) return;
+    ev.preventDefault();
+    if (refused()) return;
+    const base = used.get(e.dataset.id);
+    if (base) commit(e.dataset.id, { x: base.x + step[0] * MOVE_STEP, y: base.y + step[1] * MOVE_STEP });
+  });
 
   // 부품이나 항목을 누르면 ref 를 복사한다
   root.addEventListener("click", (ev) => {
@@ -481,7 +653,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   return {
     render,
     // 재고 있던 배치도 버린다(rev). 그대로 두면 끝난 뒤 lastKey 를 채워 다시 배치하라는 요청을 지운다
-    reset() { rev++; lastKey = pendingKey = null; prevJson = new Map(); mermaidCache.clear(); },
+    reset() { rev++; lastKey = pendingKey = null; prevJson = new Map(); mermaidCache.clear(); layout = null; pending.clear(); drag = null; },
     invalidate() { rev++; lastKey = pendingKey = null; },
     isEmpty: () => nodes.size === 0,
     busy: () => pendingKey !== null, // 배치를 재는 중(부품이 아직 옛 자리나 0,0 에 있다)

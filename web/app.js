@@ -1,7 +1,7 @@
 // 화면: 세션 목록, 맨 위 한 줄, 주의 띠, 가운데 그림, 계획 나무, 타임라인, 재생 막대.
 // 서버가 SSE 로 보내는 결과(res)를 lib/scene.js 의 applyRes 로 적용한다. 재생도 같은 함수로 처음부터 다시 적용한다.
 // 패널 폭·접힘·배율·거르기처럼 이 브라우저에만 남는 값은 localStorage 에 두고, 읽을 때 범위로 자른다.
-import { newScene, applyRes, currentStep, own, MSG_LIMITS } from "/lib/scene.js";
+import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet } from "/lib/scene.js";
 import { createCanvas, safeRef } from "/canvas.js";
 
 const ST_KO = { todo: "할 일", doing: "진행", done: "끝", fail: "실패", blocked: "막힘", wait: "승인 대기" };
@@ -109,6 +109,12 @@ const canvas = createCanvas($("canvas"), {
   getTheme: theme,
   // 배치를 고를 때 쓰는 칸 크기(100% 기준). 지금 배율로 나누면 줄여 둔 화면에서는 긴 띠도 「다 들어간다」가 되어 그대로 남는다
   getViewport: () => ({ w: scroller.clientWidth - 32, h: scroller.clientHeight - 32 }),
+  // 도형 옮기기(Ctrl + 오른쪽 끌기·Shift + 화살표): 옮긴 자리는 화판 기록에 남는다
+  canMove: () => (!canWrite() ? "도형을 옮기려면 화판 쓰기 열쇠가 필요합니다(맨 위 「쓰기 열쇠 없음」 의 설명)" : state.replay || state.replayLoading ? "다시 보기 중에는 옮기지 않습니다. 「실시간」 으로 돌아온 뒤 옮겨 주세요" : null),
+  onMove: async (id, pos, inAt) => (await boardOp({ op: "move", sid: state.sid, id, in: inAt, ...(pos ? pos : { x: null }) })).ok,
+  onRefuse: toast,
+  getZoom: () => view.zoom,
+  onPlaced: () => { if (askFor && !askBtn.hidden && $("canvas").contains(askFor)) showAsk(askFor); placeComposer(); },
 });
 
 const viewScene = () => (state.replay ? state.replay.scene : state.scene);
@@ -314,6 +320,8 @@ $("zoom-in").addEventListener("click", () => setZoom(view.zoom * 1.25));
 $("zoom-out").addEventListener("click", () => setZoom(view.zoom / 1.25));
 $("zoom-100").addEventListener("click", () => setZoom(1));
 $("zoom-fit").addEventListener("click", zoomFit);
+// 옮긴 도형을 모두 자동 자리로(Claude 가 고른 배치로) 되돌린다
+$("auto-place").addEventListener("click", () => { if (state.sid && canWrite() && !state.replay && !state.replayLoading) boardOp({ op: "move", sid: state.sid, all: true }); });
 $("follow").addEventListener("click", () => setFollow(!view.follow));
 
 // 부품이 보이도록 그림을 옮긴다(배율 반영). center 면 가운데로
@@ -384,6 +392,8 @@ function connect(sid) {
   state.followed = null;
   canvas.reset();
   tlCache = new Map();
+  state.tlFocus = null;
+  state.planReveal = null;
   state.markerSeq = sid ? Number(store.get(`atv.seen.${sid}`) || 0) : null;
   if (sid) history.replaceState(null, "", `${location.search}#s=${encodeURIComponent(sid)}`);
   const es = openEvents(sid);
@@ -440,6 +450,7 @@ function connect(sid) {
     state.replayToken++;
     canvas.invalidate();
     tlCache = new Map();
+    if (finder.open) renderSearch(false); // 다른 세션으로 옮겨 다시 찾는 중이면 그 세션 기준으로
     queueRender();
   });
   es.addEventListener("res", (ev) => {
@@ -587,13 +598,15 @@ function render({ list = true, view = true } = {}) {
   renderPlan(scene, now);
   renderTimeline(scene, now);
   renderReplay();
+  $("auto-place").hidden = !(canWrite() && !state.replay && !state.replayLoading && Object.values(scene.items).some((p) => p.pos)); // 옮긴 도형이 있을 때만
   renderBasket();
   const hasParts = Object.values(scene.items).some((it) => it.kind !== "step");
   $("empty").hidden = hasParts;
   $("empty").textContent = isProj(state.sid) ? "아직 큰 그림이 없습니다. 이 프로젝트에 든 대화의 Claude·Codex 가 작업 단위를 시작·끝낼 때 그립니다." : `아직 그림이 없습니다. ${agentName(state.sessions.get(state.sid))} 가 draw 로 그리면 여기에 나타납니다.`;
+  applyFocus(false);
   if (!ONLY_TL) canvas.render(scene).then(() => {
     for (const p of $("canvas").querySelectorAll(".part[data-id]")) markSend(p, "상자");
-    followNow();
+    if (state.focus?.part) applyFocus(true); else followNow(); // 찾기로 고른 부품이 있으면 따라가기보다 앞선다
     placeComposer();
   }).catch((e) => console.error("그림 실패", e));
   markSeen();
@@ -1012,7 +1025,7 @@ function reveal(id, isStep) {
 // 끝난 단계는 기본으로 숨기고 개수만 보인다. 실패·막힘과 지금 단계는 숨기지 않는다
 const showDone = () => store.get("atv.showDone") === "1";
 function setShowDone(on) { store.set("atv.showDone", on ? "1" : "0"); queueRender(); }
-$("toggle-done").addEventListener("click", () => setShowDone(!showDone()));
+$("toggle-done").addEventListener("click", () => { state.planReveal = null; setShowDone(!showDone()); });
 
 function renderPlan(scene, now) {
   const body = $("plan-body"), cur = currentStep(scene), nowBox = $("plan-now");
@@ -1047,13 +1060,16 @@ function renderPlan(scene, now) {
     return v;
   };
   const hideDone = !showDone();
+  // 찾기로 고른 단계와 그 위 단계들은 숨기지 않는다
+  const reveal = new Set();
+  for (let id = state.planReveal, i = 0; id && ids.has(id) && i < 10; id = parentOf(own(scene.items, id)), i++) reveal.add(id);
   const doneCount = steps.filter((s) => s.status === "done").length;
   toggle.hidden = !doneCount;
   toggle.textContent = hideDone ? `끝난 단계 ${doneCount}개 보기` : "끝난 단계 숨기기";
   // 1초마다 불리므로 구조가 같으면 걸린 시간 글자만 고친다(다시 만들면 「보기」 강조와 대상 표시가 지워진다)
   const noteCount = (id) => scene.timeline.reduce((n, e) => n + (e.type === "note" && e.on === id ? 1 : 0), 0);
   const mailKey = (id) => { const ms = msgsTo(scene, id); return ms.length ? mailBadge(ms).title : ""; };
-  const key = JSON.stringify([cur, hideDone, steps.map((x) => [x.id, x.title, x.status, x.parent, x.note, !!x.answered, !!x.startT, noteCount(x.id), mailKey(x.id)])]);
+  const key = JSON.stringify([cur, hideDone, state.planReveal, steps.map((x) => [x.id, x.title, x.status, x.parent, x.note, !!x.answered, !!x.startT, noteCount(x.id), mailKey(x.id)])]);
   if (key === renderPlan.key && body.isConnected) {
     for (const li of body.querySelectorAll("li[data-id]")) {
       const stats = li.querySelector(":scope > .stats");
@@ -1067,7 +1083,7 @@ function renderPlan(scene, now) {
     const ul = el("ul", "tree");
     let hidden = 0;
     for (const s of steps.filter((x) => parentOf(x) === parent)) {
-      if (hideDone && isSettled(s)) { hidden++; continue; }
+      if (hideDone && isSettled(s) && !reveal.has(s.id)) { hidden++; continue; }
       const li = el("li", "step" + (s.id === cur ? " cur" : ""));
       li.dataset.id = s.id;
       li.tabIndex = 0; // 키보드로 단계에 가서 Enter 로 Claude 에 보낸다
@@ -1195,6 +1211,8 @@ function renderHistory(scene, now) {
 // 타임라인 줄 요소. 열쇠는 기록 번호와 그 줄의 모양을 바꾸는 값(실행 상태·걸린 시간, 보낸 글 상태, 묶은 수정 횟수)이다.
 // 기록 번호는 세션마다 따로 매기므로 다른 세션·스냅샷으로 바꿀 때 비운다
 let tlCache = new Map();
+// 타임라인 줄 하나를 가리키는 열쇠(한 기록에 줄이 여럿일 수 있다: 모아 보내기)
+const tlKey = (e) => `${e.seq}:${e.mid || e.id || ""}`;
 function rowKey(scene, row, now) {
   if (row.mark) return "mark";
   const e = row.e;
@@ -1206,6 +1224,8 @@ const runDur = (r, now) => { const d = r.state === "running" || r.state === "wai
 function tlRow(scene, { mark, e, n }, now) {
   if (mark) return el("li", "new-mark", "▲ 여기부터 새것");
   const li = el("li");
+  li.dataset.seq = e.seq; // 찾기가 이 줄로 온다
+  li.dataset.key = tlKey(e);
   li.append(el("span", "when", fmtClock(e.t)));
   // 한 줄 = 시각 | 종류 표지 | 글 세 칸(.tl-k·.tl-t). 표지 칸 폭이 같아 글 머리가 줄마다 맞고, 넘어간 줄도 글 머리 아래에서 잇는다
   const kind = (cls, label) => li.append(el("span", `tl-k${cls ? " k " + cls : ""}`, label));
@@ -1269,7 +1289,11 @@ function renderTimeline(scene, now) {
   // 시작 없이 끝만 온 하위 에이전트(종류도 없음)는 Claude Code 안쪽 보조 에이전트(다음 입력 제안 따위)로 보여 숨긴다
   const started = new Set(scene.timeline.filter((e) => e.f === "agent-start" && e.agent).map((e) => e.agent));
   const helper = (e) => e.f === "agent-stop" && !e.agentType && !started.has(e.agent);
-  const entries = scene.timeline.slice(-400).reverse().filter((e) => !tlHide.has(tlKind(e)) && !(e.agent && tlHide.has("agent")) && !helper(e));
+  // 보통은 최근 400줄. 찾기로 고른 줄(tlFocus)이 그보다 옛것이거나 거르기로 숨긴 것이어도 그 줄까지 보인다
+  const fi = state.tlFocus != null ? scene.timeline.findIndex((e) => e.seq === state.tlFocus) : -1;
+  const from = Math.max(0, scene.timeline.length - 400), focus = fi >= 0 ? state.tlFocus : null;
+  const entries = scene.timeline.slice(fi >= 0 ? Math.min(fi, from) : from).reverse()
+    .filter((e) => e.seq === focus || (!tlHide.has(tlKind(e)) && !(e.agent && tlHide.has("agent")) && !helper(e)));
   // 먼저 줄을 정한다: 「여기부터 새것」 표시, 같은 파일을 잇달아 고친 기록은 한 줄로(가장 최근 줄에 횟수를 붙인다)
   const rows = [];
   let marked = false, prevEdit = null;
@@ -1279,7 +1303,7 @@ function renderTimeline(scene, now) {
       marked = true;
       prevEdit = null;
     }
-    if (e.type === "fact" && e.f === "edit" && prevEdit && prevEdit.e.path === e.path && prevEdit.e.agent === e.agent) { prevEdit.n++; continue; }
+    if (e.type === "fact" && e.f === "edit" && e.seq !== focus && prevEdit && prevEdit.e.seq !== focus && prevEdit.e.path === e.path && prevEdit.e.agent === e.agent) { prevEdit.n++; continue; }
     prevEdit = null;
     if ((e.type === "msg" && !own(scene.msgs || {}, e.mid)) || (e.type === "run" && !own(scene.runs, e.id))) continue;
     const row = { e, n: 1 };
@@ -1319,6 +1343,8 @@ function renderTimeline(scene, now) {
 }
 $("tl-new").addEventListener("click", () => { $("timeline").scrollTo({ top: 0, behavior: "smooth" }); });
 $("timeline").addEventListener("scroll", () => {
+  // 맨 위로 오면 찾기로 펼친 옛 줄을 접는다(찾은 줄로 옮기느라 맨 위가 된 것은 빼고)
+  if ($("timeline").scrollTop <= 8 && state.tlFocus != null && performance.now() - (state.tlJumpT || 0) > 600) { state.tlFocus = null; queueRender("view"); }
   if ($("timeline").scrollTop <= 8 && !$("tl-new").hidden) queueRender();
 });
 $("popout").addEventListener("click", () => {
@@ -1360,6 +1386,7 @@ async function enterReplay(idx) {
     if (state.replayLoading) return; // 이미 받는 중
     const sid = state.sid, token = ++state.replayToken;
     state.replayLoading = [];
+    $("auto-place").hidden = true;
     $("plan-now").classList.remove("live"); // 지난 기록을 받는 동안에도 반짝이지 않게
     let records;
     try {
@@ -2157,5 +2184,239 @@ if (!store.get("atv.w")) {
 applyLayout();
 setZoom(view.zoom);
 setFollow(view.follow);
+// ---- 찾기: 이 화판(그림·계획) · 이 세션 타임라인 · 세션·프로젝트 · 다른 세션 기록(서버) ----
+// 맨 위 「찾기」 나 / · Ctrl+K 로 연다. 입력하는 대로 결과가 바뀌고 ↑ ↓ 로 고르고 Enter(또는 누르기)로 연다.
+// Esc 나 창 바깥을 누르면 닫는다. 낱말을 여럿 쓰면 모두 담은 것만 찾는다(대소문자 무시)
+const finder = { open: false, q: "", active: -1, opts: [], ctl: null, timer: 0, remote: null, back: null };
+const searchBox = $("search"), searchQ = $("search-q"), searchList = $("search-list");
+const FIND_MAX = { board: 8, tl: 30, sess: 8 };
+function openSearch() {
+  if (!finder.open) {
+    finder.open = true;
+    finder.back = document.activeElement;
+    finder.q = null; // 닫혔다 다시 열면 같은 말이어도 새로 찾고 첫 줄을 고른다(옛 서버 결과·오류를 쓰지 않는다)
+    finder.remote = null;
+    searchBox.hidden = false;
+    searchQ.setAttribute("aria-expanded", "true");
+    $("search-open").setAttribute("aria-expanded", "true");
+    runSearch();
+  }
+  searchQ.focus();
+  searchQ.select();
+}
+function closeSearch(restore = true) {
+  if (!finder.open) return;
+  finder.open = false;
+  searchBox.hidden = true;
+  searchQ.setAttribute("aria-expanded", "false");
+  $("search-open").setAttribute("aria-expanded", "false");
+  finder.ctl?.abort();
+  clearTimeout(finder.timer);
+  if (finder.remote?.loading) finder.remote = null; // 받는 중이던 서버 찾기를 버린다(같은 말로 다시 열면 다시 묻는다)
+  if (restore && finder.back?.isConnected) finder.back.focus({ preventScroll: true });
+}
+// 맞은 낱말을 칠한 글(innerHTML 을 쓰지 않는다)
+function marked(text, terms) {
+  const out = document.createDocumentFragment(), low = text.toLowerCase();
+  for (let i = 0; i < text.length;) {
+    let at = -1, len = 0;
+    for (const w of terms) { const k = low.indexOf(w, i); if (k >= 0 && (at < 0 || k < at || (k === at && w.length > len))) { at = k; len = w.length; } }
+    if (at < 0) { out.append(text.slice(i)); break; }
+    if (at > i) out.append(text.slice(i, at));
+    out.append(el("mark", "", text.slice(at, at + len)));
+    i = at + len;
+  }
+  return out;
+}
+// 타임라인 줄의 종류 이름(타임라인 표지와 같은 말)
+function tlLabel(e) {
+  if (e.type === "msg") return "보낸 글";
+  if (e.type === "note") return NOTE_KO[e.kind] || "메모";
+  if (e.type === "run") return "명령";
+  if (e.f === "prompt" && !e.sys) return "사용자";
+  return factParts(e)[0];
+}
+const partLabel = (it) => (it.kind === "step" ? "계획" : it.kind === "edge" ? "선" : "그림");
+// 그림에서 보일 자리: 목록 항목은 그 목록, 선은 시작 부품
+function partAnchor(scene, it) {
+  let p = it;
+  for (let i = 0; p && p.kind === "item" && i < 10; i++) p = own(scene.items, p.in);
+  if (p && p.kind === "edge") p = own(scene.items, p.from);
+  return p ? p.id : null;
+}
+function localGroups(terms) {
+  const scene = viewScene(), now = Date.now(), groups = [];
+  const board = [];
+  for (const it of Object.values(scene.items).sort((a, b) => a.ord - b.ord)) {
+    const text = itemText(it);
+    if (!matchAll(text, terms)) continue;
+    const go = it.kind === "step" ? { step: it.id } : { part: partAnchor(scene, it) };
+    board.push({ kind: partLabel(it), text: snippet(text, terms), meta: it.status ? ST_KO[it.status] : "", go: { sid: state.sid, ...go } });
+  }
+  if (isProj(state.sid)) {
+    // 큰 그림에는 타임라인이 없다: 메모는 붙은 단위·부품으로 간다
+    for (let i = scene.timeline.length - 1; i >= 0; i--) {
+      const e = scene.timeline[i], on = e.type === "note" ? own(scene.items, e.on || e.step) : null;
+      if (on && matchAll(entryText(scene, e), terms)) board.push({ kind: NOTE_KO[e.kind] || "메모", text: snippet(entryText(scene, e), terms), meta: fmtWhen(e.t, now), go: { sid: state.sid, ...(on.kind === "step" ? { step: on.id } : { part: partAnchor(scene, on) }) } });
+    }
+  }
+  if (board.length) groups.push({ title: isProj(state.sid) ? "이 큰 그림" : "이 화판", count: board.length, rows: board.slice(0, FIND_MAX.board), note: board.length > FIND_MAX.board ? `외 ${board.length - FIND_MAX.board}개 — 낱말을 더 써서 좁혀 보세요` : "" });
+  if (!isProj(state.sid)) {
+    const tl = [];
+    let n = 0;
+    for (let i = scene.timeline.length - 1; i >= 0; i--) {
+      const e = scene.timeline[i], text = entryText(scene, e);
+      if (matchAll(text, terms) && ++n <= FIND_MAX.tl) tl.push({ kind: tlLabel(e), text: snippet(text, terms), meta: fmtWhen(e.t, now), go: { sid: state.sid, seq: e.seq, key: tlKey(e) } });
+    }
+    if (n) groups.push({ title: "이 세션 타임라인", count: n, rows: tl, note: n > FIND_MAX.tl ? `외 ${n - FIND_MAX.tl}개(옛 기록) — 낱말을 더 써서 좁혀 보세요` : "" });
+  }
+  const sess = [];
+  for (const [pid, p] of Object.entries(state.projects.projects)) {
+    if (matchAll(`${p.name} ${p.purpose || ""}`, terms)) sess.push({ kind: "프로젝트", text: p.name, meta: p.done ? "끝난 프로젝트" : p.purpose || "", go: { sid: pid } });
+  }
+  for (const s of [...state.sessions.values()].sort((a, b) => b.lastT - a.lastT)) {
+    if (s.empty || !matchAll(`${sessName(s)} ${s.title} ${s.cwd}`, terms)) continue;
+    sess.push({ kind: "세션", text: sessName(s), meta: `${base(s.cwd) || "폴더 모름"} · ${fmtAgo(s.lastT, now)}`, go: { sid: s.id } });
+  }
+  if (sess.length) groups.push({ title: "세션 · 프로젝트", count: sess.length, rows: sess.slice(0, FIND_MAX.sess), note: sess.length > FIND_MAX.sess ? `외 ${sess.length - FIND_MAX.sess}개` : "" });
+  return groups;
+}
+// 다른 세션 기록(서버). 보는 세션은 위 「이 세션 타임라인」 이 다 보이므로 뺀다
+function remoteGroup(terms) {
+  const r = finder.remote, rows = [];
+  if (r.loading) return { title: "다른 세션 기록", rows, note: "다른 세션에서 찾는 중…" };
+  if (r.error) return { title: "다른 세션 기록", rows, note: "다른 세션은 화판 서버에서 찾지 못했습니다" };
+  const now = Date.now();
+  let total = 0;
+  for (const s of r.sessions) {
+    if (s.id === state.sid) continue;
+    total += s.n;
+    const name = s.project ? `프로젝트 ${state.projects.projects[s.id]?.name || s.id}` : state.sessions.has(s.id) ? sessName(state.sessions.get(s.id)) : s.id.slice(0, 8);
+    for (const h of s.hits) {
+      const kind = h.note ? NOTE_KO[h.kind] || "메모" : h.type === "part" || h.type === "step" ? (h.type === "step" ? "계획" : "그림") : tlLabel(h);
+      rows.push({ kind, text: h.text, meta: h.t ? `${name} · ${fmtWhen(h.t, now)}` : name, go: { sid: s.id, ...(h.seq != null ? { seq: h.seq, key: h.key } : h.type === "step" ? { step: h.id } : { part: h.id }) } });
+    }
+    if (s.n > s.hits.length) rows.push({ kind: "", text: `${name} 에서 외 ${s.n - s.hits.length}건`, meta: "열어서 다시 찾기", go: { sid: s.id, again: true } });
+  }
+  return { title: "다른 세션 기록", count: total || undefined, rows, note: r.more ? `세션 ${r.more}개 더 — 낱말을 더 써서 좁혀 보세요` : r.partial ? "앞의 세션만 찾음 — 낱말을 더 써서 좁혀 보세요" : rows.length ? "" : "다른 세션에는 없습니다" };
+}
+function runSearch() {
+  const q = searchQ.value.trim();
+  const changed = q !== finder.q;
+  finder.q = q;
+  clearTimeout(finder.timer);
+  if (searchTerms(q).length && q.length >= 2) {
+    if (changed || !finder.remote) { finder.remote = { loading: true }; finder.timer = setTimeout(() => remoteSearch(q), 250); }
+  } else { finder.ctl?.abort(); finder.remote = null; }
+  renderSearch(changed);
+}
+function remoteSearch(q) {
+  finder.ctl?.abort();
+  const ctl = (finder.ctl = new AbortController());
+  fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctl.signal })
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((d) => { if (finder.q === q) { finder.remote = { sessions: d.sessions || [], more: d.more || 0, partial: !!d.partial }; renderSearch(false); } })
+    .catch((e) => { if (e.name !== "AbortError" && finder.q === q) { finder.remote = { error: true }; renderSearch(false); } });
+}
+function renderSearch(reset) {
+  const terms = searchTerms(finder.q);
+  const groups = terms.length ? [...localGroups(terms), ...(finder.remote ? [remoteGroup(terms)] : [])] : [];
+  const keep = !reset && finder.active >= 0 ? finder.active : 0;
+  finder.opts = [];
+  finder.gen = (finder.gen || 0) + 1; // 다시 그릴 때마다 선택지 id 를 바꿔 화면 읽기 프로그램이 고른 줄을 다시 읽게 한다
+  const out = [], notes = [];
+  groups.forEach((g, gi) => {
+    if (!g.rows.length) { if (g.note) notes.push(g.note); return; }
+    const sec = el("div", "s-group");
+    sec.setAttribute("role", "group");
+    const head = el("div", "s-head", (g.count ? `${g.title} · ${g.count}` : g.title) + (g.note ? ` (${g.note})` : ""));
+    head.id = `s-head-${finder.gen}-${gi}`;
+    sec.setAttribute("aria-labelledby", head.id);
+    sec.append(head);
+    for (const r of g.rows) {
+      const i = finder.opts.length, opt = el("div", "s-opt"), text = el("span", "s-text");
+      opt.id = `s-opt-${finder.gen}-${i}`;
+      opt.setAttribute("role", "option");
+      text.append(marked(r.text, terms));
+      opt.append(el("span", "s-kind", r.kind), text, el("span", "s-meta", r.meta || ""));
+      opt.title = r.text;
+      opt.addEventListener("pointerdown", (ev) => ev.preventDefault()); // 입력 칸의 초점을 지킨다
+      opt.addEventListener("click", () => chooseFound(i));
+      opt.addEventListener("pointermove", () => { if (finder.active !== i) setFound(i); });
+      finder.opts.push({ el: opt, go: r.go });
+      sec.append(opt);
+    }
+    out.push(sec);
+  });
+  // 알림 줄(목록 상자 밖, 화면 읽기 프로그램이 읽는다): 안내·결과 수·서버 상태
+  const st = !terms.length ? "찾을 말을 쓰세요. 이 화판의 그림·계획, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트의 이름과 폴더, 다른 세션의 기록에서 찾습니다. 낱말을 여럿 쓰면 모두 담은 것만 찾습니다."
+    : finder.opts.length ? [`${finder.opts.length}개 찾음`, ...notes].join(" · ") : finder.remote?.loading ? "찾는 중…" : ["찾은 것이 없습니다", ...notes].join(" · ");
+  if ($("search-status").textContent !== st) $("search-status").textContent = st;
+  searchList.hidden = !out.length;
+  searchList.replaceChildren(...out);
+  setFound(finder.opts.length ? Math.min(keep, finder.opts.length - 1) : -1);
+}
+function setFound(i) {
+  finder.active = i;
+  finder.opts.forEach((o, k) => o.el.setAttribute("aria-selected", String(k === i)));
+  const o = finder.opts[i];
+  if (o) { searchQ.setAttribute("aria-activedescendant", o.el.id); o.el.scrollIntoView({ block: "nearest" }); }
+  else searchQ.removeAttribute("aria-activedescendant");
+}
+function chooseFound(i) {
+  const o = finder.opts[i];
+  if (!o) return;
+  const q = finder.q;
+  closeSearch(false);
+  const g = o.go;
+  if (g.sid && g.sid !== state.sid) connect(g.sid); // 이어 아래 자리로 간다(스냅샷을 받은 뒤)
+  if (g.again) { searchQ.value = q; openSearch(); return; }
+  // 접어 둔 계획·타임라인 칸은 펴고 간다
+  const unfold = (g.step && layout.foldPlan && "foldPlan") || (g.seq != null && layout.foldTl && "foldTl");
+  if (unfold) { layout[unfold] = false; applyLayout(); saveLayout(); }
+  state.focus = { sid: g.sid || state.sid, ...g };
+  if (g.seq != null) state.tlFocus = g.seq; // 400줄 밖·거른 줄이라도 그 줄까지 보인다
+  if (g.step) state.planReveal = g.step; // 끝난 단계·끝난 상위 단계 아래여도 그 단계까지 보인다(세션을 바꾸거나 「끝난 단계」 를 누를 때까지)
+  queueRender();
+}
+// 찾은 자리로 간다: 타임라인 줄·계획 단계는 그린 바로 뒤에, 그림 부품은 배치가 끝난 뒤에
+function applyFocus(afterCanvas) {
+  const f = state.focus;
+  if (!f || f.sid !== state.sid || !state.snapped) return;
+  const flashIt = (e) => { e.classList.remove("flash"); void e.offsetWidth; e.classList.add("flash"); };
+  if (f.seq != null) {
+    const li = $("tl-body").querySelector(f.key ? `li[data-key="${CSS.escape(f.key)}"]` : `li[data-seq="${f.seq}"]`);
+    if (li) { state.focus = null; state.tlJumpT = performance.now(); li.scrollIntoView({ block: "center" }); flashIt(li); li.tabIndex = -1; li.focus({ preventScroll: true }); }
+    else if (afterCanvas) state.focus = null; // 그 줄이 없다(지워진 세션 따위)
+  } else if (f.step) {
+    const li = $("plan-body").querySelector(`li[data-id="${CSS.escape(f.step)}"]`);
+    if (li) { state.focus = null; li.scrollIntoView({ block: "center" }); flashIt(li); li.focus({ preventScroll: true }); }
+    else if (afterCanvas) state.focus = null;
+  } else if (f.part && afterCanvas && !canvas.busy()) {
+    state.focus = null;
+    if (revealPart(f.part)) canvas.elementOf(f.part)?.focus({ preventScroll: true });
+  } else if (!f.part) { state.focus = null; $("sess-name").focus({ preventScroll: true }); } // 세션·프로젝트만 골랐다
+}
+$("search-open").addEventListener("click", () => (finder.open ? closeSearch() : openSearch()));
+searchQ.addEventListener("input", runSearch);
+searchQ.addEventListener("keydown", (ev) => {
+  if (ev.isComposing || ev.keyCode === 229) return; // 한글 조합 중(조합을 끝내는 Enter 가 한 번 더 온다)
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    ev.preventDefault();
+    if (finder.opts.length) setFound((finder.active + (ev.key === "ArrowDown" ? 1 : -1) + finder.opts.length) % finder.opts.length);
+  } else if (ev.key === "Enter") { ev.preventDefault(); chooseFound(finder.active); }
+  else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); closeSearch(); }
+});
+document.addEventListener("pointerdown", (ev) => { if (finder.open && !searchBox.contains(ev.target) && !$("search-open").contains(ev.target)) closeSearch(false); }, true);
+document.addEventListener("keydown", (ev) => {
+  if (ONLY_TL || document.querySelector("dialog[open]")) return; // 떼어 본 타임라인 창에는 찾기가 없고, 도움말·설정 창 뒤에서는 열지 않는다
+  if ((ev.key === "k" || ev.key === "K") && (ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey) { ev.preventDefault(); openSearch(); return; }
+  if (ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey || help.open) return;
+  const t = ev.target;
+  if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return; // 글을 쓰는 중
+  ev.preventDefault();
+  openSearch();
+});
+
 window.__atv = state; // 화면 검사 도구가 상태를 읽는다
 connect(null);

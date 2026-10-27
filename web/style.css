@@ -194,6 +194,9 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .elabel { position: absolute; font-size: 12px; line-height: 16px; color: var(--muted); background: var(--bg); padding: 0 3px; white-space: nowrap; }
 
 .part { position: absolute; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--s-todo); border-radius: 6px; padding: 6px 30px 6px 9px; max-width: 260px; }
+/* Ctrl + 오른쪽 버튼으로 끄는 도형: 다른 도형 위로 올리고 그림자로 들린 것처럼 보인다 */
+.part.dragging { z-index: 5; box-shadow: 0 6px 18px rgb(0 0 0 / 0.28); cursor: grabbing; }
+.part.group.dragging { z-index: 0; }
 .part.nostatus { border-left-color: var(--line); }
 .part.group { background: transparent; border-style: dashed; border-left-style: solid; padding: 0; max-width: none; }
 .part.group > .lbl { padding: 4px 30px 0 9px; color: var(--muted); }
@@ -380,7 +383,7 @@ main.fold-left .ghead { display: none; }
 /* 새 창으로 뗀 타임라인: 맨 위 한 줄과 타임라인만 남긴다 */
 body.only-tl { grid-template-rows: auto auto 1fr; }
 body.only-tl main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
-body.only-tl #sessions, body.only-tl .split, body.only-tl #canvas-wrap, body.only-tl #plan, body.only-tl #replay, body.only-tl #popout, body.only-tl #fold-tl, body.only-tl #theme, body.only-tl #compose, body.only-tl #thread-nav, body.only-tl #proj-link, body.only-tl #settings-open, body.only-tl #basket { display: none; }
+body.only-tl #sessions, body.only-tl .split, body.only-tl #canvas-wrap, body.only-tl #plan, body.only-tl #replay, body.only-tl #popout, body.only-tl #fold-tl, body.only-tl #theme, body.only-tl #compose, body.only-tl #thread-nav, body.only-tl #proj-link, body.only-tl #settings-open, body.only-tl #basket, body.only-tl #search-open { display: none; }
 body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 
 @media (max-width: 900px) {
@@ -448,3 +451,28 @@ body.dragging .gsec.drop { outline: 2px solid var(--accent); background: var(--p
 #group-menu .gm-del { color: var(--s-fail); }
 #group-menu .gm-del.armed { font-weight: 600; }
 #group-menu .gm-item[aria-disabled="true"] { color: var(--muted); cursor: default; }
+
+/* 찾기: 맨 위 「찾기」 단추(입력 칸처럼 보인다)와 그 아래 가운데 뜨는 찾기 창. 결과는 묶음(이 화판·타임라인·세션·다른 세션)별 */
+#search-open.find { display: inline-flex; align-items: center; gap: 6px; flex: none; min-width: 10em; padding: 3px 6px 3px 9px; border: 1px solid var(--btn-line); border-radius: 999px; background: var(--input-bg); color: var(--muted); font-size: 13px; line-height: 18px; cursor: text; }
+#search-open.find:hover { border-color: var(--accent); }
+#search-open.find .i { width: 15px; height: 15px; }
+#search-open.find kbd { margin-left: auto; }
+#search { position: fixed; z-index: 40; top: 50px; left: 50%; transform: translateX(-50%); width: min(680px, calc(100vw - 32px)); max-height: min(72vh, 640px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 14px 40px rgb(0 0 0 / 0.28); overflow: hidden; }
+#search[hidden] { display: none; }
+#search .s-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
+#search .s-bar .i { width: 18px; height: 18px; flex: none; }
+#search-q { flex: 1; min-width: 0; font: inherit; font-size: 15px; line-height: 22px; border: none; outline: none; background: transparent; color: var(--fg); }
+#search-q::-webkit-search-cancel-button { cursor: pointer; }
+.s-keys { font-size: 12px; white-space: nowrap; }
+#search-list { overflow: auto; padding: 2px 0 8px; overscroll-behavior: contain; }
+.s-head { position: sticky; top: 0; z-index: 1; padding: 8px 14px 4px; font-size: 12px; font-weight: 600; color: var(--title); background: var(--panel); }
+.s-opt { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; column-gap: 10px; align-items: baseline; padding: 5px 14px; font-size: 13px; line-height: 19px; cursor: pointer; border-left: 3px solid transparent; }
+.s-opt[aria-selected="true"] { background: var(--panel-2); border-left-color: var(--accent); }
+.s-kind { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.s-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s-meta { color: var(--muted); font-size: 12px; white-space: nowrap; max-width: 18em; overflow: hidden; text-overflow: ellipsis; }
+#search mark { background: var(--flash); color: inherit; border-radius: 2px; padding: 0 1px; }
+.s-status { padding: 6px 14px; color: var(--muted); font-size: 12px; line-height: 18px; border-bottom: 1px solid var(--panel-2); }
+.s-status:empty { display: none; }
+#search-list[hidden] { display: none; }
+@media (max-width: 700px) { .s-keys, #search-open.find kbd { display: none; } #search-open.find { min-width: 0; } .s-opt { grid-template-columns: 48px minmax(0, 1fr); } .s-meta { display: none; } }

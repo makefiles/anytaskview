@@ -270,6 +270,62 @@ const boardHeaders = (f, extra = {}) => {
 };
 const board = (f, body, extra) => f.request("POST", "/api/board", { headers: boardHeaders(f, extra), body });
 
+test("도형 옮기기: 화판 쓰기 열쇠로 move 를 기록하고(세션·큰 그림), 다시 띄워도 남는다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  await f.hook("M", { f: "start", cwd: "/w" });
+  await f.mcp("draw", { ops: [{ id: "a", kind: "box", label: "가" }] }, { env: "M" });
+  assert.equal((await f.request("POST", "/api/board", { headers: { "content-type": "application/json", host: `127.0.0.1:${f.port}` }, body: { op: "move", sid: "M", id: "a", x: 10, y: 20 } })).status, 403);
+  const r = JSON.parse((await board(f, { op: "move", sid: "M", id: "a", x: 10, y: 20 })).text);
+  assert.deepEqual([r.ok, r.msg], [true, "a 옮김"]);
+  assert.deepEqual(f.board.sessions.get("M").scene.items.a.pos, { x: 10, y: 20 });
+  assert.equal(JSON.parse((await board(f, { op: "move", sid: "없음", id: "a", x: 1, y: 1 })).text).ok, false);
+  assert.equal(JSON.parse((await board(f, { op: "move", sid: "M", id: "a", x: "1", y: 1 })).text).ok, false);
+  await f.restart();
+  assert.deepEqual(f.board.sessions.get("M").scene.items.a.pos, { x: 10, y: 20 });
+  assert.equal(JSON.parse((await board(f, { op: "move", sid: "M", all: true })).text).msg, "자동 배치로 1개");
+  // 큰 그림
+  await f.hook("M", { f: "start", cwd: "/w", source: "resume" }, { pid: (1 << 22) + 3 });
+  const P = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
+  await board(f, { op: "proj-set", sids: ["M"], pid: P });
+  await f.mcp("draw", { ops: [{ id: "u", kind: "box", label: "단위" }], project: P }, { env: "M" });
+  assert.equal(JSON.parse((await board(f, { op: "move", sid: P, id: "u", x: 3, y: 4 })).text).ok, true);
+  assert.deepEqual(f.board.pboards.get(P).scene.items.u.pos, { x: 3, y: 4 });
+});
+
+test("찾기 API: 읽기 토큰이 필요하고, 세션마다 맞은 수와 앞의 몇 건(부품 먼저, 그다음 최근 줄)을 최근 세션부터", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  assert.equal((await f.request("GET", "/api/search?q=x")).status, 401);
+  await f.hook("A", { f: "start", cwd: "/w/a" });
+  await f.hook("A", { f: "prompt", text: "로그인 버그 고치기" });
+  for (let i = 0; i < 5; i++) await f.hook("A", { f: "run-end", id: `r${i}`, cmd: `npm test login ${i}`, desc: "시험" });
+  await f.mcp("draw", { ops: [{ id: "lg", kind: "box", label: "Login 화면" }] }, { env: "A" });
+  await new Promise((ok) => setTimeout(ok, 5)); // B 가 A 보다 늦게 움직인 세션이 되게(같은 ms 면 순서가 갈리지 않는다)
+  await f.hook("B", { f: "start", cwd: "/w/b" });
+  await f.hook("B", { f: "edit", tool: "Edit", path: "/w/b/login.js" });
+  const r = (await f.read(`/api/search?q=${encodeURIComponent("LOGIN")}`)).json;
+  assert.deepEqual(r.sessions.map((s) => [s.id, s.n]), [["B", 1], ["A", 6]]);
+  const a = r.sessions[1];
+  assert.deepEqual(a.hits[0], { id: "lg", type: "part", text: "Login 화면" });
+  assert.deepEqual(a.hits.slice(1).map((h) => h.text), ["시험 npm test login 4", "시험 npm test login 3"]);
+  assert.equal(a.hits.length, 3);
+  assert.deepEqual((await f.read(`/api/search?q=${encodeURIComponent("npm login 4")}`)).json.sessions.map((s) => [s.id, s.n]), [["A", 1]]); // 낱말을 모두 담은 줄만
+  assert.deepEqual((await f.read("/api/search?q=%20")).json, { sessions: [], more: 0 });
+  // 목록 항목·선은 화면에 보이는 부품(목록·시작 부품)으로, 큰 그림의 메모는 붙은 단위로 간다
+  const asA = { env: "A", pid: 999_991 }; // B 가 기본 프로세스 번호로 시작해 짝지어졌으므로 A 로 보낸다
+  await f.mcp("draw", { ops: [{ id: "l", kind: "list", label: "목록" }, { id: "li", kind: "item", in: "l", label: "고래항목" }, { id: "e", kind: "edge", from: "lg", to: "l", label: "고래선" }] }, asA);
+  assert.deepEqual((await f.read(`/api/search?q=${encodeURIComponent("고래항목")}`)).json.sessions[0].hits[0], { id: "l", type: "part", text: "고래항목" });
+  assert.deepEqual((await f.read(`/api/search?q=${encodeURIComponent("고래선")}`)).json.sessions[0].hits[0], { id: "lg", type: "part", text: "고래선" });
+  const P = JSON.parse((await board(f, { op: "proj-new", name: "큰일" })).text).pid;
+  await board(f, { op: "proj-set", sids: ["A"], pid: P });
+  await f.mcp("plan", { steps: [{ id: "u1", title: "단위", status: "doing" }], project: P }, asA);
+  await f.mcp("note", { text: "고래결정 기다림", kind: "wait", on: "u1", project: P }, asA);
+  const pj = (await f.read(`/api/search?q=${encodeURIComponent("고래결정")}`)).json.sessions.find((s) => s.project);
+  assert.equal(pj.id, P);
+  assert.deepEqual([pj.hits[0].id, pj.hits[0].type, pj.hits[0].note, pj.hits[0].kind], ["u1", "step", true, "wait"]);
+});
+
 test("브라우저 쓰기 보안: 같은 화판 페이지(Origin·머리글·쿠키)에서 온 것만, 큰 본문은 거절", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());

@@ -1,7 +1,7 @@
 // 장면 규칙 시험: 명령 검사, 지금 단계, 훅 사실의 순서 처리, 재생이 실시간과 같은지
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs } from "../lib/scene.js";
+import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs } from "../lib/scene.js";
 
 // 서버처럼: 검사 → 기록(JSON) → 기록을 되읽어 적용
 function harness(resume) {
@@ -412,4 +412,55 @@ test("승인 대기: 사용자 입력이면 단계와 그림 부품의 대기를
   // 작업 알림(sys)은 사용자 입력이 아니다
   h.fact({ f: "prompt", text: "<task-notification>", sys: true });
   assert.equal(h.scene.items.opt.answered, undefined);
+});
+
+test("도형 옮기기(move): 놓기·제자리로·모두 되돌리기, 단계·선·목록 항목은 옮기지 않고, 묶음이 바뀌면 자리를 버린다", () => {
+  const h = harness();
+  const move = (input) => { const out = evalMove(h.scene, input); applyRes(h.scene, JSON.parse(JSON.stringify(out.res))); h.log.push(out.res); return out.msg; };
+  h.plan({ steps: [{ id: "s1", title: "단계" }] });
+  h.draw({ ops: [{ id: "g", kind: "group", label: "묶음" }, { id: "a", kind: "box", label: "가", in: "g" }, { id: "b", kind: "box" }, { id: "e", kind: "edge", from: "a", to: "b" }, { id: "l", kind: "list" }, { id: "i", kind: "item", in: "l", label: "항목" }] });
+  assert.equal(move({ id: "a", x: 12.4, y: 40 }), "a 옮김");
+  assert.deepEqual(h.scene.items.a.pos, { x: 12, y: 40 });
+  assert.equal(move({ id: "a", x: 12, y: 40 }), "그대로");
+  for (const id of ["s1", "e", "i", "없음"]) assert.equal(move({ id, x: 1, y: 1 }), "옮길 수 없는 부품");
+  assert.match(move({ id: "b", x: -1, y: 0 }), /자리는 0~/);
+  assert.match(move({ id: "b", x: 1, y: Infinity }), /자리는 0~/);
+  move({ id: "b", x: 100, y: 0 });
+  move({ id: "g", x: 5, y: 5 });
+  // Claude 가 다른 것을 고쳐도 자리는 남고, 묶음을 바꾸면 버린다
+  h.draw({ ops: [{ id: "b", label: "나" }, { id: "a", status: "doing" }] });
+  assert.deepEqual([h.scene.items.a.pos, h.scene.items.b.pos], [{ x: 12, y: 40 }, { x: 100, y: 0 }]);
+  h.draw({ ops: [{ id: "a", in: null }] });
+  assert.equal(h.scene.items.a.pos, undefined);
+  // 끄는 사이 묶음이 바뀌었으면(요청에 실은 in 과 다름) 받지 않는다
+  assert.equal(move({ id: "b", x: 5, y: 5, in: "g" }), "그사이 묶음이 바뀌어 옮기지 않음");
+  assert.deepEqual(h.scene.items.b.pos, { x: 100, y: 0 });
+  assert.equal(move({ id: "b", x: 6, y: 5, in: null }), "b 옮김");
+  assert.equal(move({ id: "b", x: null }), "b 자동 자리로");
+  assert.equal(h.scene.items.b.pos, undefined);
+  assert.equal(move({ all: true }), "자동 배치로 1개");
+  assert.equal(h.scene.items.g.pos, undefined);
+  assert.equal(move({ all: true }), "옮긴 도형 없음");
+  assert.deepEqual(h.replay().items, h.scene.items);
+});
+
+test("찾기 재료: 타임라인 줄·부품의 글, 낱말 모두 담기(대소문자 무시), 첫 낱말 둘레 앞부분", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "s1", title: "원인 찾기", note: "파서" }] });
+  h.draw({ ops: [{ id: "t", kind: "table", label: "비교", cols: ["안"], rows: [["Redis 캐시"]] }] });
+  h.fact({ f: "run-start", id: "r1", cmd: "npm test", desc: "시험 돌리기" });
+  h.fact({ f: "edit", tool: "Edit", path: "/w/src/App.js", lines: "3" });
+  h.note({ text: "빈 줄에서만 재현", kind: "why", on: "s1" });
+  const [run, edit, note] = h.scene.timeline.filter((e) => e.type !== "fact" || e.f === "edit");
+  assert.equal(entryText(h.scene, run), "시험 돌리기 npm test");
+  assert.equal(entryText(h.scene, edit), "/w/src/App.js:3");
+  assert.equal(entryText(h.scene, note), "빈 줄에서만 재현 (s1)");
+  assert.equal(itemText(h.scene.items.t), "비교 안 Redis 캐시");
+  assert.equal(itemText(h.scene.items.s1), "원인 찾기 파서");
+  const q = searchTerms("  app.JS   src ");
+  assert.deepEqual(q, ["app.js", "src"]);
+  assert.ok(matchAll("/w/src/App.js:3", q));
+  assert.ok(!matchAll("/w/src/Main.js", q));
+  assert.ok(!matchAll("무엇이든", []));
+  assert.equal(snippet("가".repeat(100) + "찾는말" + "나".repeat(300), ["찾는말"]).slice(0, 42), "…" + "가".repeat(40) + "찾");
 });

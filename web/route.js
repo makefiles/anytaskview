@@ -204,30 +204,40 @@ export function detour(a, b, others, grid = makeGrid([a, b, ...others])) {
     !((pts[n - 1].x === p.x && p.x === pts[n + 1].x) || (pts[n - 1].y === p.y && p.y === pts[n + 1].y)));
 }
 
+// 상자 a 에서 b 로 그을 선 하나: 후보(routes) 가운데 다른 상자(leaves, 묶음 말고)를 덜 지나는 것, 같으면 덜 꺾인 것, 그다음 짧은 것.
+// 후보가 모두 지나면 돌아가는 길(detour)을 찾아 덜 지나면 그것을 쓴다. ctx 는 한 배치의 선들이 같이 쓰는 격자와,
+// 같은 두 끝(pair)의 돌아가는 길이다. { pts, n(지나는 상자 수), len }
+export function pickRoute(a, b, leaves, ctx = {}, pair = null) {
+  let best = null;
+  for (const pts of routes(a, b)) {
+    const n = leaves.filter((c) => c !== a && c !== b && pts.some((p, i) => i > 0 && segmentHits(pts[i - 1], p, c))).length;
+    const cand = { pts, n, len: pathLength(pts) };
+    if (!best || n < best.n || (n === best.n && (pts.length < best.pts.length || (pts.length === best.pts.length && cand.len < best.len)))) best = cand;
+  }
+  if (best.n) {
+    // 격자는 한 배치의 잎 상자로 한 번만 만들고, 같은 두 끝의 길은 다시 찾지 않는다
+    if (ctx.grid === undefined) ctx.grid = makeGrid(leaves);
+    ctx.found ||= new Map();
+    let pts;
+    if (pair !== null && ctx.found.has(pair)) pts = ctx.found.get(pair);
+    else { pts = detour(a, b, [], ctx.grid); if (pair !== null) ctx.found.set(pair, pts); }
+    const n = pts ? leaves.filter((c) => c !== a && c !== b && pts.some((p, i) => i > 0 && segmentHits(pts[i - 1], p, c))).length : Infinity;
+    if (n < best.n) best = { pts, n, len: pathLength(pts) };
+  }
+  return best;
+}
+export { midPoint };
+
 export function crossLines(out, cross) {
   const boxes = new Map(), leaves = [];
   const walk = (n) => { for (const c of n.children || []) { boxes.set(c.id, c); if (c.children?.length) walk(c); else leaves.push(c); } };
   walk(out);
-  let w = Math.max(1, out.width), h = Math.max(1, out.height), hits = 0, grid;
-  const lines = [], found = new Map();
+  let w = Math.max(1, out.width), h = Math.max(1, out.height), hits = 0;
+  const lines = [], ctx = {};
   for (const e of cross) {
     const a = boxes.get(e.a), b = boxes.get(e.b);
     if (!a || !b) continue;
-    let best = null;
-    for (const pts of routes(a, b)) {
-      const n = leaves.filter((c) => c !== a && c !== b && pts.some((p, i) => i > 0 && segmentHits(pts[i - 1], p, c))).length;
-      const cand = { pts, n, len: pathLength(pts) };
-      if (!best || n < best.n || (n === best.n && (pts.length < best.pts.length || (pts.length === best.pts.length && cand.len < best.len)))) best = cand;
-    }
-    if (best.n) {
-      // 격자는 한 배치의 잎 상자로 한 번만 만들고, 같은 두 끝의 길은 다시 찾지 않는다
-      if (grid === undefined) grid = makeGrid(leaves);
-      const pair = `${e.a}\n${e.b}`;
-      if (!found.has(pair)) found.set(pair, detour(a, b, [], grid));
-      const pts = found.get(pair);
-      const n = pts ? leaves.filter((c) => c !== a && c !== b && pts.some((p, i) => i > 0 && segmentHits(pts[i - 1], p, c))).length : Infinity;
-      if (n < best.n) best = { pts, n, len: pathLength(pts) };
-    }
+    const best = pickRoute(a, b, leaves, ctx, `${e.a}\n${e.b}`);
     hits += best.n;
     // 돌아가는 길은 상자 밖 여백(MARGIN)까지 나가므로 그만큼 그림을 키운다
     for (const p of best.pts) { w = Math.max(w, p.x + 2); h = Math.max(h, p.y + 2); }

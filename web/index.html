@@ -56,12 +56,22 @@
   <span id="headline">세션을 고르세요</span>
   <span id="stall" hidden></span>
   <span class="grow"></span>
-  <span id="nokey" class="chip warn" hidden title="이름 바꾸기·프로젝트·Claude 에 보내기·설정에는 화판 쓰기 열쇠가 필요합니다. 터미널에서 scripts/atv board --url 이 찍는 주소를 이 브라우저로 한 번 여세요">쓰기 열쇠 없음</span>
+  <button id="search-open" class="find" type="button" aria-haspopup="dialog" aria-controls="search" aria-expanded="false" title="찾기: 이 화판의 그림·계획, 이 세션의 타임라인, 세션·프로젝트, 다른 세션의 기록 (/ 또는 Ctrl+K)"><svg class="i" aria-hidden="true"><use href="#ic-search"/></svg><span>찾기</span><kbd>/</kbd></button>
+  <span id="nokey" class="chip warn" hidden title="이름 바꾸기·프로젝트·Claude 에 보내기·설정·도형 옮기기에는 화판 쓰기 열쇠가 필요합니다. 터미널에서 scripts/atv board --open 으로 한 번 여세요(원격 셸이면 --url 이 찍는 주소를 이 브라우저로)">쓰기 열쇠 없음</span>
   <button id="compose" class="send" type="button" title="지금 보는 세션 전체에 대해 의견·지시를 써서 Claude 에 보냅니다. 상자·단계에 대해서는 그 위의 「보내기」 를 누릅니다"><svg class="logo" aria-hidden="true"><use href="#logo-claude"/></svg><span>Claude 에 보내기</span></button>
   <button id="theme" class="icon" type="button" aria-label="테마: 자동" title="테마: 자동"><svg class="i" aria-hidden="true"><use href="#i-auto"/></svg></button>
   <button id="settings-open" class="icon" type="button" aria-label="설정" title="설정: 이어받기 문구"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg></button>
   <button id="help-open" class="icon" type="button" aria-label="도움말" title="도움말: 사용법과 단축키(?)"><svg class="i" aria-hidden="true"><use href="#i-help"/></svg></button>
 </header>
+<div id="search" role="dialog" aria-label="찾기" hidden>
+  <div class="s-bar">
+    <svg class="i" aria-hidden="true"><use href="#ic-search"/></svg>
+    <input id="search-q" type="search" autocomplete="off" spellcheck="false" placeholder="그림·계획·타임라인·세션·다른 세션 기록에서 찾기" role="combobox" aria-expanded="false" aria-controls="search-list" aria-autocomplete="list" aria-label="찾을 말">
+    <span class="s-keys muted"><kbd>↑</kbd> <kbd>↓</kbd> 고르기 · <kbd>Enter</kbd> 열기 · <kbd>Esc</kbd> 닫기</span>
+  </div>
+  <div id="search-status" class="s-status" role="status" aria-live="polite"></div>
+  <div id="search-list" role="listbox" aria-label="찾은 것"></div>
+</div>
 <div id="band" hidden></div>
 <main>
   <nav id="sessions" aria-label="세션 목록">
@@ -75,6 +85,7 @@
       <button id="zoom-fit" class="mini" type="button" title="화면에 맞추기">맞춤</button>
       <button id="zoom-100" class="mini" type="button" title="100% 로 되돌리기">원래 크기</button>
       <button id="zoom-in" class="mini" type="button" title="확대">+</button>
+      <button id="auto-place" class="mini" type="button" hidden title="Ctrl + 오른쪽 버튼으로 옮긴 도형을 모두 자동 자리로 되돌립니다">자동 배치로</button>
       <span id="zoom-label" class="muted"></span>
       <button id="follow" class="mini" type="button" aria-pressed="true" title="진행 중인 상자를 따라 화면을 옮깁니다. 직접 움직이면 꺼집니다">따라가기</button>
     </div>
@@ -132,7 +143,9 @@
     <dt>여러 글 한 번에</dt><dd>보내기 창에서 「모아 두기」 를 누른 뒤, 화면 아래 띠의 「한꺼번에 보내기」 를 누릅니다.</dd>
     <dt>프로젝트로 묶기</dt><dd>세션 목록 위 「+ 프로젝트」 로 만들고, 세션 줄을 끌어다 놓습니다.</dd>
     <dt>지난 화면 보기</dt><dd>맨 아래 재생 막대를 끕니다. 「실시간」 을 누르면 돌아옵니다.</dd>
-    <dt>그림 옮기기</dt><dd>그림이 칸보다 크면 마우스로 잡고 끌어 상하좌우로 옮깁니다. 「맞춤」 을 누르면 그림 전체가 칸에 들어갑니다.</dd>
+    <dt>찾기</dt><dd>맨 위 「찾기」(또는 <kbd>/</kbd> · <kbd>Ctrl</kbd> + <kbd>K</kbd>)에 낱말을 씁니다. 이 화판의 그림·계획, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트, 다른 세션의 기록에서 찾고, 고르면 그 자리로 갑니다.</dd>
+    <dt>도형 옮기기</dt><dd><kbd>Ctrl</kbd> 을 누른 채 도형을 오른쪽 버튼으로 끌어 원하는 자리에 놓습니다. 놓은 자리는 다른 브라우저·다시 보기에서도 같고, 에이전트가 그림을 고쳐도 그대로입니다. 그림 위 「자동 배치로」 를 누르면 모두 처음 자리로 돌아갑니다.</dd>
+    <dt>그림 화면 옮기기</dt><dd>그림이 칸보다 크면 빈 곳을 마우스로 잡고 끌어 상하좌우로 봅니다. 「맞춤」 을 누르면 그림 전체가 칸에 들어갑니다.</dd>
   </dl>
 
   <h3>화면 표시의 뜻</h3>
@@ -149,11 +162,15 @@
   <h3>단축키 · 마우스</h3>
   <dl class="keys">
     <dt><kbd>?</kbd></dt><dd>도움말 열기·닫기</dd>
-    <dt><kbd>Esc</kbd></dt><dd>도움말·보내기 창·이름 입력 닫기</dd>
+    <dt><kbd>/</kbd> · <kbd>Ctrl</kbd> + <kbd>K</kbd></dt><dd>찾기 열기. 찾기 창에서 <kbd>↑</kbd> <kbd>↓</kbd> 고르기, <kbd>Enter</kbd> 열기</dd>
+    <dt><kbd>Esc</kbd></dt><dd>도움말·찾기 창·보내기 창·이름 입력 닫기</dd>
     <dt><kbd>Enter</kbd></dt><dd>보내기 창에서 보내기, 이름 저장</dd>
     <dt><kbd>Shift</kbd> + <kbd>Enter</kbd></dt><dd>보내기 창에서 줄 바꾸기</dd>
     <dt>상자·단계에서 <kbd>Enter</kbd></dt><dd>그 상자·단계에 대해 보내기(<kbd>Tab</kbd> 으로 상자·단계에 갑니다)</dd>
     <dt><kbd>Ctrl</kbd> + 휠</dt><dd>그림 확대·축소(마우스 자리를 중심으로)</dd>
+    <dt><kbd>Ctrl</kbd> + 오른쪽 버튼 끌기</dt><dd>도형 옮기기(묶음은 안의 도형과 함께, 묶음 안 도형은 그 묶음 안에서)</dd>
+    <dt><kbd>Ctrl</kbd> + 오른쪽 클릭</dt><dd>옮긴 도형 하나만 처음 자리로</dd>
+    <dt>도형에서 <kbd>Shift</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>도형을 10px 씩 옮기기(<kbd>Tab</kbd> 으로 도형에 갑니다)</dd>
     <dt>경계선 끌기</dt><dd>패널 폭·높이 바꾸기. 두 번 누르면 기본값</dd>
     <dt>경계선에서 <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>16px 씩 옮기기</dd>
   </dl>
@@ -218,18 +235,39 @@
       <li>「따라가기」 를 켜면 진행 중인 상자로 화면이 옮겨 갑니다. 직접 스크롤하거나 누르면 꺼집니다.</li>
       <li>파일 위치가 붙은 상자·항목을 누르면 그 위치(경로:줄)가 복사됩니다. 상자에는 파일 이름만 보이고, 마우스를 올리면 전체 경로가 보입니다.</li>
       <li>계획의 끝난 단계는 숨기고 개수만 보입니다. 「끝난 단계 n개 보기」 로 폅니다.</li>
-      <li>타임라인 위 단추로 종류별로 거르고, 「새 창」 으로 떼어 봅니다.</li>
+      <li>타임라인 위 단추로 종류별로 거르고, 「새 창」 으로 떼어 봅니다. 타임라인은 최근 400줄을 보이고, 옛 기록은 찾기로 갑니다.</li>
+      <li>에이전트는 화판 갱신을 다른 작업과 같은 응답에 실어 보냅니다(토큰을 아끼려고). 그래서 마지막으로 확인하던 단계는 답을 한 뒤 다음 차례에 「끝」 으로 바뀔 수 있습니다. 승인을 물을 때와 막혀서 도움을 청할 때는 그 자리에서 「승인 대기」 · 「막힘」 이 뜹니다.</li>
       <li>맨 위 주의 띠(입력 필요 · 승인 대기 · 막힘 · 실패)는 둘 이상이면 한 줄로 접히고 「외 N개 ▾」 로 폅니다. 「닫기 ×」 를 누르면 숨고, 새 알림이 오면 다시 보입니다.</li>
       <li>승인 대기는 사용자가 다음 입력을 하면 「답 받음」 으로 풀립니다. 프로젝트 큰 그림의 승인 대기도 그 프로젝트에 든 대화에 입력이 오면 풀립니다. 끝난 세션에는 승인 대기 · 막힘을 띄우지 않습니다.</li>
     </ul>
   </details>
   <details>
+    <summary>찾기</summary>
+    <ul>
+      <li>찾는 곳은 위에서부터 이 화판(그림 이름표·글·메모·경로, 계획 단계), 이 세션 타임라인(사용자 입력·명령·고친 파일·메모·보낸 글·에이전트), 세션·프로젝트(이름·폴더·첫 입력), 다른 세션의 기록입니다.</li>
+      <li>낱말을 여럿 쓰면 모두 담은 것만 찾습니다. 대소문자는 가리지 않습니다. 맞은 곳은 색으로 칠합니다.</li>
+      <li>타임라인 줄을 고르면 화면에 없던 옛 줄이라도 그 줄까지 펼쳐 보이고, 거르기로 숨긴 종류여도 그 줄은 보입니다. 타임라인을 맨 위로 올리면 다시 접힙니다.</li>
+      <li>다른 세션의 기록은 화판 서버가 찾고, 세션마다 앞의 몇 건만 보입니다. 「외 N건」 을 고르면 그 세션을 열고 그 안에서 다시 찾습니다.</li>
+      <li>휴지통으로 옮긴 대화는 찾지 않습니다.</li>
+    </ul>
+  </details>
+  <details>
+    <summary>도형 옮기기</summary>
+    <ul>
+      <li><kbd>Ctrl</kbd> 을 누른 채 오른쪽 버튼으로 도형을 끌어 놓습니다. 그냥 끌면(왼쪽 버튼) 지금처럼 그림 화면이 움직입니다.</li>
+      <li>묶음을 옮기면 안의 도형이 함께 갑니다. 묶음 안의 도형은 그 묶음 밖으로 나가지 않습니다. 목록 안의 항목과 선은 따로 옮기지 않고, 옮긴 도형에 닿는 선은 다시 그어집니다.</li>
+      <li>놓은 자리는 화판 기록에 남습니다. 다른 탭·브라우저와 다시 보기에서도 같고, 에이전트가 새 도형을 그려 다시 배치해도 옮긴 도형은 그 자리에 있습니다. 겹치면 다시 옮기거나 「자동 배치로」 를 누릅니다.</li>
+      <li>에이전트가 도형을 다른 묶음으로 옮기거나 지우면 그 도형의 놓은 자리도 없어집니다.</li>
+      <li>쓰기 열쇠가 있어야 옮길 수 있고, 다시 보기 중에는 옮기지 않습니다.</li>
+    </ul>
+  </details>
+  <details>
     <summary>화판 주소 · 쓰기 열쇠</summary>
     <ul>
-      <li>처음 한 번만 터미널에서 플러그인 폴더의 <code>scripts/atv board --url</code> 이 찍는 주소로 엽니다.</li>
+      <li>처음 한 번만 에이전트에게 「화판 열어 줘」 라고 하거나, 터미널에서 플러그인 폴더의 <code>scripts/atv board --open</code> 을 실행합니다. 원격 셸이면 <code>scripts/atv board --url</code> 이 찍는 주소를 그 PC 의 브라우저로 엽니다.</li>
       <li>그 뒤로는 이 브라우저에서 <code>http://127.0.0.1:4871/</code> 만 열면 됩니다. 읽기 쿠키는 1년 동안, 쓰기 열쇠는 이 브라우저에 남습니다.</li>
       <li>다른 브라우저나 시크릿 창을 쓰거나 쿠키를 지웠을 때만 주소를 다시 받습니다.</li>
-      <li>맨 위에 「쓰기 열쇠 없음」 이 보이면 이름 바꾸기 · 프로젝트 · 보내기 · 설정을 쓸 수 없습니다. 위 주소로 한 번 다시 여세요.</li>
+      <li>맨 위에 「쓰기 열쇠 없음」 이 보이면 이름 바꾸기 · 프로젝트 · 보내기 · 설정 · 도형 옮기기를 쓸 수 없습니다. 위 방법으로 한 번 다시 여세요.</li>
     </ul>
   </details>
 </dialog>

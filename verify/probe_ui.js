@@ -1547,15 +1547,153 @@ async function main() {
     // 옛 기록을 보는 중에 위에 줄이 붙어도 보던 줄은 화면에서 제자리에 있다(코드 보정과 브라우저 스크롤 고정이 겹치지 않음)
     for (let i = 0; i < 30; i++) await mcp("note", { text: `스크롤 채우기 ${i}` });
     await waitFor(`document.getElementById('timeline').scrollHeight > document.getElementById('timeline').clientHeight + 300`);
-    await evaluate(`(() => { const box = document.getElementById('timeline'); box.scrollTop = 200; window.__row = [...document.querySelectorAll('#tl-body li')].find((li) => li.getBoundingClientRect().top >= box.getBoundingClientRect().top + 40); window.__rowTop = window.__row.getBoundingClientRect().top; return 1; })()`);
+    await evaluate(`(() => { const box = document.getElementById('timeline'); box.scrollTop = 200; window.__row = [...document.querySelectorAll('#tl-body li')].find((li) => li.getBoundingClientRect().top >= box.getBoundingClientRect().top + 40); window.__rowTop = window.__row.getBoundingClientRect().top; window.__dbg0 = { st: box.scrollTop, band: document.getElementById('band').offsetHeight, top: document.getElementById('top').offsetHeight, boxTop: Math.round(box.getBoundingClientRect().top), n: document.querySelectorAll('#tl-body li').length }; return 1; })()`);
     await sleep(100);
     await mcp("note", { text: "위에 붙는 줄" });
     await waitFor(`!document.getElementById('tl-new').hidden`);
     const moved = await evaluate(`Math.round(window.__row.getBoundingClientRect().top - window.__rowTop)`);
-    expect(moved === 0, `보던 줄이 ${moved}px 밀림`);
+    const dbg = await evaluate(`JSON.stringify({ before: window.__dbg0, after: { st: document.getElementById('timeline').scrollTop, band: document.getElementById('band').offsetHeight, top: document.getElementById('top').offsetHeight, boxTop: Math.round(document.getElementById('timeline').getBoundingClientRect().top), n: document.querySelectorAll('#tl-body li').length, conn: window.__row.isConnected, txt: window.__row.textContent.slice(0, 30) } })`);
+    expect(moved === 0, `보던 줄이 ${moved}px 밀림 ${dbg}`);
     await evaluate(`document.getElementById('timeline').scrollTop = 0`);
     return `있던 줄 ${kept} 그대로`;
   });
+
+  // ---- 19: 도형 옮기기(Ctrl + 오른쪽 끌기) ----
+  const mv = `move-${process.pid}`;
+  const mvHook = (fact) => post("/api/hook", { sid: mv, pid: process.pid + 140, fact });
+  const mvDraw = (input) => post("/api/mcp", { env: mv, cwd, tool: "draw", input });
+  await mvHook({ f: "start", cwd: "/tmp/옮기기", source: "startup" });
+  await mvHook({ f: "prompt", text: "도형 옮기기 시험" });
+  await mvDraw({ ops: [
+    { id: "g", kind: "group", label: "묶음" }, { id: "a", kind: "box", label: "가 상자", in: "g" }, { id: "b", kind: "box", label: "나 상자", in: "g" },
+    { id: "c", kind: "box", label: "다 상자" }, { id: "ac", kind: "edge", from: "a", to: "c" }, { id: "bc", kind: "edge", from: "b", to: "c" },
+  ] });
+  await open(mv);
+  await settledPositions();
+  const rect = (id) => evaluate(`(() => { const r = document.querySelector('#canvas .part[data-id="${id}"]').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })()`);
+  const pathD = (id) => evaluate(`document.querySelector('#canvas path[data-id="${id}"]')?.getAttribute('d') || ''`);
+  const rightDrag = async (id, dx, dy, top = false) => {
+    const r = await rect(id), x = r.x + Math.min(20, r.w / 2), y = top ? r.y + 10 : r.y + r.h / 2; // top: 묶음 제목 자리
+    const ev = (type, px, py, buttons) => cdp.send("Input.dispatchMouseEvent", { type, x: px, y: py, button: "right", buttons, modifiers: 2, clickCount: 1 });
+    await ev("mousePressed", x, y, 2);
+    for (let i = 1; i <= 8; i++) await ev("mouseMoved", x + (dx * i) / 8, y + (dy * i) / 8, 2);
+    await ev("mouseReleased", x + dx, y + dy, 0);
+  };
+  const posOf = (id) => board.sessions.get(mv).scene.items[id].pos;
+  await check("도형 옮기기: Ctrl + 오른쪽 끌기로 옮기고 기록에 남으며, 닿는 선만 다시 긋고 「자동 배치로」 가 보임", async () => {
+    await evaluate(`window.__ctx = 0; document.addEventListener('contextmenu', (e) => { if (!e.defaultPrevented) window.__ctx++; }, { capture: false }); 1`);
+    const before = await rect("c"), dAc = await pathD("ac"), zoom = await evaluate("window.__atv && Number(localStorage.getItem('atv.zoom') || 1)");
+    expect(await evaluate(`document.getElementById('auto-place').hidden`), "옮기기 전에 「자동 배치로」 가 보임");
+    await rightDrag("c", 90, 60);
+    await waitFor(`!!${JSON.stringify(mv)} && document.getElementById('auto-place').hidden === false`);
+    const p = posOf("c");
+    expect(p && Number.isInteger(p.x) && Number.isInteger(p.y), `기록된 자리 없음 ${JSON.stringify(p)}`);
+    await sleep(200);
+    const after = await rect("c");
+    expect(Math.abs(after.x - before.x - 90) <= 2 && Math.abs(after.y - before.y - 60) <= 2, `옮긴 거리 ${after.x - before.x},${after.y - before.y}(배율 ${zoom})`);
+    expect((await pathD("ac")) !== dAc, "닿는 선을 다시 긋지 않음");
+    expect((await evaluate("window.__ctx")) === 0, "Ctrl + 오른쪽 클릭에 브라우저 메뉴가 뜸");
+    return `c → ${JSON.stringify(p)}`;
+  });
+  await check("도형 옮기기: 묶음 안 도형은 묶음 밖으로 나가지 않고, 묶음을 옮기면 안의 도형이 함께 가며, 다시 열어도 그 자리", async () => {
+    const g0 = await rect("g");
+    await rightDrag("a", -400, -400);
+    await waitFor(`true`);
+    for (let i = 0; i < 40 && !posOf("a"); i++) await sleep(50);
+    const a = await rect("a"), g = await rect("g");
+    expect(a.x >= g.x && a.y >= g.y && a.x + a.w <= g.x + g.w + 1 && a.y + a.h <= g.y + g.h + 1, `묶음 밖으로 나감 ${JSON.stringify({ a, g })}`);
+    const b0 = await rect("b");
+    await rightDrag("g", 40, 120, true);
+    for (let i = 0; i < 40 && !posOf("g"); i++) await sleep(50);
+    await sleep(200);
+    const g1 = await rect("g"), b1 = await rect("b");
+    expect(Math.round(g1.x - g0.x) === 40 && Math.round(b1.x - b0.x) === 40 && Math.round(b1.y - b0.y) === Math.round(g1.y - g0.y), `묶음과 안 도형이 함께 가지 않음 ${JSON.stringify({ g0, g1, b0, b1 })}`);
+    // Claude 가 새 도형을 그려 다시 배치해도 놓은 자리 그대로
+    const c0 = await rect("c");
+    await mvDraw({ ops: [{ id: "d", kind: "box", label: "새 상자" }, { id: "cd", kind: "edge", from: "c", to: "d" }] });
+    await waitFor(`!!document.querySelector('#canvas .part[data-id="d"]')`);
+    await settledPositions();
+    const c1 = await rect("c");
+    expect(Math.abs(c1.x - c0.x) <= 1 && Math.abs(c1.y - c0.y) <= 1, `다시 배치 뒤 옮긴 자리가 바뀜 ${JSON.stringify({ c0, c1 })}`);
+    await open(mv);
+    await settledPositions();
+    const c2 = await rect("c");
+    expect(Math.abs(c2.x - c1.x) <= 1 && Math.abs(c2.y - c1.y) <= 1, "다시 열면 자리가 바뀜");
+  });
+  await check("도형 옮기기: Shift + 화살표는 10px, Ctrl + 오른쪽 클릭은 그 도형만 처음 자리로, 「자동 배치로」 는 모두", async () => {
+    const p0 = posOf("c");
+    await evaluate(`document.querySelector('#canvas .part[data-id="c"]').focus()`);
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39, modifiers: 8 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39, modifiers: 8 });
+    for (let i = 0; i < 40 && posOf("c").x === p0.x; i++) await sleep(50);
+    expect(posOf("c").x === p0.x + 10 && posOf("c").y === p0.y, `Shift + → ${JSON.stringify(posOf("c"))}`);
+    await rightDrag("c", 0, 0);
+    for (let i = 0; i < 40 && posOf("c"); i++) await sleep(50);
+    expect(!posOf("c") && posOf("g"), "Ctrl + 오른쪽 클릭이 그 도형만 되돌리지 않음");
+    await evaluate(`document.getElementById('auto-place').click()`);
+    for (let i = 0; i < 40 && Object.values(board.sessions.get(mv).scene.items).some((x) => x.pos); i++) await sleep(50);
+    expect(!Object.values(board.sessions.get(mv).scene.items).some((x) => x.pos), "「자동 배치로」 뒤에도 옮긴 자리가 남음");
+    await waitFor(`document.getElementById('auto-place').hidden`);
+  });
+
+  // ---- 19: 찾기 ----
+  const other = `find-${process.pid}`;
+  await post("/api/hook", { sid: other, pid: process.pid + 141, fact: { f: "start", cwd: "/tmp/다른곳", source: "startup" } });
+  await post("/api/hook", { sid: other, pid: process.pid + 141, fact: { f: "prompt", text: "무지개다리 고치기" } });
+  await post("/api/hook", { sid: other, pid: process.pid + 141, fact: { f: "run-end", id: "rainbow", cmd: "make rainbowbridge", desc: "무지개다리 빌드" } });
+  await mvHook({ f: "run-end", id: "old-1", cmd: "echo 옛날찾기", desc: "옛 기록 시험" });
+  for (let i = 0; i < 420; i++) await mvHook({ f: "run-end", id: `fill-${i}`, cmd: `true ${i}`, desc: "채우기" });
+  await open(mv);
+  await check("찾기: / 로 열고 이 화판·타임라인(400줄 밖)·세션·다른 세션 기록을 묶어 보이며, ↑ ↓ · Enter 로 그 자리로 감", async () => {
+    await evaluate(`document.activeElement?.blur(); 1`);
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "/", code: "Slash", windowsVirtualKeyCode: 191 });
+    await waitFor(`!document.getElementById('search').hidden && document.activeElement === document.getElementById('search-q')`);
+    const type = (q) => evaluate(`(() => { const i = document.getElementById('search-q'); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event('input')); return 1; })()`);
+    await type("상자");
+    const heads = await evaluate(`[...document.querySelectorAll('#search .s-head')].map((h) => h.textContent)`);
+    expect(heads[0].startsWith("이 화판") && (await evaluate(`document.querySelectorAll('#search mark').length`)) > 0, `묶음 ${heads}`);
+    // 400줄 밖 옛 줄로 간다. 타임라인 칸을 접어 두었어도 펴고 간다
+    await evaluate(`document.getElementById('search-q').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); document.getElementById('fold-tl').click(); 1`);
+    await waitFor(`document.getElementById('side').classList.contains('fold-tl')`);
+    await evaluate(`document.getElementById('search-open').click()`);
+    await type("옛날찾기");
+    await waitFor(`[...document.querySelectorAll('#search .s-head')].some((h) => h.textContent.startsWith('이 세션 타임라인'))`);
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await waitFor(`document.getElementById('search').hidden && !document.getElementById('side').classList.contains('fold-tl') && [...document.querySelectorAll('#tl-body li')].some((li) => li.textContent.includes('옛 기록 시험') && li.classList.contains('flash') && li.getBoundingClientRect().height > 0)`);
+    // 다른 세션 기록(서버)에서 고르면 그 세션으로 간다
+    await evaluate(`document.getElementById('search-open').click()`);
+    await type("rainbowbridge");
+    await waitFor(`[...document.querySelectorAll('#search .s-head')].some((h) => h.textContent.startsWith('다른 세션 기록')) && document.querySelectorAll('#search .s-opt').length > 0`, 4000);
+    const first = await evaluate(`document.querySelector('#search .s-opt[aria-selected="true"]')?.textContent || ''`);
+    expect(first.includes("rainbowbridge"), `고른 줄 ${first}`);
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await waitFor(`window.__atv.sid === ${JSON.stringify(other)} && [...document.querySelectorAll('#tl-body li.flash')].some((li) => li.textContent.includes('무지개다리 빌드'))`, 6000);
+    // 서버 찾기를 받기 전에 닫았다가 같은 말로 다시 열어도 결과가 온다
+    await evaluate(`document.getElementById('search-open').click()`);
+    await type("rainbowbridge");
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await evaluate(`document.getElementById('search-open').click()`);
+    await waitFor(`[...document.querySelectorAll('#search .s-opt')].some((o) => o.textContent.includes('rainbowbridge'))`, 4000);
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    // 끝난 상위 단계 아래의 끝난 단계로 가면 그 단계까지 펼쳐 보이고 초점을 준다(다음 그리기에도 남음)
+    await post("/api/mcp", { env: other, cwd, tool: "plan", input: { steps: [{ id: "p1", title: "위 단계", status: "done" }, { id: "p2", title: "숨은단계찾기", status: "done", parent: "p1" }, { id: "p3", title: "지금", status: "doing" }] } });
+    await waitFor(`!!document.querySelector('#plan-body li[data-id="p3"]') && !document.querySelector('#plan-body li[data-id="p2"]')`);
+    await evaluate(`document.getElementById('search-open').click()`);
+    await type("숨은단계찾기");
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await waitFor(`document.activeElement === document.querySelector('#plan-body li[data-id="p2"]')`);
+    await sleep(1300); // 1초 타이머가 계획을 다시 그려도 남는다
+    expect(await evaluate(`!!document.querySelector('#plan-body li[data-id="p2"]')`), "다음 그리기에서 단계가 다시 숨음");
+    // Ctrl + K 로 열고 Esc 로 닫으면 초점이 돌아간다
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "k", code: "KeyK", windowsVirtualKeyCode: 75, modifiers: 2 });
+    await waitFor(`!document.getElementById('search').hidden`);
+    await type("없을것같은낱말zzz");
+    await waitFor(`document.getElementById('search-status').textContent.includes('찾은 것이 없습니다') && document.getElementById('search-status').getAttribute('role') === 'status'`, 4000);
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await waitFor(`document.getElementById('search').hidden`);
+    return `묶음 ${heads.join(" / ")}`;
+  });
+  await open(sid);
 
   for (const theme of ["light", "dark"]) {
     await check(`${theme} 테마의 모든 버튼·범위 입력 대비가 4.5 이상임`, async () => {
