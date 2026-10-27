@@ -87,7 +87,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
         startOnLoad: false, securityLevel: "strict", theme: theme === "dark" ? "dark" : "default", htmlLabels: false, flowchart: { htmlLabels: false }, suppressErrorRendering: true,
         // 간트는 그리는 자리의 폭(따로 그리면 1200px)에 맞춰 늘어나 줄이면 글이 아주 작아진다. 폭을 정해 둔다
         gantt: { useWidth: 640, fontSize: 12, sectionFontSize: 12, barHeight: 18 },
-        themeVariables: { fontSize: "14px", pieSectionTextSize: "14px", pieLegendTextSize: "14px", pieTitleTextSize: "16px", ...Object.fromEntries(CHART_COLORS.map((c, i) => [`pie${i + 1}`, c])), pieOpacity: "0.9", xyChart: { plotColorPalette: CHART_COLORS.join(",") } },
+        themeVariables: { fontFamily: '"Pretendard Variable", system-ui, sans-serif', fontSize: "14px", pieSectionTextSize: "14px", pieLegendTextSize: "14px", pieTitleTextSize: "16px", ...Object.fromEntries(CHART_COLORS.map((c, i) => [`pie${i + 1}`, c])), pieOpacity: "0.9", xyChart: { plotColorPalette: CHART_COLORS.join(",") } },
       });
     }
     if (mermaidCache.has(src)) return mermaidCache.get(src);

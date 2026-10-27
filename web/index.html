@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>anytaskview</title>
-<link rel="icon" href="data:,">
+<title>AnyTaskView</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -132,6 +132,7 @@
     <dt>여러 글 한 번에</dt><dd>보내기 창에서 「모아 두기」 를 누른 뒤, 화면 아래 띠의 「한꺼번에 보내기」 를 누릅니다.</dd>
     <dt>프로젝트로 묶기</dt><dd>세션 목록 위 「+ 프로젝트」 로 만들고, 세션 줄을 끌어다 놓습니다.</dd>
     <dt>지난 화면 보기</dt><dd>맨 아래 재생 막대를 끕니다. 「실시간」 을 누르면 돌아옵니다.</dd>
+    <dt>그림 옮기기</dt><dd>그림이 칸보다 크면 마우스로 잡고 끌어 상하좌우로 옮깁니다. 「맞춤」 을 누르면 그림 전체가 칸에 들어갑니다.</dd>
   </dl>
 
   <h3>화면 표시의 뜻</h3>
@@ -211,10 +212,13 @@
       <li>Mermaid 그림 안의 요소는 상태 색이 바뀌지 않습니다. 그림 전체의 상태만 왼쪽 띠로 보입니다.</li>
       <li>화판이 여러 배치를 재 보고, 화면에 가장 크게 들어가면서 칸 모양에 가까운 것을 고릅니다.</li>
       <li>「맞춤」 은 그림을 화면에 맞추고, 「원래 크기」 는 100% 로 돌립니다.</li>
+      <li>그림이 칸보다 크면 마우스 커서가 손 모양이 되고, 잡고 끌어 옮길 수 있습니다. 끌다가 놓은 자리의 상자는 눌린 것으로 치지 않습니다(경로를 복사하지 않습니다).</li>
       <li>「따라가기」 를 켜면 진행 중인 상자로 화면이 옮겨 갑니다. 직접 스크롤하거나 누르면 꺼집니다.</li>
       <li>파일 위치가 붙은 상자·항목을 누르면 그 위치(경로:줄)가 복사됩니다. 상자에는 파일 이름만 보이고, 마우스를 올리면 전체 경로가 보입니다.</li>
       <li>계획의 끝난 단계는 숨기고 개수만 보입니다. 「끝난 단계 n개 보기」 로 폅니다.</li>
       <li>타임라인 위 단추로 종류별로 거르고, 「새 창」 으로 떼어 봅니다.</li>
+      <li>맨 위 주의 띠(입력 필요 · 승인 대기 · 막힘 · 실패)는 둘 이상이면 한 줄로 접히고 「외 N개 ▾」 로 폅니다. 「닫기 ×」 를 누르면 숨고, 새 알림이 오면 다시 보입니다.</li>
+      <li>승인 대기는 사용자가 다음 입력을 하면 「답 받음」 으로 풀립니다. 프로젝트 큰 그림의 승인 대기도 그 프로젝트에 든 대화에 입력이 오면 풀립니다. 끝난 세션에는 승인 대기 · 막힘을 띄우지 않습니다.</li>
     </ul>
   </details>
   <details>
@@ -230,15 +234,43 @@
 <dialog id="settings" aria-labelledby="settings-title">
   <form id="settings-form">
     <div class="phead"><h2 id="settings-title">설정</h2><span class="grow"></span><button type="button" id="settings-close" class="mini">닫기</button></div>
+    <p class="lead">화판 서버에 저장되어 이 PC 의 모든 탭이 같이 씁니다.</p>
+
     <h3>이어받기 문구</h3>
-    <p>자기만의 인계 절차가 있으면 정합니다. 새 대화의 첫 입력이 이 문구로 시작하면 그 키를 가진 앞 대화에 잇고, 그 키의 프로젝트에 넣습니다(처음 보는 키는 그 이름으로 새 프로젝트). <code>&lt;키&gt;</code> 자리에 공백 없는 이름이 오고, <code>&lt;키&gt;</code> 뒤에 글을 두면 그 글까지 맞아야 합니다. 쓰지 않으면 비워 둡니다.</p>
-    <label>첫 입력 문구<input id="cfg-phrase" maxlength="60" placeholder="예: 이어서 <키>" autocomplete="off"></label>
-    <label>인계 문서 경로(고르기)<input id="cfg-doc" maxlength="120" placeholder="예: /handoff/<키>.md" autocomplete="off"></label>
-    <p class="muted">이 경로의 문서를 고친 대화는 그 키를 갖게 되어, 다음에 그 키로 이어받는 대화가 이 대화에 이어집니다. 프로젝트에 든 대화가 고치면 키가 그 프로젝트에 붙습니다.</p>
+    <p>정한 문구로 시작한 새 대화를 같은 키의 앞 대화와 프로젝트에 잇습니다. 기본은 꺼져 있고, 쓰지 않으면 비워 둡니다.</p>
+    <dl class="fields">
+      <dt><label for="cfg-phrase">첫 입력 문구</label></dt>
+      <dd><input id="cfg-phrase" maxlength="60" placeholder="예: 이어서 <키>" autocomplete="off" aria-describedby="cfg-resume-more"></dd>
+      <dt><label for="cfg-doc">인계 문서 경로</label></dt>
+      <dd><input id="cfg-doc" maxlength="120" placeholder="고르기. 예: /handoff/<키>.md" autocomplete="off"></dd>
+    </dl>
+    <details id="cfg-resume-more">
+      <summary>자세히</summary>
+      <ul>
+        <li><code>&lt;키&gt;</code> 자리에는 공백 없는 이름이 옵니다.</li>
+        <li><code>&lt;키&gt;</code> 뒤에 글을 두면 그 글까지 맞아야 합니다.</li>
+        <li>새 대화의 첫 입력이 이 문구로 시작하면 그 키를 가진 앞 대화에 잇고, 그 키의 프로젝트에 넣습니다. 처음 보는 키는 그 이름으로 새 프로젝트를 만듭니다.</li>
+        <li>인계 문서 경로의 문서를 고친 대화는 그 키를 갖습니다. 다음에 그 키로 이어받는 대화가 이 대화에 이어집니다.</li>
+        <li>프로젝트에 든 대화가 인계 문서를 고치면 키가 그 프로젝트에 붙습니다.</li>
+      </ul>
+    </details>
+
     <h3>지난 세션 정리</h3>
-    <p>끝난 지 하루가 지난 대화는 목록 아래 「지난 세션」 에 접혀 들어갑니다. 끝난 뒤 아래 날수가 지나면 휴지통으로 옮깁니다(휴지통은 30일 뒤 비웁니다). 진행 중인 프로젝트에 든 대화는 옮기지 않습니다. 비우면 옮기지 않습니다.</p>
-    <label>휴지통으로 옮기기까지 날수<input id="cfg-trash" type="number" min="1" max="3650" step="1" placeholder="비우면 끔" inputmode="numeric"></label>
-    <div class="crow"><span class="grow"></span><button type="submit">저장</button></div>
+    <p>끝난 대화를 정한 날수가 지나면 휴지통으로 옮깁니다. 비우면 옮기지 않습니다.</p>
+    <dl class="fields">
+      <dt><label for="cfg-trash">휴지통으로 옮기기까지</label></dt>
+      <dd class="unit"><input id="cfg-trash" type="number" min="1" max="3650" step="1" placeholder="비우면 끔" inputmode="numeric" aria-describedby="cfg-trash-unit"><span id="cfg-trash-unit">일(기본 30)</span></dd>
+    </dl>
+    <details>
+      <summary>자세히</summary>
+      <ul>
+        <li>끝난 지 하루가 지난 대화는 목록 아래 「지난 세션」 에 접혀 들어갑니다.</li>
+        <li>이어진 대화는 모두 끝나고 날수가 지나야 한 줄째로 옮깁니다.</li>
+        <li>진행 중인 프로젝트에 든 대화는 옮기지 않습니다.</li>
+        <li>휴지통은 상태 폴더의 <code>trash</code> 이고, 30일 뒤 비웁니다.</li>
+      </ul>
+    </details>
+    <div class="crow"><span class="grow"></span><button type="submit" class="primary">저장</button></div>
   </form>
 </dialog>
 <div id="group-menu" role="menu" aria-label="메시지·프로젝트·지우기" hidden></div>

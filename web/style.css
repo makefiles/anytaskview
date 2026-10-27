@@ -5,6 +5,8 @@
   --s-todo: #7b818c; --s-doing: #1f5fd1; --s-done: #1a7f37; --s-fail: #c42b1c; --s-blocked: #c2410c; --s-wait: #9a6700;
   --band-bg: #fff4e5; --band-fg: #6b3500; --edge: #6b7280; --input-bg: #ffffff; --input-fg: #1f2328;
   --on-accent: #ffffff;
+  /* 역할별 색: 패널 제목(남보라 글자 + 머리띠 바탕), 보조 단추(옅은 파랑 바탕·파랑 글자), 지금 보는 것의 이름(자주) */
+  --title: #3730a3; --title-bg: #eef0ff; --btn-bg: #edf3fd; --btn-line: #c3d6f7; --btn-fg: #1f5fd1; --key: #a21caf;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -14,6 +16,7 @@
     --s-todo: #9aa1ab; --s-doing: #6ea8ff; --s-done: #56c26a; --s-fail: #ff6b5e; --s-blocked: #ff9a52; --s-wait: #e3b341;
     --band-bg: #3a2a12; --band-fg: #ffd9a8; --edge: #8b939e; --input-bg: #24282d; --input-fg: #e6e8eb;
     --on-accent: #15171a;
+    --title: #c7d2fe; --title-bg: #262a4d; --btn-bg: #1f2a3b; --btn-line: #34486a; --btn-fg: #8db8ff; --key: #f0abfc;
     color-scheme: dark;
   }
 }
@@ -23,15 +26,19 @@
   --s-todo: #9aa1ab; --s-doing: #6ea8ff; --s-done: #56c26a; --s-fail: #ff6b5e; --s-blocked: #ff9a52; --s-wait: #e3b341;
   --band-bg: #3a2a12; --band-fg: #ffd9a8; --edge: #8b939e; --input-bg: #24282d; --input-fg: #e6e8eb;
   --on-accent: #15171a;
+  --title: #c7d2fe; --title-bg: #262a4d; --btn-bg: #1f2a3b; --btn-line: #34486a; --btn-fg: #8db8ff; --key: #f0abfc;
   color-scheme: dark;
 }
 
-/* 글자는 14(본문)·13(타임라인·보조 글)·12(표지·코드·작은 단추) 셋만 쓰고, 줄 높이는 px 로 4px 격자에 맞춘다 */
+/* 글꼴: Pretendard(한글은 본고딕을 다듬은 꼴, 영문은 Inter 기반, OFL). 이 PC 밖에서 받지 않도록 web/vendor 에 묶었다.
+   주소의 ?v= 는 판이다(서버가 오래 캐시하므로 판을 바꾸면 이 값도 바꾼다) */
+@font-face { font-family: "Pretendard Variable"; font-weight: 45 920; font-style: normal; font-display: swap; src: url("/vendor/PretendardVariable.woff2?v=1.3.9") format("woff2-variations"); }
+/* 글자는 14(본문)·13(타임라인·보조 글)·12(표지·코드·작은 단추) 셋에 패널 제목(h2) 15 만 더해 쓰고, 줄 높이는 px 로 4px 격자에 맞춘다 */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; } /* display 를 정한 요소도 hidden 이면 숨긴다 */
 html, body { height: 100%; margin: 0; }
 body {
-  background: var(--bg); color: var(--fg); font: 14px/20px system-ui, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+  background: var(--bg); color: var(--fg); font: 14px/20px "Pretendard Variable", Pretendard, system-ui, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
   display: grid; grid-template-rows: auto auto 1fr auto; grid-template-columns: minmax(0, 1fr); overflow: hidden; /* 맨 위 줄의 최소 폭이 화면 폭을 밀어내지 않게 */
 }
 button, input, select {
@@ -41,10 +48,14 @@ button { padding: 3px 10px; cursor: pointer; }
 button:hover { border-color: var(--accent); }
 button:disabled { opacity: .55; cursor: default; border-color: var(--line); } /* 쓰기 열쇠가 없거나 프로젝트 화판의 「Claude 에 보내기」 */
 button.mini { padding: 0 8px; font-size: 12px; line-height: 22px; }
+/* 보조 단추(작은 단추·아이콘 단추): 옅은 파랑 바탕으로 글과 가른다. 주 단추(.primary)·보내기(.send)는 아래에서 따로 정한다 */
+button.mini, button.icon { background: var(--btn-bg); border-color: var(--btn-line); color: var(--btn-fg); }
+button.mini:not(:disabled):hover, button.icon:not(:disabled):hover { border-color: var(--accent); }
+button.mini:disabled, button.icon:disabled { background: var(--input-bg); border-color: var(--line); color: var(--input-fg); }
 button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 code, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; }
-h2 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--muted); margin: 0; }
+h2 { font-size: 15px; line-height: 20px; font-weight: 700; color: var(--title); margin: 0; }
 .muted { color: var(--muted); font-size: 13px; line-height: 18px; }
 
 /* 아이콘(.i)과 받는 쪽 로고(.logo): index.html 의 SVG 심벌. 아이콘은 글자색을 따른다 */
@@ -67,7 +78,7 @@ button.icon { padding: 5px 6px; }
 /* 띠(#band)가 숨으면 칸을 차지하지 않으므로, 각 영역의 행을 못박아 둔다 */
 #top { grid-row: 1; } #band { grid-row: 2; } main { grid-row: 3; } #replay { grid-row: 4; }
 #top { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 42px; }
-#headline { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex-shrink: 4; } /* 좁으면 먼저 줄어들어 오른쪽 단추를 밀어내지 않는다 */
+#headline { color: var(--title); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex-shrink: 4; } /* 좁으면 먼저 줄어들어 오른쪽 단추를 밀어내지 않는다 */
 #stall { color: var(--s-blocked); font-weight: 600; }
 .grow { flex: 1; }
 .chip { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; line-height: 18px; border: 1px solid currentColor; white-space: nowrap; }
@@ -85,6 +96,7 @@ button.icon { padding: 5px 6px; }
 #band .bi + .bi { margin-top: 2px; }
 #band .bi .ico { flex: none; width: 16px; text-align: center; }
 #band .bi .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#band .btools { margin-left: auto; display: flex; gap: 6px; flex: none; }
 #band button { color: var(--band-fg); background: transparent; border-color: currentColor; }
 
 /* 세 칸과 그 사이 경계선. 폭은 app.js 가 변수로 정한다 */
@@ -100,7 +112,11 @@ main.fold-left #split-left { display: none; }
 .split.h:hover, .split.h:focus-visible, .split.h.drag { background-size: 100% 2px; }
 
 #sessions { overflow: auto; padding: 8px; background: var(--panel); min-width: 0; }
+/* 패널 머리줄: 머리띠 바탕을 패널 끝까지 깔고, 목록을 내려도 위에 남긴다 */
+#sessions > .phead { position: sticky; top: -8px; z-index: 2; margin: -8px -8px 6px; padding: 6px 8px; background: var(--title-bg); }
+#plan > .phead, #timeline > .phead { margin: -10px -12px 8px; padding: 6px 12px; background: var(--title-bg); }
 main.fold-left #sessions { padding: 8px 4px; }
+main.fold-left #sessions > .phead { margin: -8px -4px 6px; padding: 6px 4px; }
 main.fold-left #sessions h2, main.fold-left .sess .txt, main.fold-left #group-add, main.fold-left #sess-sort, main.fold-left .pastfold, main.fold-left .smenu, main.fold-left .gempty { display: none; }
 main.fold-left #sessions .phead { justify-content: center; }
 main.fold-left .sess { padding: 6px 0; text-align: center; }
@@ -128,6 +144,9 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #canvas { position: absolute; left: 16px; top: 16px; transform-origin: 0 0; }
 #empty { position: absolute; inset: 40% 0 auto; text-align: center; color: var(--muted); }
 /* 선 규칙은 선 층(svg.edges)에만 건다. Mermaid 그림과 상자 윤곽의 path 까지 칠하지 않게 */
+/* 그림이 칸보다 크면 잡아 끌 수 있다는 손 모양(상자의 「복사」 커서는 그대로) */
+#canvas-scroll.pannable { cursor: grab; }
+#canvas-scroll.panning, #canvas-scroll.panning * { cursor: grabbing !important; user-select: none; }
 #canvas svg.edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 #canvas svg.edges path { fill: none; stroke: var(--edge); stroke-width: 1.5; }
 #canvas svg.edges path.st-doing { stroke: var(--s-doing); stroke-width: 2.5; }
@@ -209,10 +228,11 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #side.fold-plan.fold-tl { grid-template-rows: auto auto; align-content: start; }
 #side.fold-plan #split-side, #side.fold-tl #split-side { display: none; }
 #side.fold-plan #plan > :not(.phead), #side.fold-tl #timeline > :not(.phead) { display: none; }
-#side.fold-plan #plan .phead, #side.fold-tl #timeline .phead { margin: 0; }
+#side.fold-plan #plan .phead, #side.fold-tl #timeline .phead { margin: -10px -12px; }
 #plan, #timeline { padding: 10px 12px; overflow: auto; min-height: 0; }
 #plan-now { position: sticky; top: -10px; z-index: 1; margin: -4px -12px 6px; padding: 4px 12px; background: var(--panel); border-bottom: 1px solid var(--panel-2); font-weight: 600; display: flex; gap: 6px; }
 #plan-now .ico { flex: none; width: 14px; text-align: center; }
+#plan-now .key { color: var(--key); }
 .tree { list-style: none; margin: 0; padding: 0; }
 .tree .tree { padding-left: 16px; }
 .tree .step { padding: 2px 4px; border-radius: 4px; }
@@ -253,7 +273,7 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #measure { position: absolute; left: -10000px; top: 0; visibility: hidden; }
 
 /* 맨 위 줄의 세션 이름(눌러서 바꾸기)과 묶음·보내기 */
-#sess-name { border: 0; background: transparent; padding: 0 2px; font-weight: 600; min-width: 4em; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+#sess-name { border: 0; background: transparent; padding: 0 2px; font-weight: 600; min-width: 4em; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--key); }
 #sess-name:hover { text-decoration: underline dotted; }
 #name-form { display: flex; gap: 4px; }
 #name-input { width: 24ch; padding: 0 6px; }
@@ -265,7 +285,7 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .pastfold { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 2px 4px; margin: 2px 0; font-size: 13px; line-height: 18px; color: var(--muted); }
 .pastfold:hover { color: var(--fg); text-decoration: underline dotted; }
 .ghead .gtog { flex: none; border: 0; background: transparent; padding: 0 2px; font-size: 12px; line-height: 20px; color: var(--muted); }
-.ghead .gfold { flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; padding: 0 2px; font-size: 12px; line-height: 20px; font-weight: 600; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ghead .gfold { flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; padding: 0 2px; font-size: 12px; line-height: 20px; font-weight: 600; color: var(--key); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ghead button.gfold:hover { color: var(--fg); text-decoration: underline dotted; }
 .ghead .gfold.sel { color: var(--accent); }
 .ghead .pmenu { flex: none; opacity: 0; }
@@ -326,16 +346,20 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 #help, #settings { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 10px 16px 14px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
 #help::backdrop, #settings::backdrop { background: rgba(0, 0, 0, .35); }
 #help h3, #settings h3 { font-size: 14px; line-height: 20px; font-weight: 600; margin: 12px 0 4px; }
-#settings p { font-size: 13px; line-height: 20px; }
+#settings input { padding: 4px 8px; width: 100%; }
 #help p, #settings p { margin: 0; }
-#settings label { display: grid; gap: 2px; margin: 8px 0 4px; font-size: 13px; line-height: 20px; }
-#settings input { padding: 2px 6px; }
+#settings dl.fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px 16px; margin: 10px 0; }
+#settings dl.fields dt { font-weight: 600; }
+#settings dl.fields dd { margin: 0; }
+#settings dd.unit { display: flex; align-items: center; gap: 8px; }
+#settings dd.unit input { width: 8em; }
+#settings dd.unit span { color: var(--muted); }
 #settings .crow { display: flex; margin-top: 10px; }
 /* 도움말: 자주 하는 일·표시의 뜻·단축키는 왼쪽 이름, 오른쪽 설명의 두 칸. 자세한 규칙은 접어 둔다 */
-#help { width: min(720px, calc(100vw - 32px)); padding: 12px 20px 18px; }
-#help .lead, #help li, #help dt, #help dd { font-size: 14px; line-height: 22px; }
-#help h3 { margin: 18px 0 6px; }
-#help > .phead { position: sticky; top: -12px; z-index: 1; margin: -12px 0 6px; padding: 12px 0 6px; background: var(--panel); } /* 내려 읽어도 「닫기」 가 보인다 */
+#help, #settings { width: min(720px, calc(100vw - 32px)); padding: 12px 20px 18px; }
+#help .lead, #help li, #help dt, #help dd, #settings .lead, #settings p, #settings li, #settings dt, #settings dd { font-size: 14px; line-height: 22px; }
+#help h3, #settings h3 { margin: 18px 0 6px; }
+#help > .phead, #settings-form > .phead { position: sticky; top: -12px; z-index: 1; margin: -12px 0 6px; padding: 12px 0 6px; background: var(--panel); } /* 내려 읽어도 「닫기」 가 보인다 */
 #help dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; }
 #help dd { margin: 0; }
 #help dl.tasks dt { font-weight: 600; }
@@ -343,11 +367,11 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 #help .legend [class*="st-"] { color: var(--st); font-weight: 600; }
 #help .legend .badge { cursor: default; box-shadow: none; }
 #help dl.keys dd { color: var(--muted); }
-#help details { border-top: 1px solid var(--line); }
-#help details:last-of-type { border-bottom: 1px solid var(--line); }
-#help summary { cursor: pointer; padding: 8px 0; font-weight: 600; font-size: 14px; line-height: 22px; }
-#help details ul { margin: 0 0 12px; padding-left: 20px; }
-#help li + li { margin-top: 4px; }
+#help details, #settings details { border-top: 1px solid var(--line); }
+#help details:last-of-type, #settings details { border-bottom: 1px solid var(--line); }
+#help summary, #settings summary { cursor: pointer; padding: 8px 0; font-weight: 600; font-size: 14px; line-height: 22px; }
+#help details ul, #settings details ul { margin: 0 0 12px; padding-left: 20px; }
+#help li + li, #settings li + li { margin-top: 4px; }
 kbd { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; line-height: 16px; padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); }
 
 /* 세션 줄과 묶음: 줄을 끌어 묶음(머리나 그 아래 어디든)에 놓는다. ⋯ 는 줄에 마우스를 올리거나 초점이 있을 때 보인다 */

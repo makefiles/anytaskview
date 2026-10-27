@@ -6,7 +6,7 @@
 - Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md). Agents given only this repository URL should follow INSTALL.md from the top; the two commands alone do not start or open the board.
 - OpenAI Codex (CLI, desktop app, VS Code) works too: `codex plugin marketplace add makefiles/anytaskview`, `codex plugin add anytaskview@anytaskview`, allow the five board tools in `~/.codex/config.toml`, and trust the hooks in `/hooks`. See the Codex part of [INSTALL.md](INSTALL.md).
 - Security: the board listens on 127.0.0.1 only and every request needs a token; nothing is sent off the machine. Details and limits: [SECURITY.md](SECURITY.md).
-- License: Apache-2.0. Bundled browser libraries keep their own licenses (ELK: EPL-2.0, Mermaid: MIT).
+- License: Apache-2.0. Bundled browser libraries and the font keep their own licenses (ELK: EPL-2.0, Mermaid: MIT, Pretendard: SIL OFL 1.1).
 - Trademarks: Claude and the Claude logo are trademarks of Anthropic, PBC; Codex, ChatGPT and the OpenAI logo are trademarks of OpenAI. The board shows these logos (the OpenAI logo recoloured blue for Codex sessions) only to tell which agent a session belongs to. anytaskview is not affiliated with or endorsed by either company.
 
 ---
@@ -25,7 +25,7 @@ Claude Code 가 일하는 동안 지금 하는 일을 이 PC 의 브라우저 �
 - Linux 에서 만들고 시험했습니다. macOS 는 시험하지 않았고, Windows 는 WSL 에서 씁니다.
 - Chrome·Edge·Firefox 같은 최근 브라우저
 
-실행에 필요한 npm 패키지는 없습니다(브라우저 라이브러리는 `web/vendor/` 에 들어 있습니다).
+실행에 필요한 npm 패키지는 없습니다(브라우저 라이브러리와 글꼴은 `web/vendor/` 에 들어 있습니다).
 
 ## 설치
 
@@ -69,6 +69,7 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 - 가운데: Claude 가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 상자를 누르면 파일 경로를 복사합니다.
 - 오른쪽: 계획(지금 단계는 위에 고정)과 타임라인(사실·메모·보낸 글). 타임라인은 「새 창」 으로 떼어 볼 수 있습니다.
 - 아래: 재생 막대. 지난 상태를 처음부터 다시 봅니다.
+- 맨 위 주의 띠(입력 필요·승인 대기·막힘·실패)는 한 줄로 접혀 「외 N개」 로 펴고, 「닫기」 로 숨깁니다(새 알림이 오면 다시 보임). 그림이 칸보다 크면 마우스로 잡아 끌어 옮깁니다.
 - 상자나 단계에 마우스를 올리거나 초점을 두면 「보내기」 가 뜹니다. 여러 글을 「모아 두기」 로 모았다가 한꺼번에 보낼 수도 있습니다. 쓰다 둔 글과 모은 글은 브라우저를 닫아도 남습니다.
 - 맨 위 「설정」 에서 이어받기 문구(예: `이어서 <키>`)를 정하면, 그 문구로 시작한 대화를 같은 키의 앞 대화와 프로젝트에 잇습니다. 기본은 꺼져 있습니다.
 - 끝난 뒤 30일이 지난 대화는 휴지통(`~/.local/state/anytaskview/trash/`, 30일 뒤 비움)으로 옮깁니다. 진행 중인 프로젝트에 든 대화는 남깁니다. 날수는 「설정」 에서 바꾸거나 끕니다.
@@ -101,6 +102,6 @@ claude --plugin-dir .        # 이 폴더를 한 세션에만 붙여 시험
 
 ## 라이선스
 
-Apache License 2.0 ([LICENSE](LICENSE)). `web/vendor/` 의 ELK(EPL-2.0)와 Mermaid(MIT)는 각자의 라이선스를 따릅니다([web/vendor/README.md](web/vendor/README.md)).
+Apache License 2.0 ([LICENSE](LICENSE)). `web/vendor/` 의 ELK(EPL-2.0), Mermaid(MIT), 글꼴 Pretendard(SIL OFL 1.1)는 각자의 라이선스를 따릅니다([web/vendor/README.md](web/vendor/README.md)).
 
 Claude 와 Claude 로고는 Anthropic, PBC 의, Codex·ChatGPT 와 OpenAI 로고는 OpenAI 의 상표입니다. 화판은 세션이 어느 에이전트의 것인지 알아보게 하려고만 이 로고를 보이며(Codex 세션에는 OpenAI 로고를 파란색으로 칠해 씁니다), anytaskview 는 두 회사와 관계가 없고 두 회사의 보증을 받지 않았습니다.

@@ -1204,3 +1204,48 @@ test("지난 대화 자동 휴지통: 이어진 대화는 줄째로 보고, 설�
     assert.equal(await f.board.sweep(now), 0, `틀린 날수 ${JSON.stringify(bad)}`);
   }
 });
+
+test("승인 대기: 프로젝트에 든 대화에 사용자 입력이 오면 큰 그림의 대기도 「답 받음」, 다른 프로젝트·작업 알림은 건드리지 않는다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const P = (1 << 22) + 300;
+  await f.hook("W1", { f: "start", cwd: "/w" }, { pid: P });
+  await f.hook("W2", { f: "start", cwd: "/w" }, { pid: P + 1 });
+  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
+  const B = JSON.parse((await board(f, { op: "proj-new", name: "나" })).text).pid;
+  await board(f, { op: "proj-set", sids: ["W1"], pid: A });
+  await board(f, { op: "proj-set", sids: ["W2"], pid: B });
+  await f.mcp("plan", { steps: [{ id: "u1", title: "단위", status: "doing" }], project: A }, { pid: P, env: "W1" });
+  await f.mcp("note", { text: "결정 기다림", kind: "wait", on: "u1", project: A }, { pid: P, env: "W1" });
+  await f.mcp("plan", { steps: [{ id: "v1", title: "다른 단위", status: "wait" }], project: B }, { pid: P + 1, env: "W2" });
+  const wait = (pid, id) => f.board.pboards.get(pid).scene.items[id];
+  assert.equal(wait(A, "u1").status, "wait");
+  await f.hook("W1", { f: "prompt", text: "<task-notification>", sys: true }, { pid: P });
+  assert.equal(wait(A, "u1").answered, undefined, "작업 알림은 사용자 입력이 아니다");
+  await f.hook("W1", { f: "prompt", text: "1번으로 가자" }, { pid: P });
+  assert.equal(wait(A, "u1").answered, true);
+  assert.equal(wait(B, "v1").answered, undefined, "다른 프로젝트는 그대로");
+  await f.restart();
+  assert.equal(wait(A, "u1").answered, true, "기록에 남아 다시 띄워도 같다");
+});
+
+test("승인 대기: 이어받기 문구로 이 입력에서 막 들어간 프로젝트의 대기는 풀지 않고, 그다음 입력부터 푼다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const P = (1 << 22) + 400;
+  await board(f, { op: "config-set", resume: { phrase: "핸드온 <키>" } });
+  await f.hook("H0", { f: "start", cwd: "/w" }, { pid: P });
+  await f.hook("H0", { f: "prompt", text: "핸드온 zz" }, { pid: P });
+  const pid = f.board.projects.members.H0.pid;
+  await f.mcp("plan", { steps: [{ id: "u1", title: "결정", status: "wait" }], project: pid }, { pid: P, env: "H0" });
+  await f.hook("H0", { f: "end", reason: "other" }, { pid: P });
+  await f.hook("H1", { f: "start", cwd: "/w" }, { pid: P + 1 });
+  await f.hook("H1", { f: "prompt", text: "핸드온 zz" }, { pid: P + 1 });
+  assert.equal(f.board.projects.members.H1.pid, pid, "시험 전제: 문구로 같은 프로젝트에 들어감");
+  assert.equal(f.board.pboards.get(pid).scene.items.u1.answered, undefined, "이어받는 첫 입력은 답이 아니다");
+  await f.hook("H1", { f: "prompt", text: "그걸로 하자" }, { pid: P + 1 });
+  assert.equal(f.board.pboards.get(pid).scene.items.u1.answered, true);
+  // 승인 대기를 다시 보내면(같은 상태여도) 새 질문이다
+  await f.mcp("plan", { steps: [{ id: "u1", status: "wait" }], project: pid }, { pid: P + 1, env: "H1" });
+  assert.equal(f.board.pboards.get(pid).scene.items.u1.answered, undefined);
+});

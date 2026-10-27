@@ -1334,6 +1334,82 @@ async function main() {
   });
   await open(sid);
 
+  // 14: 글꼴·탭 아이콘·역할별 색, 주의 띠 접기·닫기, 승인 대기, 설정 창, 그림 끌어 옮기기
+  await check("글꼴·탭: Pretendard 를 이 서버에서 받아 쓰고, 탭 아이콘과 「· AnyTaskView」 제목이 있음", async () => {
+    const r = await evaluate(`(async () => {
+      const faces = await document.fonts.load('14px "Pretendard Variable"', '가A1');
+      const icon = document.querySelector('link[rel="icon"]')?.getAttribute('href');
+      const res = await fetch(icon);
+      return { faces: faces.length, family: getComputedStyle(document.body).fontFamily, icon, status: res.status, type: res.headers.get('content-type'), title: document.title };
+    })()`);
+    expect(r.faces > 0 && r.family.startsWith('"Pretendard Variable"'), `글꼴 ${r.faces} ${r.family}`);
+    expect(r.icon === "/icon.svg" && r.status === 200 && r.type.startsWith("image/svg+xml"), `아이콘 ${r.icon} ${r.status} ${r.type}`);
+    expect(r.title.endsWith(" · AnyTaskView"), `제목 ${r.title}`);
+    return r.title;
+  });
+  await check("역할별 색: 패널 제목·보조 단추·지금 세션 이름이 각자의 색을 씀", async () => {
+    const r = await evaluate(`(() => {
+      const color = (v, prop = 'color') => { const i = document.createElement('i'); i.style[prop] = v; document.body.append(i); const c = getComputedStyle(i)[prop]; i.remove(); return c; };
+      const h2 = getComputedStyle(document.querySelector('#plan h2')), btn = getComputedStyle(document.getElementById('zoom-fit'));
+      return { h2: h2.color, title: color('var(--title)'), head: getComputedStyle(document.querySelector('#plan > .phead')).backgroundColor, titleBg: color('var(--title-bg)', 'backgroundColor'),
+        btnBg: btn.backgroundColor, wantBg: color('var(--btn-bg)', 'backgroundColor'), btnFg: btn.color, wantFg: color('var(--btn-fg)'),
+        name: getComputedStyle(document.getElementById('sess-name')).color, key: color('var(--key)') };
+    })()`);
+    expect(r.h2 === r.title && r.head === r.titleBg, `제목 ${r.h2}/${r.title} 머리띠 ${r.head}/${r.titleBg}`);
+    expect(r.btnBg === r.wantBg && r.btnFg === r.wantFg, `보조 단추 ${r.btnBg}/${r.wantBg} ${r.btnFg}/${r.wantFg}`);
+    expect(r.name === r.key, `세션 이름 ${r.name}/${r.key}`);
+  });
+  await check("주의 띠: 둘 이상이면 한 줄로 접히고 「외 N개」 로 펴며, 닫으면 숨고 새 항목이 오면 다시 보임. 끝난 세션은 승인 대기를 띄우지 않음", async () => {
+    const bs = `band-${process.pid}`;
+    await post("/api/hook", { sid: bs, pid: process.pid + 70, fact: { f: "start", cwd: "/tmp/띠", source: "startup" } });
+    await post("/api/mcp", { env: bs, cwd, tool: "plan", input: { steps: [{ id: "q1", title: "첫 승인", status: "wait" }] } });
+    await post("/api/mcp", { env: bs, cwd, tool: "draw", input: { ops: [{ id: "p1", kind: "box", label: "둘째", status: "wait" }, { id: "p2", kind: "box", label: "셋째", status: "blocked" }] } });
+    await open(bs);
+    await waitFor(`!document.getElementById('band').hidden && document.querySelectorAll('#band .bi').length === 1 && document.querySelector('#band .btoggle')?.textContent === '외 2개 ▾'`);
+    await evaluate(`document.querySelector('#band .btoggle').click()`);
+    await waitFor(`document.querySelectorAll('#band .bi').length === 3 && document.activeElement?.classList.contains('btoggle') && document.activeElement.getAttribute('aria-expanded') === 'true'`);
+    await evaluate(`[...document.querySelectorAll('#band button')].find((b) => b.textContent === '닫기 ×').click()`);
+    await waitFor(`document.getElementById('band').hidden && document.activeElement?.closest('#top') !== null && document.activeElement.tagName === 'BUTTON'`);
+    await post("/api/mcp", { env: bs, cwd, tool: "draw", input: { ops: [{ id: "p3", kind: "box", label: "넷째", status: "fail" }] } });
+    await waitFor(`!document.getElementById('band').hidden && document.querySelectorAll('#band .bi').length === 4`);
+    // 다시 닫은 뒤 사용자 입력으로 승인 대기가 풀리면 띠는 숨은 채, 같은 단계에 승인 대기를 다시 걸면 새 알림으로 보인다
+    await evaluate(`[...document.querySelectorAll('#band button')].find((b) => b.textContent === '닫기 ×').click()`);
+    await waitFor(`document.getElementById('band').hidden`);
+    await post("/api/hook", { sid: bs, pid: process.pid + 70, fact: { f: "prompt", text: "좋아요" } });
+    await sleep(300);
+    expect(await evaluate(`document.getElementById('band').hidden`), "풀린 뒤 띠가 다시 보임");
+    await post("/api/mcp", { env: bs, cwd, tool: "plan", input: { steps: [{ id: "q1", status: "wait" }] } });
+    await waitFor(`!document.getElementById('band').hidden && [...document.querySelectorAll('#band .bi .txt')].some((t) => t.textContent === '승인 대기: 첫 승인')`);
+    await post("/api/hook", { sid: bs, pid: process.pid + 70, fact: { f: "prompt", text: "다시 좋아요" } });
+    await waitFor(`![...document.querySelectorAll('#band .bi .txt')].some((t) => t.textContent.startsWith('승인 대기'))`);
+    await post("/api/hook", { sid: bs, pid: process.pid + 70, fact: { f: "end", reason: "other" } });
+    await waitFor(`![...document.querySelectorAll('#band .bi .txt')].some((t) => /^(승인 대기|막힘)/.test(t.textContent)) && [...document.querySelectorAll('#band .bi .txt')].some((t) => t.textContent.startsWith('실패'))`);
+  });
+  await check("설정 창: 도움말처럼 소개·항목 두 칸·「자세히」 접기", async () => {
+    await evaluate(`document.getElementById('settings-open').click()`);
+    await waitFor(`document.getElementById('settings').open`);
+    const r = await evaluate(`({ lead: !!document.querySelector('#settings .lead'), fields: document.querySelectorAll('#settings dl.fields dt').length, details: document.querySelectorAll('#settings details').length, w: document.getElementById('settings').getBoundingClientRect().width })`);
+    await evaluate(`document.getElementById('settings-close').click()`);
+    expect(r.lead && r.fields === 3 && r.details === 2 && r.w > 600, JSON.stringify(r));
+  });
+  await check("그림 끌어 옮기기: 칸보다 크면 손 모양이 되고, 끌면 스크롤이 옮겨지며 끌기 뒤 클릭은 경로를 복사하지 않음", async () => {
+    await open(`rich-${process.pid}`);
+    await settledPositions();
+    for (let i = 0; i < 4; i++) await evaluate(`document.getElementById('zoom-in').click()`);
+    await waitFor(`document.getElementById('canvas-scroll').classList.contains('pannable')`);
+    const box = await evaluate(`(() => { const s = document.getElementById('canvas-scroll'); s.scrollLeft = 0; s.scrollTop = 0; const r = s.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await evaluate(`window.__copied = 0; navigator.clipboard.writeText = async () => { window.__copied++; };`);
+    const mouse = (type, x, y) => cdp.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+    await mouse("mousePressed", box.x, box.y);
+    for (let k = 1; k <= 6; k++) await mouse("mouseMoved", box.x - k * 25, box.y - k * 15);
+    await mouse("mouseReleased", box.x - 150, box.y - 90);
+    const after = await evaluate(`({ left: document.getElementById('canvas-scroll').scrollLeft, top: document.getElementById('canvas-scroll').scrollTop, panning: document.getElementById('canvas-scroll').classList.contains('panning'), copied: window.__copied })`);
+    expect(after.left >= 140 && after.top >= 80 && !after.panning && after.copied === 0, JSON.stringify(after));
+    await evaluate(`document.getElementById('zoom-100').click()`);
+    return `스크롤 ${after.left}·${after.top}`;
+  });
+  await open(sid);
+
   for (const theme of ["light", "dark"]) {
     await check(`${theme} 테마의 모든 버튼·범위 입력 대비가 4.5 이상임`, async () => {
       await evaluate(`(() => {

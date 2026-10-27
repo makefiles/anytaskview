@@ -321,3 +321,31 @@ test("draw: 표·상자 모양·아이콘을 받고 한도·모르는 값은 거
   assert.doesNotMatch(h.note({ text: "자료 없음", kind: "blocked", on: "m" }), /상태가 없음/);
   assert.equal(h.scene.items.m.status, "blocked");
 });
+
+test("승인 대기: 사용자 입력이면 단계와 그림 부품의 대기를 「답 받음」 으로, 상태가 바뀌거나 새 대기 메모면 다시 묻는다", () => {
+  const h = harness();
+  h.fact({ f: "start", cwd: "/w" });
+  h.plan({ steps: [{ id: "s1", title: "고르기", status: "wait" }] });
+  h.draw({ ops: [{ id: "opt", kind: "table", label: "방안", status: "wait" }, { id: "b", kind: "box", status: "wait" }, { id: "e", kind: "edge", from: "opt", to: "b", status: "wait" }] });
+  h.fact({ f: "prompt", text: "2번으로" });
+  assert.deepEqual(["s1", "opt", "b", "e"].map((id) => !!h.scene.items[id].answered), [true, true, true, false], "선의 대기 무늬는 그대로");
+  assert.deepEqual(h.replay().items, h.scene.items);
+  // 상태가 바뀌었다가 다시 대기가 되면 새 질문이다
+  h.draw({ ops: [{ id: "b", status: "doing" }] });
+  h.draw({ ops: [{ id: "b", status: "wait" }] });
+  assert.equal(h.scene.items.b.answered, undefined);
+  // 이미 답 받은 대기에 새 승인 대기 메모가 오면 다시 묻는다(단계·부품 모두)
+  h.note({ text: "하나 더 고르기", kind: "wait", on: "opt" });
+  h.note({ text: "다시 승인", kind: "wait", on: "s1" });
+  assert.equal(h.scene.items.opt.answered, undefined);
+  assert.equal(h.scene.items.s1.answered, undefined);
+  // 같은 상태여도 승인 대기를 다시 보내면 새 질문이다(부품·단계)
+  h.fact({ f: "prompt", text: "네" });
+  h.draw({ ops: [{ id: "opt", status: "wait", rows: [["새 안"]] }] });
+  h.plan({ steps: [{ id: "s1", status: "wait" }] });
+  assert.equal(h.scene.items.opt.answered, undefined);
+  assert.equal(h.scene.items.s1.answered, undefined);
+  // 작업 알림(sys)은 사용자 입력이 아니다
+  h.fact({ f: "prompt", text: "<task-notification>", sys: true });
+  assert.equal(h.scene.items.opt.answered, undefined);
+});

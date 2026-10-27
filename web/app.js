@@ -279,6 +279,36 @@ scroller.addEventListener("wheel", (ev) => {
   setZoom(view.zoom * (ev.deltaY < 0 ? 1.1 : 1 / 1.1), ev.clientX - r.left, ev.clientY - r.top);
 }, { passive: false });
 scroller.addEventListener("pointerdown", () => { if (view.follow) setFollow(false); });
+// 끌어 옮기기: 그림이 칸보다 크면 왼쪽 단추로 잡고 끌어 상하좌우로 옮긴다. 4px 넘게 움직여야 끌기로 보고,
+// 끌기 뒤의 클릭은 막는다(상자를 누르면 경로를 복사하므로). 단추·입력 칸·말풍선 위에서는 끌지 않는다
+const pan = { id: null, x: 0, y: 0, left: 0, top: 0, moved: false };
+const scrollable = () => scroller.scrollWidth > scroller.clientWidth + 1 || scroller.scrollHeight > scroller.clientHeight + 1;
+scroller.addEventListener("pointerdown", (ev) => {
+  if (ev.button !== 0 || ev.pointerType === "touch" || !scrollable() || ev.target.closest("button, input, textarea, a, .badge")) return;
+  Object.assign(pan, { id: ev.pointerId, x: ev.clientX, y: ev.clientY, left: scroller.scrollLeft, top: scroller.scrollTop, moved: false });
+});
+scroller.addEventListener("pointermove", (ev) => {
+  if (ev.pointerId !== pan.id) return;
+  if (!(ev.buttons & 1)) { panEnd(ev); return; } // 칸 밖에서 놓아 pointerup 을 못 받았으면 여기서 끝낸다
+  const dx = ev.clientX - pan.x, dy = ev.clientY - pan.y;
+  if (!pan.moved && Math.hypot(dx, dy) < 4) return;
+  if (!pan.moved) { pan.moved = true; scroller.setPointerCapture(ev.pointerId); scroller.classList.add("panning"); }
+  scroller.scrollLeft = pan.left - dx;
+  scroller.scrollTop = pan.top - dy;
+});
+function panEnd(ev) {
+  if (ev.pointerId !== pan.id) return;
+  pan.id = null;
+  scroller.classList.remove("panning");
+  // 끌기 바로 뒤에 오는 클릭 하나만 막는다(클릭이 오지 않는 경우에 다음 진짜 클릭을 먹지 않게 다음 차례에 푼다)
+  if (pan.moved) { pan.swallow = true; setTimeout(() => { pan.swallow = false; }, 0); }
+}
+scroller.addEventListener("click", (e) => { if (pan.swallow) { e.stopPropagation(); e.preventDefault(); } }, { capture: true });
+scroller.addEventListener("pointerup", panEnd);
+scroller.addEventListener("pointercancel", panEnd);
+const panRO = new ResizeObserver(() => scroller.classList.toggle("pannable", scrollable()));
+panRO.observe(sizer);
+panRO.observe(scroller);
 scroller.addEventListener("keydown", () => { if (view.follow) setFollow(false); });
 $("zoom-in").addEventListener("click", () => setZoom(view.zoom * 1.25));
 $("zoom-out").addEventListener("click", () => setZoom(view.zoom / 1.25));
@@ -498,6 +528,8 @@ const fmtWhen = (t, now) => (new Date(t).toDateString() === new Date(now).toDate
 const BAND_RANK = { input: 0, wait: 0, blocked: 1, fail: 2 };
 function bandItems(scene) {
   const out = [];
+  // 끝난 세션의 승인 대기·막힘은 더 할 수 있는 일이 없으므로 띄우지 않는다(실패는 남긴다)
+  const live = scene.sess.status !== "ended";
   if (scene.sess.status === "input") {
     const last = [...scene.timeline].reverse().find((e) => e.type === "fact" && e.f === "notify");
     out.push({ kind: "input", ico: "?", text: `입력 필요${last && last.text ? ": " + last.text : ""}` });
@@ -505,8 +537,8 @@ function bandItems(scene) {
   for (const it of Object.values(scene.items)) {
     if (it.kind === "edge") continue;
     const name = it.kind === "step" ? it.title : it.label || it.id;
-    if (it.status === "wait" && !it.answered) out.push({ kind: "wait", ico: ST_ICO.wait, text: `승인 대기: ${name}`, id: it.id, step: it.kind === "step", ord: it.ord });
-    else if (it.status === "blocked") out.push({ kind: "blocked", ico: ST_ICO.blocked, text: `막힘: ${name}${it.note ? " · " + it.note : ""}`, id: it.id, step: it.kind === "step", ord: it.ord });
+    if (it.status === "wait" && !it.answered) { if (live) out.push({ kind: "wait", ico: ST_ICO.wait, text: `승인 대기: ${name}`, id: it.id, step: it.kind === "step", ord: it.ord }); }
+    else if (it.status === "blocked") { if (live) out.push({ kind: "blocked", ico: ST_ICO.blocked, text: `막힘: ${name}${it.note ? " · " + it.note : ""}`, id: it.id, step: it.kind === "step", ord: it.ord }); }
     else if (it.status === "fail") out.push({ kind: "fail", ico: ST_ICO.fail, text: `실패: ${name}`, id: it.id, step: it.kind === "step", ord: it.ord });
   }
   return out.sort((a, b) => BAND_RANK[a.kind] - BAND_RANK[b.kind] || (b.ord || 0) - (a.ord || 0));
@@ -791,16 +823,17 @@ function renderTop(scene, now) {
   stall.textContent = `멈춘 듯 · ${fmtDur(quiet)}째 사건 없음`;
 
   const band = bandItems(scene), b = $("band");
-  b.hidden = !band.length;
+  b.hidden = bandHidden(band);
   // 1초마다 부르므로 내용이 같으면 다시 만들지 않는다(누르는 사이에 단추가 바뀌면 클릭이 사라진다)
-  const bandKey = JSON.stringify(band.map((x) => [x.kind, x.text, x.id]));
+  const bandKey = JSON.stringify([bandUi.open, band.map((x) => [x.kind, x.text, x.id])]);
   if (bandKey !== renderTop.bandKey) {
     renderTop.bandKey = bandKey;
     b.replaceChildren(...bandRows(band));
+    if (bandUi.refocus) { bandUi.refocus = false; b.querySelector(".btoggle")?.focus(); }
   }
 
   const s = state.sessions.get(state.sid);
-  const name = proj ? proj.name : s ? sessName(s) : base(scene.meta.cwd) || "anytaskview";
+  const name = proj ? proj.name : s ? sessName(s) : base(scene.meta.cwd) || "";
   if ($("name-form").hidden) $("sess-name").textContent = proj || s ? name : "";
   $("sess-name").title = proj ? "눌러서 이 프로젝트의 이름을 바꿉니다" : "눌러서 이 세션의 이름을 바꿉니다";
   $("sess-name").hidden = !(s || proj) || !$("name-form").hidden;
@@ -817,7 +850,7 @@ function renderTop(scene, now) {
   renderComposer(scene);
   const needs = band.some((x) => x.kind === "input" || x.kind === "wait");
   const prefix = needs ? "● 입력 필요 · " : band.some((x) => x.kind === "blocked") ? "막힘 · " : "";
-  document.title = `${prefix}${name} · anytaskview`;
+  document.title = name ? `${prefix}${name} · AnyTaskView` : "AnyTaskView";
 }
 
 // 이어진 대화가 둘 이상이면 이름 옆에 ◀ n/m ▶. 그림은 대화마다 따로라 옮기면 그 대화의 화판을 연다
@@ -853,8 +886,24 @@ for (const [id, d] of [["thread-prev", -1], ["thread-next", 1]]) {
   });
 }
 
+// 주의 띠: 항목이 둘 이상이면 첫 줄만 보이고 「외 N개 ▾」 로 편다(화면이 아래로 밀리지 않게).
+// 「닫기」 는 지금 항목을 숨기고, 닫을 때 없던 항목이 생기면 다시 보인다(세션마다, 이 탭이 열려 있는 동안)
+const bandUi = { open: false, closed: new Map(), refocus: false }; // closed: 세션 id → 닫을 때의 항목 열쇠들
+const bandItemKey = (x) => `${x.kind}|${x.id || ""}|${x.text}`;
+function bandHidden(band) {
+  const closed = bandUi.closed.get(state.sid);
+  // 띠에서 빠진 항목은 잊는다: 풀린 뒤 같은 항목이 다시 오면 새 알림으로 보인다.
+  // 재생 중이거나 스냅샷을 받기 전의 장면으로는 잊지 않는다
+  if (closed && !state.replay && state.snapped) {
+    const now = new Set(band.map(bandItemKey));
+    for (const k of closed) if (!now.has(k)) closed.delete(k);
+    if (!closed.size) bandUi.closed.delete(state.sid);
+  }
+  return !band.length || (!!closed && band.every((x) => closed.has(bandItemKey(x))));
+}
 function bandRows(band) {
-  const rows = band.slice(0, 5).map((x) => {
+  const more = band.length - 1, open = bandUi.open && more > 0, max = 8;
+  const rows = (open ? band.slice(0, max) : band.slice(0, 1)).map((x, i) => {
     const row = el("div", `bi ${x.kind}`);
     row.append(el("span", "ico", x.ico), el("span", "txt", x.text));
     if (x.id) {
@@ -863,9 +912,31 @@ function bandRows(band) {
       go.addEventListener("click", () => reveal(x.id, x.step));
       row.append(go);
     }
+    if (i === 0) {
+      const tools = el("span", "btools");
+      if (more) {
+        const t = el("button", "mini btoggle", open ? "접기 ▴" : `외 ${more}개 ▾`);
+        t.type = "button";
+        t.setAttribute("aria-expanded", String(open));
+        t.addEventListener("click", () => { bandUi.open = !bandUi.open; bandUi.refocus = true; renderTop.bandKey = null; render(); });
+        tools.append(t);
+      }
+      const close = el("button", "mini", "닫기 ×");
+      close.type = "button";
+      close.title = "지금 알림을 숨깁니다. 새 알림이 오면 다시 보입니다";
+      close.addEventListener("click", () => {
+        bandUi.closed.set(state.sid, new Set(band.map(bandItemKey)));
+        renderTop.bandKey = null;
+        render();
+        // 숨은 띠에 초점이 남지 않게 맨 위 줄의 누를 수 있는 첫 단추로(보통 「보내기」)
+        [$("compose"), ...document.querySelectorAll("#top button")].find((x) => !x.disabled && !x.hidden && x.offsetParent)?.focus();
+      });
+      tools.append(close);
+      row.append(tools);
+    }
     return row;
   });
-  if (band.length > 5) rows.push(el("div", "bi", `외 ${band.length - 5}개`));
+  if (open && band.length > max) rows.push(el("div", "bi", `외 ${band.length - max}개`));
   return rows;
 }
 
@@ -907,7 +978,7 @@ function renderPlan(scene, now) {
   if (cur) {
     const st = own(scene.items, cur);
     const head = el("span", `st-${st.status}`);
-    head.append(el("span", "ico", ST_ICO[st.status]), document.createTextNode(` 지금: ${st.title}`));
+    head.append(el("span", "ico", ST_ICO[st.status]), document.createTextNode(" 지금: "), el("span", "key", st.title));
     nowBox.replaceChildren(head);
   }
   const ids = new Set(steps.map((s) => s.id));
@@ -1291,6 +1362,7 @@ setInterval(() => {
 // 세션을 바꿀 때: 그 세션에 쓰던 이름 고치기와 보내기 창을 닫는다. 보내기 창에 쓰던 글은 비운다
 function leaveSession() {
   if (!$("name-form").hidden) { $("name-form").hidden = true; $("sess-name").hidden = false; }
+  bandUi.open = false; // 띠 펼침은 그 세션에서만(다른 세션은 접힌 채로 연다)
   closeComposer(false); // 쓰던 글은 그 받는 곳의 글로 남는다
   hideAsk(true);
 }
