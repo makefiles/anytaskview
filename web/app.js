@@ -580,7 +580,7 @@ function markSend(e, what) {
 function sessRow(thread, now) {
   const s = thread[0], mine = thread.some((x) => x.id === state.sid);
   const row = el("div", "srow");
-  const b = el("button", "sess" + (mine ? " sel" : "") + (s.status === "ended" ? " ended" : ""));
+  const b = el("button", "sess" + (mine ? " sel" : "") + (s.status === "ended" ? " ended" : "") + (s.status === "input" ? " input" : ""));
   b.type = "button";
   if (mine) b.setAttribute("aria-current", "true");
   const r1 = el("div", "row1");
@@ -592,7 +592,8 @@ function sessRow(thread, now) {
   logo.setAttribute("role", "img");
   logo.setAttribute("aria-label", agentName(s));
   const r2 = el("div", "row2 txt");
-  r2.append(logo, `${SESS_KO[s.status] || s.status} · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
+  // 상태 글자는 따로 감싸 작업 중이면 빛이 지나가게 한다(CSS .stw)
+  r2.append(logo, el("span", `stw ${s.status}`, SESS_KO[s.status] || s.status), ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
   b.title = `${sessName(s)}\n${agentName(s)} · ${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
   b.append(r1, r2);
   b.addEventListener("click", () => { if (s.id !== state.sid) connect(s.id); }); // 앞 대화를 보는 중이어도 줄이 보이는 대화로 간다
@@ -807,7 +808,8 @@ function inlineEdit(anchor, value, save, back = anchor) {
 function renderTop(scene, now) {
   const sess = scene.sess, cur = currentStep(scene), proj = isProj(state.sid) ? state.projects.projects[state.sid] : null;
   const chip = $("sess-chip");
-  chip.className = proj ? `chip proj${proj.done ? " ended" : ""}` : `chip ${sess.status}`;
+  // 작업 중·입력 필요는 실시간일 때만 빛이 지나가게 한다(재생 중인 지난 상태는 멈춘 글자로)
+  chip.className = proj ? `chip proj${proj.done ? " ended" : ""}` : `chip ${sess.status}${state.replay ? "" : " live"}`;
   chip.textContent = proj ? (proj.done ? "끝난 프로젝트" : "프로젝트") : SESS_KO[sess.status] || sess.status;
   let line = proj ? "큰 그림 없음" : "계획 없음";
   if (cur) {

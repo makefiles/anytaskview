@@ -1,6 +1,11 @@
-# anytaskview
+# AnyTaskView
 
-**English summary.** anytaskview is a Claude Code plugin that shows what Claude is doing on a live board in your local browser: the plan and its current step, a diagram Claude draws while it works, notes and decisions, and facts collected automatically by hooks (file edits, commands, subagents). Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to Claude. The board UI and Claude-facing texts are in Korean.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.png">
+  <img src="docs/images/hero-light.png" alt="AnyTaskView board. Left: session list grouped by project, with Claude and Codex logos and a 'past sessions' group (expanded here). Middle: a diagram the agent drew, with a rounded screen box, a decision diamond, a server box and a database cylinder joined by labelled arrows, a results table, a document box and a hexagon waiting for approval. Right: the plan with the current step pinned on top, and a timeline of commands, file edits, notes and the user's prompt. Top: the session name, the current step and a one-line approval banner with 'show more' and 'close' buttons.">
+</picture>
+
+**English summary.** anytaskview is a Claude Code plugin that shows what Claude is doing on a live board in your local browser: the plan and its current step, a diagram Claude draws while it works, notes and decisions, and facts collected automatically by hooks (file edits, commands, subagents). Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to Claude. The board UI and Claude-facing texts are in Korean, and so are the screenshots in this README.
 
 - Requirements: Claude Code with plugin support, Node.js 22.12 or later, Linux (macOS untested, Windows through WSL), a recent browser.
 - Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md). Agents given only this repository URL should follow INSTALL.md from the top; the two commands alone do not start or open the board.
@@ -65,6 +70,39 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 
 ## 화면
 
+### 그림: 내용에 맞는 형식을 섞어 그립니다
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/forms-dark.png">
+  <img src="docs/images/forms-light.png" alt="형식을 섞은 그림: 원통 모양 DB 상자와 색인 상자를 잇는 화살표, 방안 셋의 응답 시간·위험·작업량을 비교한 표, 느린 요청 원인의 원 차트, 주문 목록 호출 순서(화면·API·DB)의 시퀀스 다이어그램.">
+</picture>
+
+에이전트는 상태를 고쳐 갈 부분은 상자(둥근 네모·마름모·원통·문서·육각형 모양과 아이콘)와 선으로, 비교·결과는 표로, 호출 순서·비율·일정은 Mermaid 다이어그램과 차트로 그립니다. 상자의 테두리 색과 기호가 진행·끝·실패·막힘·승인 대기를 보입니다.
+
+### 세션 목록 · 가리키고 보내기
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/sessions-dark.png">
+  <img src="docs/images/sessions-light.png" alt="세션 목록: 프로젝트 묶음 안의 Codex 세션(파란 OpenAI 로고)과 작업 중인 Claude 세션(「작업 중」 글자에 빛이 지나감), 「프로젝트 없음」 묶음의 입력을 기다리는 세션(왼쪽 주황 띠와 옅은 주황 바탕), 며칠 전에 끝난 대화가 든 「지난 세션」. 위의 정렬 단추는 「시작순」.">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/send-dark.png">
+  <img src="docs/images/send-light.png" alt="「할인 API」 상자에 대해 연 보내기 창: 받는 곳, 의견·지시 고르기, 쓴 글, 「모아 두기」·「보내기」 단추.">
+</picture>
+
+세션은 프로젝트별로 묶이고, Claude·Codex 로고로 어느 에이전트의 세션인지 보입니다. 작업 중인 세션은 「작업 중」 글자 위로 빛이 지나가고, 입력이 필요한 세션은 주황 띠로 눈에 띕니다. 상자나 단계에 마우스를 올리면 뜨는 「보내기」 로 그 자리에 대해 의견·지시를 보냅니다.
+
+### 프로젝트 큰 그림
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/project-dark.png">
+  <img src="docs/images/project-light.png" alt="프로젝트 큰 그림: 작업 단위의 간트 차트, 남은 결정 표, 계획의 작업 단위(하나는 승인 대기), 프로젝트에 든 대화의 이력.">
+</picture>
+
+여러 대화에 걸친 일은 프로젝트의 큰 그림 화판에 작업 단위·남은 결정·대화 이력으로 남습니다.
+
+### 화면 구성
+
 - 왼쪽: 세션 목록. 프로젝트별로 묶이고, 목록 위 정렬 단추(처음에는 「시작순 ▾」)에서 시작순·활동순·이름순을 고르거나 끝난 세션을 숨깁니다. 끝난 지 하루가 지난 대화는 「지난 세션」 에 접혀 들어갑니다. 프로젝트 이름을 누르면 큰 그림이 열립니다.
 - 가운데: Claude 가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 상자를 누르면 파일 경로를 복사합니다.
 - 오른쪽: 계획(지금 단계는 위에 고정)과 타임라인(사실·메모·보낸 글). 타임라인은 「새 창」 으로 떼어 볼 수 있습니다.
@@ -95,6 +133,7 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 npm install                  # 시험 도구와 브라우저 라이브러리 원본(실행에는 필요 없음)
 npm test                     # 장면 규칙, 서버 보안, 훅, MCP, 선 길 찾기
 node verify/probe_ui.js      # 화면 없는 Chrome 으로 화면 확인(Chrome 필요)
+node verify/readme_shots.js  # 이 README 의 화면 이미지(docs/images) 다시 찍기(예시 데이터만, Chrome 필요)
 claude --plugin-dir .        # 이 폴더를 한 세션에만 붙여 시험
 ```
 

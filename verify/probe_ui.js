@@ -1408,6 +1408,29 @@ async function main() {
     await evaluate(`document.getElementById('zoom-100').click()`);
     return `스크롤 ${after.left}·${after.top}`;
   });
+  await check("작업 중 표시: 세션 줄·맨 위 표지의 「작업 중」 에 빛이 지나가고(움직임 줄이기면 멈춤), 입력이 필요한 줄은 왼쪽 주황 띠와 바탕", async () => {
+    const wait = `wait-${process.pid}`;
+    await post("/api/hook", { sid: wait, pid: process.pid + 80, fact: { f: "start", cwd: "/tmp/입력", source: "startup" } });
+    await post("/api/hook", { sid: wait, pid: process.pid + 80, fact: { f: "prompt", text: "권한 묻는 세션" } });
+    await post("/api/hook", { sid: wait, pid: process.pid + 80, fact: { f: "notify", ntype: "permission_prompt", text: "needs permission" } });
+    await post("/api/hook", { sid, fact: { f: "prompt", text: "다시 일하기" } });
+    await open(sid);
+    await waitFor(`document.querySelector('#sess-body .sess .stw.working') !== null && document.querySelector('#sess-body .sess.input') !== null`);
+    const look = () => evaluate(`(() => {
+      const color = (v) => { const i = document.createElement('i'); i.style.color = v; document.body.append(i); const c = getComputedStyle(i).color; i.remove(); return c; };
+      const w = getComputedStyle(document.querySelector('#sess-body .sess .stw.working')), chip = getComputedStyle(document.getElementById('sess-chip'));
+      const row = getComputedStyle(document.querySelector('#sess-body .sess.input'));
+      return { anim: w.animationName, chipAnim: chip.animationName, fill: w.color, chipLine: chip.borderTopColor, doing: color('var(--s-doing)'), rowLeft: row.borderLeftColor, rowW: row.borderLeftWidth, rowBg: row.backgroundColor, wait: color('var(--s-wait)') };
+    })()`);
+    const r = await look();
+    expect(r.anim === "shimmer" && r.chipAnim === "shimmer" && r.fill === "rgba(0, 0, 0, 0)", `반짝임 ${r.anim}/${r.chipAnim} ${r.fill}`);
+    expect(r.chipLine === r.doing, `표지 테두리 ${r.chipLine}`);
+    expect(r.rowLeft === r.wait && r.rowW === "4px" && r.rowBg !== "rgba(0, 0, 0, 0)", `입력 필요 줄 ${r.rowLeft} ${r.rowW} ${r.rowBg}`);
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    const still = await look();
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+    expect(still.anim === "none" && still.fill === still.doing, `움직임 줄이기 ${still.anim} ${still.fill}`);
+  });
   await open(sid);
 
   for (const theme of ["light", "dark"]) {
