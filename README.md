@@ -83,14 +83,14 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/sessions-dark.png">
-  <img src="docs/images/sessions-light.png" alt="세션 목록: 프로젝트 묶음 안의 Codex 세션(파란 OpenAI 로고)과 작업 중인 Claude 세션(「작업 중」 글자에 빛이 지나감), 「프로젝트 없음」 묶음의 입력을 기다리는 세션(왼쪽 주황 띠와 옅은 주황 바탕), 며칠 전에 끝난 대화가 든 「지난 세션」. 위의 정렬 단추는 「시작순」.">
+  <img src="docs/images/sessions-light.png" alt="세션 목록: 프로젝트 묶음 안의 Codex 세션(파란 OpenAI 로고)과 작업 중인 Claude 세션(왼쪽 파란 띠와 옅은 파란 바탕, 「작업 중」 글자에 빛이 지나감), 「프로젝트 없음」 묶음의 입력을 기다리는 세션(왼쪽 주황 띠와 옅은 주황 바탕), 며칠 전에 끝난 대화가 든 「지난 세션」. 위의 정렬 단추는 「시작순」.">
 </picture>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/send-dark.png">
   <img src="docs/images/send-light.png" alt="「할인 API」 상자에 대해 연 보내기 창: 받는 곳, 의견·지시 고르기, 쓴 글, 「모아 두기」·「보내기」 단추.">
 </picture>
 
-세션은 프로젝트별로 묶이고, Claude·Codex 로고로 어느 에이전트의 세션인지 보입니다. 작업 중인 세션은 「작업 중」 글자 위로 빛이 지나가고, 입력이 필요한 세션은 주황 띠로 눈에 띕니다. 상자나 단계에 마우스를 올리면 뜨는 「보내기」 로 그 자리에 대해 의견·지시를 보냅니다.
+세션은 프로젝트별로 묶이고, Claude·Codex 로고로 어느 에이전트의 세션인지 보입니다. 작업 중인 세션은 파란 띠·바탕에 「작업 중」 글자가 반짝이고, 입력이 필요한 세션은 주황 띠·바탕에 「입력 필요」 글자가 반짝입니다. 지금 보는 세션이 일하는 동안에는 계획의 「지금」 줄도 반짝입니다. 상자나 단계에 마우스를 올리면 뜨는 「보내기」 로 그 자리에 대해 의견·지시를 보냅니다.
 
 ### 프로젝트 큰 그림
 

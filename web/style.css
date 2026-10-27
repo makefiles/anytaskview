@@ -6,7 +6,8 @@
   --band-bg: #fff4e5; --band-fg: #6b3500; --edge: #6b7280; --input-bg: #ffffff; --input-fg: #1f2328;
   --on-accent: #ffffff;
   --shine: #8b2fc9; /* 작업 중 글자 위로 지나가는 빛: 밝은 바탕에서는 밝게 하면 대비가 떨어지므로 보라로 색을 바꿔 지나간다(대비 5.4 이상) */
-  --wait-bg: #fbf3e3; --wait-bg-sel: #f5e8cc; --wait-fg: #7d5400; /* 입력이 필요한 세션 줄 바탕과 그 위의 「입력 필요」 글자(대비 5.5 이상) */
+  --wait-bg: #fbf3e3; --wait-bg-sel: #f5e8cc; --wait-fg: #7d5400; --wait-shine: #a3290a; /* 입력이 필요한 세션 줄 바탕과 그 위의 「입력 필요」 글자·빛(대비 5.4 이상) */
+  --work-bg: #eef4fd; --work-bg-sel: #e3ecfb; /* 일하는 세션 줄 바탕(그 위 글자 대비 4.8 이상) */
   /* 역할별 색: 패널 제목(남보라 글자 + 머리띠 바탕), 보조 단추(옅은 파랑 바탕·파랑 글자), 지금 보는 것의 이름(자주) */
   --title: #3730a3; --title-bg: #eef0ff; --btn-bg: #edf3fd; --btn-line: #c3d6f7; --btn-fg: #1f5fd1; --key: #a21caf;
   color-scheme: light;
@@ -19,7 +20,8 @@
     --band-bg: #3a2a12; --band-fg: #ffd9a8; --edge: #8b939e; --input-bg: #24282d; --input-fg: #e6e8eb;
     --on-accent: #15171a;
     --shine: #e6f0ff;
-    --wait-bg: #2f2817; --wait-bg-sel: #3a311a; --wait-fg: #e3b341;
+    --wait-bg: #2f2817; --wait-bg-sel: #3a311a; --wait-fg: #e3b341; --wait-shine: #fff1c4;
+    --work-bg: #1c2638; --work-bg-sel: #22304a;
     --title: #c7d2fe; --title-bg: #262a4d; --btn-bg: #1f2a3b; --btn-line: #34486a; --btn-fg: #8db8ff; --key: #f0abfc;
     color-scheme: dark;
   }
@@ -31,7 +33,8 @@
   --band-bg: #3a2a12; --band-fg: #ffd9a8; --edge: #8b939e; --input-bg: #24282d; --input-fg: #e6e8eb;
   --on-accent: #15171a;
   --shine: #e6f0ff;
-  --wait-bg: #2f2817; --wait-bg-sel: #3a311a; --wait-fg: #e3b341;
+  --wait-bg: #2f2817; --wait-bg-sel: #3a311a; --wait-fg: #e3b341; --wait-shine: #fff1c4;
+  --work-bg: #1c2638; --work-bg-sel: #22304a;
   --title: #c7d2fe; --title-bg: #262a4d; --btn-bg: #1f2a3b; --btn-line: #34486a; --btn-fg: #8db8ff; --key: #f0abfc;
   color-scheme: dark;
 }
@@ -91,17 +94,25 @@ button.icon { padding: 5px 6px; }
 .chip.warn { color: var(--s-blocked); }
 .chip.working { color: var(--s-doing); } .chip.input { color: var(--s-wait); } .chip.idle { color: var(--s-todo); } .chip.ended { color: var(--muted); }
 .chip.proj { color: var(--accent); } .chip.proj.ended { color: var(--muted); }
-/* 작업 중: 상태 글자 위로 빛이 지나간다(AI 도구의 「생각 중」 표시와 같은 방식). 맨 위 표지와 세션 줄 둘째 줄의 「작업 중」 에만 쓰고,
-   제목은 움직이지 않는다. 표지 테두리는 글자색(currentColor)을 따르므로 글자를 투명하게 해도 테두리 색은 따로 준다 */
-.sess .stw.working, .chip.working.live {
-  color: transparent; background: linear-gradient(100deg, var(--s-doing) 40%, var(--shine) 50%, var(--s-doing) 60%) 0 0 / 300% 100%;
+/* 일하는 중: 글자 위로 빛이 지나간다(AI 도구의 「생각 중」 표시와 같은 방식). 세션 줄 둘째 줄의 「작업 중」·「입력 필요」 글자와
+   계획의 「지금」 줄(세션이 실제로 일할 때 .live)에만 쓴다. 맨 위 표지와 세션 제목은 움직이지 않는다 */
+.sess .stw.working, .sess .stw.input {
+  color: transparent; background: linear-gradient(100deg, var(--sh-base) 40%, var(--sh-peak) 50%, var(--sh-base) 60%) 0 0 / 300% 100%;
   -webkit-background-clip: text; background-clip: text; animation: shimmer 2.4s linear infinite;
 }
-.chip.working.live { border-color: var(--s-doing); }
+.sess .stw.working, #plan-now.live > span { --sh-base: var(--s-doing); --sh-peak: var(--shine); }
+.sess .stw.input { --sh-base: var(--wait-fg); --sh-peak: var(--wait-shine); }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) { .sess .stw.working, .chip.working.live { animation: none; background: none; color: var(--s-doing); } }
-.sess .stw.working { font-weight: 600; }
-.sess .stw.input { color: var(--wait-fg); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .sess .stw.working, .sess .stw.input { animation: none; background: none; color: var(--sh-base); } }
+/* 계획 「지금」 줄은 움직여도 될 때만 반짝인다(움직임 줄이기면 원래 색 그대로). 안쪽 기호·단계 이름도 같은 빛을 따른다 */
+@media (prefers-reduced-motion: no-preference) {
+  #plan-now.live > span {
+    color: transparent; background: linear-gradient(100deg, var(--sh-base) 40%, var(--sh-peak) 50%, var(--sh-base) 60%) 0 0 / 300% 100%;
+    -webkit-background-clip: text; background-clip: text; animation: shimmer 2.4s linear infinite;
+  }
+  #plan-now.live > span > .ico, #plan-now.live > span > .key { color: transparent; }
+}
+.sess .stw.working, .sess .stw.input { font-weight: 600; }
 #proj-link { flex: 0 1 auto; min-width: 6em; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 좁아지면 단계 줄 → 이름 → 프로젝트 순으로 줄어들고, 단추는 줄지도 꺾이지도 않는다 */
 #top > button:not(#sess-name):not(#proj-link), #top > .chip { flex: none; white-space: nowrap; }
@@ -141,7 +152,9 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .sess:hover { border-color: var(--line); }
 .sess.sel { background: var(--panel-2); border-color: var(--accent); }
 .sess.ended { opacity: .6; }
-/* 입력이 필요한 세션: 왼쪽 주황 띠와 옅은 주황 바탕(움직이지 않는다. 움직임은 작업 중 표시가 쓴다) */
+/* 일하는 중·입력이 필요한 세션 줄: 왼쪽 띠와 옅은 바탕으로 줄 전체를 가른다(띠·바탕은 움직이지 않는다) */
+.sess.working { border-left: 4px solid var(--s-doing); background: var(--work-bg); }
+.sess.working.sel { background: var(--work-bg-sel); }
 .sess.input { border-left: 4px solid var(--s-wait); background: var(--wait-bg); }
 .sess.input.sel { background: var(--wait-bg-sel); }
 .sess .row1 { display: flex; gap: 6px; align-items: baseline; font-weight: 600; line-height: 18px; }
@@ -268,14 +281,21 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #tl-body li { padding: 2px 0; border-bottom: 1px solid var(--panel-2); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
 #tl-body li.sub { padding-left: 14px; color: var(--muted); }
 #tl-body li .when { color: var(--muted); font-size: 13px; margin-right: 6px; font-variant-numeric: tabular-nums; }
-/* 타임라인(.hang): 시각을 왼쪽 칸에 두고 글은 그 오른쪽에 내어 써서 줄이 바뀌어도 글 머리가 맞는다 */
-#tl-body.hang li { position: relative; padding-left: 64px; }
-#tl-body.hang li .when { position: absolute; left: 0; top: 2px; font-weight: 400; } /* 굵은 줄(사용자·화판 글)에서도 칸 폭을 넘지 않게 */
-#tl-body.hang li.sub { padding-left: 78px; }
-#tl-body.hang li.new-mark { padding-left: 0; }
+/* 타임라인: 시각 | 종류 표지 | 글 세 칸. 표지 칸 폭을 고정해 글 머리가 줄마다 맞고, 넘어간 줄도 글 머리 아래에서 잇는다.
+   하위 에이전트 줄(.sub)은 글 칸만 들여 쓴다 */
+#tl-body.hang li:not(.new-mark) { display: grid; grid-template-columns: 58px 64px minmax(0, 1fr); column-gap: 6px; align-items: baseline; }
+#tl-body.hang li .when { font-weight: 400; margin: 0; } /* 굵은 줄(사용자·화판 글)에서도 칸 폭을 넘지 않게 */
+#tl-body.hang li .tl-k { justify-self: start; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font-weight: 400; }
+#tl-body.hang li.sub .tl-t { padding-left: 14px; }
+#tl-body.hang li.sub { padding-left: 0; }
+#tl-body .tl-k.fact { color: var(--muted); }
+#tl-body .tl-k.fact.notify { color: var(--s-wait); } #tl-body .tl-k.fact.edit-fail { color: var(--s-fail); }
+#tl-body .tl-k.note { color: var(--muted); }
+#tl-body .dur { color: var(--muted); font-weight: 400; }
 #tl-body .k.user { color: var(--fg); }
 #tl-body li.prompt { font-weight: 600; }
-#tl-body li.prompt, #tl-body li.sys { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+/* 긴 사용자 입력·작업 알림·화판 글은 글 칸을 3줄로 접는다(줄 자체는 세 칸 격자) */
+#tl-body li.prompt .tl-t, #tl-body li.sys .tl-t { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 #tl-body li.sys { color: var(--muted); }
 #tl-body li.new-mark { border: 0; border-top: 2px solid var(--accent); color: var(--accent); font-size: 12px; line-height: 16px; padding: 0; margin: 4px 0; }
 #tl-body .k { font-size: 12px; line-height: 16px; padding: 0 5px; border-radius: 4px; margin-right: 4px; border: 1px solid currentColor; }

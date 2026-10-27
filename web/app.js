@@ -372,6 +372,7 @@ function openEvents(sid) {
 function connect(sid) {
   if (state.es) state.es.close();
   if (sid !== state.sid) leaveSession();
+  $("plan-now").classList.remove("live"); // 새 세션의 상태를 받기 전까지 앞 세션의 반짝임을 남기지 않는다
   state.sid = sid;
   state.scene = newScene();
   state.seq = 0;
@@ -580,7 +581,7 @@ function markSend(e, what) {
 function sessRow(thread, now) {
   const s = thread[0], mine = thread.some((x) => x.id === state.sid);
   const row = el("div", "srow");
-  const b = el("button", "sess" + (mine ? " sel" : "") + (s.status === "ended" ? " ended" : "") + (s.status === "input" ? " input" : ""));
+  const b = el("button", "sess" + (mine ? " sel" : "") + (s.status === "ended" ? " ended" : "") + (s.status === "input" || s.status === "working" ? ` ${s.status}` : ""));
   b.type = "button";
   if (mine) b.setAttribute("aria-current", "true");
   const r1 = el("div", "row1");
@@ -592,7 +593,7 @@ function sessRow(thread, now) {
   logo.setAttribute("role", "img");
   logo.setAttribute("aria-label", agentName(s));
   const r2 = el("div", "row2 txt");
-  // 상태 글자는 따로 감싸 작업 중이면 빛이 지나가게 한다(CSS .stw)
+  // 상태 글자는 따로 감싸 작업 중·입력 필요면 빛이 지나가게 한다(CSS .stw)
   r2.append(logo, el("span", `stw ${s.status}`, SESS_KO[s.status] || s.status), ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
   b.title = `${sessName(s)}\n${agentName(s)} · ${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
   b.append(r1, r2);
@@ -808,8 +809,9 @@ function inlineEdit(anchor, value, save, back = anchor) {
 function renderTop(scene, now) {
   const sess = scene.sess, cur = currentStep(scene), proj = isProj(state.sid) ? state.projects.projects[state.sid] : null;
   const chip = $("sess-chip");
-  // 작업 중·입력 필요는 실시간일 때만 빛이 지나가게 한다(재생 중인 지난 상태는 멈춘 글자로)
-  chip.className = proj ? `chip proj${proj.done ? " ended" : ""}` : `chip ${sess.status}${state.replay ? "" : " live"}`;
+  chip.className = proj ? `chip proj${proj.done ? " ended" : ""}` : `chip ${sess.status}`;
+  // 세션이 실제로 일하는 동안(실시간)만 계획의 「지금」 줄에 빛이 지나간다. 단계가 진행 중이어도 세션이 쉬면 멈춘다
+  $("plan-now").classList.toggle("live", !proj && sess.status === "working" && !state.replay && !state.replayLoading);
   chip.textContent = proj ? (proj.done ? "끝난 프로젝트" : "프로젝트") : SESS_KO[sess.status] || sess.status;
   let line = proj ? "큰 그림 없음" : "계획 없음";
   if (cur) {
@@ -1061,20 +1063,21 @@ function renderPlan(scene, now) {
 const isSysPrompt = (e) => e.sys || /^\s*<task-notification>/.test(e.text || "");
 const sysText = (e) => (e.sys ? e.text : (String(e.text).match(/<summary>([\s\S]*?)(<\/summary>|$)/) || [])[1] || "백그라운드 작업 알림");
 
-function factText(e) {
+// 타임라인의 사실 한 줄을 표지와 글로 나눈다(표지 칸에 들어가게 짧게)
+function factParts(e) {
   switch (e.f) {
-    case "start": return `세션 시작 (${e.source})`;
-    case "prompt": return isSysPrompt(e) ? `알림: ${sysText(e)}` : `사용자: ${e.text}`;
-    case "edit": return `수정 ${base(e.path)}${e.lines ? ":" + e.lines : ""}`;
-    case "edit-fail": return `수정 실패 ${base(e.path)}: ${e.error}`;
-    case "todo": return `할 일 도구(${e.tool}): ${e.text}`;
-    case "agent-start": return `하위 에이전트 시작${e.agentType ? " " + e.agentType : ""}`;
-    case "agent-stop": return `하위 에이전트 끝${e.agentType ? " " + e.agentType : ""}${e.last ? ": " + e.last : ""}`;
-    case "notify": return `입력 필요: ${e.text}`;
-    case "stop": return `차례 끝${e.last ? ": " + e.last : ""}`;
-    case "end": return `세션 끝${e.reason ? ` (${e.reason})` : ""}`;
-    case "gone": return "세션 끝 (claude 프로세스 없음)";
-    default: return e.f;
+    case "start": return ["세션", `시작 (${e.source})`];
+    case "prompt": return ["알림", sysText(e)];
+    case "edit": return ["수정", `${base(e.path)}${e.lines ? ":" + e.lines : ""}`];
+    case "edit-fail": return ["수정 실패", `${base(e.path)}: ${e.error}`];
+    case "todo": return ["할 일", `${e.tool}: ${e.text}`];
+    case "agent-start": return ["에이전트", `시작${e.agentType ? " " + e.agentType : ""}`];
+    case "agent-stop": return ["에이전트", `끝${e.agentType ? " " + e.agentType : ""}${e.last ? ": " + e.last : ""}`];
+    case "notify": return ["입력 필요", e.text || ""];
+    case "stop": return ["차례 끝", e.last || ""];
+    case "end": return ["세션", `끝${e.reason ? ` (${e.reason})` : ""}`];
+    case "gone": return ["세션", "끝 (claude 프로세스 없음)"];
+    default: return [e.f, ""];
   }
 }
 
@@ -1167,34 +1170,38 @@ function renderTimeline(scene, now) {
     const li = el("li");
     li.append(el("span", "when", fmtClock(e.t)));
     prevEdit = null;
+    // 한 줄 = 시각 | 종류 표지 | 글 세 칸(.tl-k·.tl-t). 표지 칸 폭이 같아 글 머리가 줄마다 맞고, 넘어간 줄도 글 머리 아래에서 잇는다
+    const kind = (cls, label) => li.append(el("span", `tl-k${cls ? " k " + cls : ""}`, label));
+    const body = (...parts) => { const t = el("span", "tl-t"); t.append(...parts); li.append(t); return t; };
     if (e.type === "msg") {
       const m = own(scene.msgs || {}, e.mid);
       if (!m) continue;
-      li.append(el("span", `k ${m.state}`, MSG_STATE_KO[m.state] || m.state));
-      li.append(document.createTextNode(`화판 → ${agentName(state.sessions.get(state.sid))} (${MSG_KIND_KO[m.kind]}${m.target ? " · " + m.target.id : ""}): ${m.text}`));
+      kind(m.state, MSG_STATE_KO[m.state] || m.state);
+      body(`화판 → ${agentName(state.sessions.get(state.sid))} (${MSG_KIND_KO[m.kind]}${m.target ? " · " + m.target.id : ""}): ${m.text}`);
       li.classList.add("prompt");
       li.title = m.text;
     } else if (e.type === "note") {
-      if (e.kind) li.append(el("span", `k ${e.kind}`, NOTE_KO[e.kind]));
-      li.append(document.createTextNode(e.text + (e.on ? ` (${e.on})` : "")));
+      kind(e.kind || "note", NOTE_KO[e.kind] || "메모");
+      body(e.text + (e.on ? ` (${e.on})` : ""));
       if (safeRef(e.ref)) { li.classList.add("copy"); li.dataset.ref = e.ref; }
     } else if (e.type === "run") {
       const r = own(scene.runs, e.id);
       if (!r) continue;
       const dur = r.state === "running" || r.state === "wait" ? now - r.start : r.dur ?? (r.end && r.start ? r.end - r.start : null);
-      li.append(el("span", `k ${r.state}`, `${RUN_KO[r.state] || r.state}${dur != null ? " · " + fmtDur(dur) : ""}`));
-      li.append(document.createTextNode(r.desc || r.cmd));
+      kind(r.state, RUN_KO[r.state] || r.state);
+      const t = body(r.desc || r.cmd);
+      if (dur != null) t.append(el("span", "dur", ` · ${fmtDur(dur)}`)); // 걸린 시간은 글 뒤에(표지를 짧게 두어 칸 폭을 맞춘다)
       li.title = r.cmd + (r.error ? `\n${r.error}` : "");
       if (r.agent) li.classList.add("sub");
     } else {
       if (e.agent) li.classList.add("sub");
       if (e.f === "prompt") { li.classList.add(isSysPrompt(e) ? "sys" : "prompt"); li.title = e.text; }
       // 사용자 입력은 「사용자」 표지를 붙여 화판에서 보낸 글·기계 기록과 가른다
-      if (e.f === "prompt" && !isSysPrompt(e)) li.append(el("span", "k user", "사용자"), document.createTextNode(e.text));
-      else li.append(document.createTextNode(factText(e)));
+      if (e.f === "prompt" && !isSysPrompt(e)) { kind("user", "사용자"); body(e.text); }
+      else { const [label, text] = factParts(e); kind(`fact ${e.f}`, label); body(text); }
       if (e.f === "edit") {
         const times = el("span", "times");
-        li.append(times);
+        li.querySelector(".tl-t").append(times);
         prevEdit = { path: e.path, agent: e.agent, n: 1, times };
         if (safeRef(e.path)) {
           const line = String(e.lines || "").match(/^\d+/);
@@ -1261,6 +1268,7 @@ async function enterReplay(idx) {
     if (state.replayLoading) return; // 이미 받는 중
     const sid = state.sid, token = ++state.replayToken;
     state.replayLoading = [];
+    $("plan-now").classList.remove("live"); // 지난 기록을 받는 동안에도 반짝이지 않게
     let records;
     try {
       const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/log`);

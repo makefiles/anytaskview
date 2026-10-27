@@ -450,7 +450,7 @@ async function main() {
     await waitFor(`document.querySelector('#plan-body li[data-id="s1"]')?.classList.contains('flash')`);
   });
   await check("타임라인 거르기: 파일을 끄면 수정 줄이 사라지고 켜면 돌아옴", async () => {
-    const editShown = `[...document.querySelectorAll('#tl-body li')].some((li) => li.textContent.includes('수정 a.js'))`;
+    const editShown = `[...document.querySelectorAll('#tl-body li')].some((li) => li.querySelector('.tl-k')?.textContent === '수정' && li.querySelector('.tl-t')?.textContent.startsWith('a.js'))`;
     await waitFor(editShown);
     await evaluate(`[...document.querySelectorAll('#tl-filters button')].find((b) => b.textContent === '파일').click()`);
     await waitFor(`!(${editShown})`);
@@ -1408,28 +1408,55 @@ async function main() {
     await evaluate(`document.getElementById('zoom-100').click()`);
     return `스크롤 ${after.left}·${after.top}`;
   });
-  await check("작업 중 표시: 세션 줄·맨 위 표지의 「작업 중」 에 빛이 지나가고(움직임 줄이기면 멈춤), 입력이 필요한 줄은 왼쪽 주황 띠와 바탕", async () => {
+  await check("타임라인: 시각·표지·글 세 칸이라 글 머리가 줄마다 같은 자리이고, 넘어간 줄도 글 머리 아래에서 잇고, 긴 사용자 입력은 3줄로 접힘", async () => {
+    await open(sid);
+    await mcp("note", { kind: "decision", text: "아주 긴 결정 메모입니다. ".repeat(12) });
+    await post("/api/hook", { sid, fact: { f: "prompt", text: "아주 긴 사용자 입력입니다. ".repeat(40) } });
+    await waitFor(`document.body.textContent.includes('아주 긴 결정 메모') && document.body.textContent.includes('아주 긴 사용자 입력')`);
+    const r = await evaluate(`(() => {
+      const rows = [...document.querySelectorAll('#tl-body li:not(.new-mark):not(.sub)')].slice(0, 12);
+      const lefts = rows.map((li) => Math.round(li.querySelector('.tl-t').getBoundingClientRect().left));
+      // 줄마다의 자리는 글 칸 안의 글자 범위(Range)로 잰다(격자 칸의 getClientRects 는 칸 하나만 준다)
+      const lines = (cell) => { const g = document.createRange(); g.selectNodeContents(cell); return [...g.getClientRects()].filter((x) => x.width > 0); };
+      const note = rows.find((li) => li.textContent.includes('아주 긴 결정 메모')).querySelector('.tl-t');
+      const prompt = rows.find((li) => li.textContent.includes('아주 긴 사용자 입력')).querySelector('.tl-t');
+      const nl = lines(note), cs = getComputedStyle(prompt);
+      return { lefts: [...new Set(lefts)], noteLines: new Set(nl.map((x) => Math.round(x.top))).size, wrapLeft: Math.round(Math.min(...nl.map((x) => x.left))), textLeft: Math.round(note.getBoundingClientRect().left),
+        clamp: cs.webkitLineClamp, promptH: prompt.getBoundingClientRect().height, lineH: parseFloat(cs.lineHeight) };
+    })()`);
+    expect(r.lefts.length === 1, `글 머리가 줄마다 다름: ${r.lefts}`);
+    expect(r.noteLines >= 2 && r.wrapLeft === r.textLeft, `넘어간 줄 ${r.noteLines}줄, ${r.wrapLeft} ≠ 글 머리 ${r.textLeft}`);
+    expect(r.clamp === "3" && r.promptH <= r.lineH * 3 + 1, `사용자 입력이 3줄로 접히지 않음: ${r.clamp} ${r.promptH}px`);
+    return `글 머리 ${r.lefts[0]}px, 메모 ${r.noteLines}줄`;
+  });
+  await check("작업 중 표시: 작업 중·입력 필요 줄은 왼쪽 띠와 바탕, 상태 글자와 계획 「지금」 줄에 빛이 지나가고(움직임 줄이기면 멈춤), 맨 위 표지는 움직이지 않음", async () => {
     const wait = `wait-${process.pid}`;
     await post("/api/hook", { sid: wait, pid: process.pid + 80, fact: { f: "start", cwd: "/tmp/입력", source: "startup" } });
     await post("/api/hook", { sid: wait, pid: process.pid + 80, fact: { f: "prompt", text: "권한 묻는 세션" } });
     await post("/api/hook", { sid: wait, pid: process.pid + 80, fact: { f: "notify", ntype: "permission_prompt", text: "needs permission" } });
     await post("/api/hook", { sid, fact: { f: "prompt", text: "다시 일하기" } });
+    await mcp("plan", { steps: [{ id: "s1", status: "doing" }] });
     await open(sid);
-    await waitFor(`document.querySelector('#sess-body .sess .stw.working') !== null && document.querySelector('#sess-body .sess.input') !== null`);
+    await waitFor(`document.querySelector('#sess-body .sess.working .stw.working') !== null && document.querySelector('#sess-body .sess.input .stw.input') !== null && document.getElementById('plan-now').classList.contains('live')`);
     const look = () => evaluate(`(() => {
       const color = (v) => { const i = document.createElement('i'); i.style.color = v; document.body.append(i); const c = getComputedStyle(i).color; i.remove(); return c; };
-      const w = getComputedStyle(document.querySelector('#sess-body .sess .stw.working')), chip = getComputedStyle(document.getElementById('sess-chip'));
-      const row = getComputedStyle(document.querySelector('#sess-body .sess.input'));
-      return { anim: w.animationName, chipAnim: chip.animationName, fill: w.color, chipLine: chip.borderTopColor, doing: color('var(--s-doing)'), rowLeft: row.borderLeftColor, rowW: row.borderLeftWidth, rowBg: row.backgroundColor, wait: color('var(--s-wait)') };
+      const work = document.querySelector('#sess-body .sess.working'), inp = document.querySelector('#sess-body .sess.input');
+      const w = getComputedStyle(work.querySelector('.stw')), i = getComputedStyle(inp.querySelector('.stw')), now = getComputedStyle(document.querySelector('#plan-now > span'));
+      return { w: w.animationName, i: i.animationName, now: now.animationName, fill: w.color, chip: getComputedStyle(document.getElementById('sess-chip')).animationName,
+        workLeft: getComputedStyle(work).borderLeftColor, inLeft: getComputedStyle(inp).borderLeftColor, doing: color('var(--s-doing)'), wait: color('var(--s-wait)'),
+        workBg: getComputedStyle(work).backgroundColor, inBg: getComputedStyle(inp).backgroundColor };
     })()`);
     const r = await look();
-    expect(r.anim === "shimmer" && r.chipAnim === "shimmer" && r.fill === "rgba(0, 0, 0, 0)", `반짝임 ${r.anim}/${r.chipAnim} ${r.fill}`);
-    expect(r.chipLine === r.doing, `표지 테두리 ${r.chipLine}`);
-    expect(r.rowLeft === r.wait && r.rowW === "4px" && r.rowBg !== "rgba(0, 0, 0, 0)", `입력 필요 줄 ${r.rowLeft} ${r.rowW} ${r.rowBg}`);
+    expect(r.w === "shimmer" && r.i === "shimmer" && r.now === "shimmer" && r.fill === "rgba(0, 0, 0, 0)", `반짝임 ${r.w}/${r.i}/${r.now} ${r.fill}`);
+    expect(r.chip === "none", `맨 위 표지가 움직임: ${r.chip}`);
+    expect(r.workLeft === r.doing && r.inLeft === r.wait && r.workBg !== "rgba(0, 0, 0, 0)" && r.inBg !== "rgba(0, 0, 0, 0)", JSON.stringify(r));
     await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     const still = await look();
     await cdp.send("Emulation.setEmulatedMedia", { features: [] });
-    expect(still.anim === "none" && still.fill === still.doing, `움직임 줄이기 ${still.anim} ${still.fill}`);
+    expect(still.w === "none" && still.i === "none" && still.now === "none" && still.fill === still.doing, `움직임 줄이기 ${JSON.stringify(still)}`);
+    // 세션이 쉬면 계획 「지금」 줄은 멈춘다(단계는 여전히 진행 중)
+    await post("/api/hook", { sid, fact: { f: "stop", last: "쉼" } });
+    await waitFor(`!document.getElementById('plan-now').classList.contains('live')`);
   });
   await open(sid);
 
