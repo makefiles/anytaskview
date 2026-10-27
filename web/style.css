@@ -95,23 +95,28 @@ button.icon { padding: 5px 6px; }
 .chip.working { color: var(--s-doing); } .chip.input { color: var(--s-wait); } .chip.idle { color: var(--s-todo); } .chip.ended { color: var(--muted); }
 .chip.proj { color: var(--accent); } .chip.proj.ended { color: var(--muted); }
 /* 일하는 중: 글자 위로 빛이 지나간다(AI 도구의 「생각 중」 표시와 같은 방식). 세션 줄 둘째 줄의 「작업 중」·「입력 필요」 글자와
-   계획의 「지금」 줄(세션이 실제로 일할 때 .live)에만 쓴다. 맨 위 표지와 세션 제목은 움직이지 않는다 */
-.sess .stw.working, .sess .stw.input {
-  color: transparent; background: linear-gradient(100deg, var(--sh-base) 40%, var(--sh-peak) 50%, var(--sh-base) 60%) 0 0 / 300% 100%;
-  -webkit-background-clip: text; background-clip: text; animation: shimmer 2.4s linear infinite;
-}
+   계획의 「지금」 줄(세션이 실제로 일할 때 .live)에만 쓴다. 맨 위 표지와 세션 제목은 움직이지 않는다.
+   빛 색으로 겹친 글자 한 벌(.shine > span)을 띠 모양 가림막(.shine 의 mask)이 왼쪽에서 오른쪽으로 지나며 드러낸다.
+   가림막은 오른쪽으로, 겹친 글자는 같은 만큼 왼쪽으로 움직여 글자는 제자리에 있다. 둘 다 transform 이라 합성 단계에서 돈다 */
+.sess .stw.working, .sess .stw.input { position: relative; display: inline-block; overflow: clip; color: var(--sh-base); }
 .sess .stw.working, #plan-now.live > span { --sh-base: var(--s-doing); --sh-peak: var(--shine); }
 .sess .stw.input { --sh-base: var(--wait-fg); --sh-peak: var(--wait-shine); }
-@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) { .sess .stw.working, .sess .stw.input { animation: none; background: none; color: var(--sh-base); } }
-/* 계획 「지금」 줄은 움직여도 될 때만 반짝인다(움직임 줄이기면 원래 색 그대로). 안쪽 기호·단계 이름도 같은 빛을 따른다 */
+.shine { display: none; }
+.shine > span { display: block; width: calc(100% / 3); color: var(--sh-peak); animation: shine-copy 2.4s linear infinite; will-change: transform; }
+@keyframes shine-win { from { transform: translateX(-66.6667%); } to { transform: none; } }
+@keyframes shine-copy { from { transform: translateX(200%); } to { transform: none; } }
+/* 빛은 움직여도 될 때만 보인다(움직임 줄이기면 세션 줄 글자는 바탕 색, 계획 「지금」 줄은 원래 색 그대로).
+   「지금」 줄은 안쪽 기호·단계 이름도 같은 빛을 따른다 */
 @media (prefers-reduced-motion: no-preference) {
-  #plan-now.live > span {
-    color: transparent; background: linear-gradient(100deg, var(--sh-base) 40%, var(--sh-peak) 50%, var(--sh-base) 60%) 0 0 / 300% 100%;
-    -webkit-background-clip: text; background-clip: text; animation: shimmer 2.4s linear infinite;
+  .sess .stw.working > .shine, .sess .stw.input > .shine, #plan-now.live > span > .shine {
+    display: block; position: absolute; left: 0; top: 0; width: 300%; height: 100%; pointer-events: none; user-select: none;
+    -webkit-mask-image: linear-gradient(100deg, transparent 40%, #000 50%, transparent 60%); mask-image: linear-gradient(100deg, transparent 40%, #000 50%, transparent 60%);
+    animation: shine-win 2.4s linear infinite; will-change: transform;
   }
-  #plan-now.live > span > .ico, #plan-now.live > span > .key { color: transparent; }
+  #plan-now.live > span { position: relative; overflow: clip; color: var(--sh-base); } /* 글자 폭의 세 배인 가림막이 칸 밖으로 넘쳐 가로 스크롤을 만들지 않게 */
+  #plan-now.live > span > .ico, #plan-now.live > span > .key { color: var(--sh-base); }
 }
+#plan-now .shine .ico, #plan-now .shine .key { color: inherit; }
 .sess .stw.working, .sess .stw.input { font-weight: 600; }
 #proj-link { flex: 0 1 auto; min-width: 6em; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 좁아지면 단계 줄 → 이름 → 프로젝트 순으로 줄어들고, 단추는 줄지도 꺾이지도 않는다 */
@@ -263,6 +268,11 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #side.fold-plan #plan > :not(.phead), #side.fold-tl #timeline > :not(.phead) { display: none; }
 #side.fold-plan #plan .phead, #side.fold-tl #timeline .phead { margin: -10px -12px; }
 #plan, #timeline { padding: 10px 12px; overflow: auto; min-height: 0; }
+/* 타임라인 칸의 높이는 바깥 칸(1fr)이 정한다. 그렇다고 알려 두면 줄이 바뀔 때마다 바깥 배치가 줄 400개의 높이를 다시 재지 않는다
+   (사건 하나에 배치 25ms → 2ms). 높이가 내용으로 정해지는 때(접은 타임라인, 좁은 화면)는 빼야 칸이 0 으로 접히지 않는다 */
+#side:not(.fold-tl) > #timeline { contain: size; }
+/* 옛 기록을 보는 중에 위에 줄이 붙으면 코드가 보던 자리를 지킨다(브라우저의 스크롤 고정까지 겹치면 두 번 옮겨 줄이 밀린다) */
+#timeline { overflow-anchor: none; }
 #plan-now { position: sticky; top: -10px; z-index: 1; margin: -4px -12px 6px; padding: 4px 12px; background: var(--panel); border-bottom: 1px solid var(--panel-2); font-weight: 600; display: flex; gap: 6px; }
 #plan-now .ico { flex: none; width: 14px; text-align: center; }
 #plan-now .key { color: var(--key); }
@@ -379,6 +389,7 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
   #sessions { max-height: 140px; border-bottom: 1px solid var(--line); }
   #fold-sessions { display: none; }
   #side, #side.fold-plan, #side.fold-tl { border-top: 1px solid var(--line); grid-template-rows: auto auto; }
+  #side:not(.fold-tl) > #timeline { contain: none; }
 }
 
 /* 이어진 대화 ◀ n/m ▶ */

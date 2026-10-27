@@ -1,7 +1,7 @@
 // 장면 규칙 시험: 명령 검사, 지금 단계, 훅 사실의 순서 처리, 재생이 실시간과 같은지
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs } from "../lib/scene.js";
+import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs } from "../lib/scene.js";
 
 // 서버처럼: 검사 → 기록(JSON) → 기록을 되읽어 적용
 function harness(resume) {
@@ -122,6 +122,54 @@ test("note: 막힘·승인 대기는 단계 상태를 바꾸고, 지금 단계�
   assert.equal(h.scene.items.s.answered, undefined);
 });
 
+test("note: 마지막 단계를 끝낸 바로 뒤의 승인 대기·막힘은 방금 끝난 단계에 붙는다(한 응답에 함께 보낸 경우)", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "s1", title: "고치기", status: "doing" }, { id: "s2", title: "검증" }] });
+  h.plan({ steps: [{ id: "s1", status: "done" }, { id: "s2", status: "doing" }] });
+  h.plan({ steps: [{ id: "s2", status: "done" }] });
+  assert.equal(currentStep(h.scene), null);
+  assert.equal(h.note({ text: "커밋해도 될지 확인", kind: "wait" }), "기록 · s2 승인 대기(방금 끝난 단계)");
+  assert.equal(h.scene.items.s2.status, "wait");
+  assert.equal(h.scene.items.s1.status, "done");
+  assert.equal(h.scene.timeline.at(-1).on, "s2");
+  assert.deepEqual(h.replay().items, h.scene.items);
+  // 사용자가 답하면 서버가 붙인 대기는 원래대로(끝) 돌아가고 지금 단계도 다시 없다
+  assert.equal(currentStep(h.scene), "s2");
+  h.fact({ f: "prompt", text: "승인" }, 5000);
+  assert.equal(h.scene.items.s2.status, "done");
+  assert.equal(h.scene.items.s2.back, undefined);
+  assert.equal(currentStep(h.scene), null);
+  assert.deepEqual(h.replay().items, h.scene.items);
+  assert.deepEqual(h.replay().cur, h.scene.cur);
+  // 가장 최근에 끝낸 단계가 실패면 그 단계에 붙인다(그 앞의 끝난 단계로 내려가지 않는다)
+  const f = harness();
+  f.plan({ steps: [{ id: "a", title: "가", status: "doing" }, { id: "b", title: "나" }] }, 1000);
+  f.plan({ steps: [{ id: "a", status: "done" }, { id: "b", status: "doing" }] }, 2000);
+  f.plan({ steps: [{ id: "b", status: "fail" }] }, 3000);
+  assert.equal(f.note({ text: "도와주세요", kind: "blocked" }, 3001), "기록 · b 막힘(방금 끝난 단계)");
+  assert.equal(f.scene.items.a.status, "done");
+  // 진행을 거치지 않고 함께 끝낸 단계들 가운데서는 뒤 단계에 붙는다
+  const k = harness();
+  k.plan({ steps: [{ id: "a", title: "가", status: "doing" }, { id: "b", title: "나" }, { id: "c", title: "다" }] });
+  k.plan({ steps: [{ id: "a", status: "done" }, { id: "b", status: "doing" }] }, 2000);
+  k.plan({ steps: [{ id: "b", status: "done" }, { id: "c", status: "done" }] }, 3000);
+  assert.equal(k.note({ text: "확인", kind: "wait" }, 3001), "기록 · c 승인 대기(방금 끝난 단계)");
+  // 지난 답에서 끝낸 단계(마지막 사용자 입력보다 앞)는 다시 열지 않는다
+  const m = harness();
+  m.plan({ steps: [{ id: "a", title: "가", status: "doing" }] }, 1000);
+  m.plan({ steps: [{ id: "a", status: "done" }] }, 2000);
+  m.fact({ f: "prompt", text: "다음 일" }, 3000);
+  assert.equal(m.note({ text: "확인", kind: "wait" }, 4000), "기록 (지금 단계 없음)");
+  assert.equal(m.scene.items.a.status, "done");
+  // 계획이 없으면 붙일 단계가 없다. 이유 메모(why)는 단계를 바꾸지 않는다
+  const g = harness();
+  assert.equal(g.note({ text: "기다림", kind: "wait" }), "기록 (지금 단계 없음)");
+  h.plan({ steps: [{ id: "s2", status: "done" }] });
+  h.note({ text: "이유", kind: "why" });
+  assert.equal(h.scene.items.s2.status, "done");
+  assert.equal(h.scene.timeline.at(-1).on, undefined);
+});
+
 test("작업 알림(sys) 입력은 제목이 되지 않고 승인 대기에 답한 것으로 치지 않는다", () => {
   const h = harness();
   h.plan({ steps: [{ id: "s", title: "고치기", status: "doing" }] });
@@ -208,6 +256,22 @@ test("ids: 이름표와 label 앞부분을 한 줄로", () => {
   h.plan({ steps: [{ id: "s1", title: "원인 찾기", status: "doing" }] });
   h.draw({ ops: [{ id: "a", kind: "box", label: "parser.c", status: "doing" }, { id: "b", kind: "box" }, { id: "e1", kind: "edge", from: "a", to: "b" }] });
   assert.equal(idsLine(h.scene), 'plan: s1 "원인 찾기" doing | draw: a "parser.c" box doing, b box, e1 a>b edge');
+});
+
+test("ids 줄이기(brief): 끝난 단계는 최근 몇 개만 제목을 싣고 나머지는 id 만, id 만 실은 단계는 한도에 세지 않는다", () => {
+  const h = harness();
+  h.plan({ steps: Array.from({ length: 6 }, (_, i) => ({ id: `u0${i + 1}`, title: `단위 ${i + 1}`, status: i < 5 ? "done" : "doing" })) });
+  h.draw({ ops: [{ id: "a", kind: "box", label: "지금 부품" }] });
+  assert.deepEqual(idsView(h.scene, 40, 2), { text: 'plan: 끝남 3: u01 u02 u03, u04 "단위 4" done, u05 "단위 5" done, u06 "단위 6" doing | draw: a "지금 부품" box', cut: false });
+  assert.equal(idsView(h.scene, 40).text, idsLine(h.scene, 40)); // brief 없이는 예전 그대로
+  assert.deepEqual(idsView(h.scene, 3, 2), { text: 'plan: 끝남 3: u01 u02 u03, u04 "단위 4" done, u05 "단위 5" done, u06 "단위 6" doing | 외 1개', cut: true });
+  // 제목을 싣는 최근 단계는 끝낸 때 순서로, id 만 싣는 단계는 최근 60개까지(넘으면 잘린 것으로 친다)
+  const g = harness();
+  for (const from of [0, 35]) g.plan({ steps: Array.from({ length: 35 }, (_, i) => ({ id: `d${from + i}`, title: `끝 ${from + i}` })) }); // 한 번에 50개까지
+  for (let i = 69; i >= 0; i--) g.plan({ steps: [{ id: `d${i}`, status: "done" }] }, 1000 + (69 - i)); // 뒤 단계부터 끝냄
+  const v = idsView(g.scene, 40, 1);
+  assert.match(v.text, /^plan: 끝남 69: d60 d59 .* d1 외 9개, d0 "끝 0" done$/);
+  assert.equal(v.cut, true);
 });
 
 test("ref 에 줄바꿈 같은 제어 문자는 받지 않는다(복사해 터미널에 붙이면 명령이 된다)", () => {

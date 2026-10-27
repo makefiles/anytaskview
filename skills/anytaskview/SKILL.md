@@ -7,6 +7,10 @@ description: Detailed guide for drawing your work on the anytaskview live progre
 
 The user follows your work on a local browser board. The MCP server instructions hold the rules; this guide adds patterns and examples. Write labels, titles and notes in the user's language.
 
+## Sending
+
+Board calls ride along with your work: put them first in the same message as your next Read, Bash, Edit or other tool calls. A message holding only board calls is a whole extra turn in which the full context is read again. After the last tool result, answer directly; a step still `doing` is closed by your next tool calls. The one exception is a `note` kind `wait` (approval) or `blocked` (stuck) right before you stop to ask the user, when no tool call is left to carry it. A step with a `wait` note stays waiting until the user answers; do not mark it `done` yourself.
+
 ## What goes where
 
 - **plan**: the steps of *your* work (investigate, design, implement, verify). One call with all steps after you form a plan; later calls send only changed statuses. Set the old step `done` and the new one `doing` in the same call.
@@ -54,6 +58,8 @@ Keep each view small: about 8 boxes, short tables and diagrams. When a structure
 
 ## Example
 
+One message: plan, draw and the first Read of the work.
+
 ```json
 plan: {"steps":[{"id":"s1","title":"원인 찾기","status":"doing"},{"id":"s2","title":"고치기"},{"id":"s3","title":"검증"}]}
 draw: {"ops":[{"id":"g","kind":"group","label":"의심 지점"},
@@ -61,8 +67,15 @@ draw: {"ops":[{"id":"g","kind":"group","label":"의심 지점"},
   {"id":"b","kind":"box","in":"g","label":"버퍼 길이","ref":"src/buf.c:40"},
   {"id":"t","kind":"table","label":"재현","cols":["입력","기대","실제"],"rows":[["빈 줄","무시","멈춤"],["한 줄","읽음","읽음"]]},
   {"id":"q","kind":"mermaid","label":"호출 순서","src":"sequenceDiagram\n  읽기->>파서: 줄\n  파서->>버퍼: 복사\n  버퍼-->>파서: 넘침"}]}
+Read: {"file_path":"src/parse.c"}
+```
+
+A later message: the note and the step change ride with the first edit of the next step.
+
+```json
 note: {"text":"빈 줄에서만 재현됨","kind":"why","on":"a"}
 plan: {"steps":[{"id":"s1","status":"done"},{"id":"s2","status":"doing"}]}
+Edit: {"file_path":"src/parse.c", …}
 ```
 
 ## Opening the board

@@ -383,6 +383,7 @@ function connect(sid) {
   state.tlTopSeq = 0;
   state.followed = null;
   canvas.reset();
+  tlCache = new Map();
   state.markerSeq = sid ? Number(store.get(`atv.seen.${sid}`) || 0) : null;
   if (sid) history.replaceState(null, "", `${location.search}#s=${encodeURIComponent(sid)}`);
   const es = openEvents(sid);
@@ -393,10 +394,19 @@ function connect(sid) {
     queueRender();
   });
   es.addEventListener("sess", (ev) => {
-    const s = JSON.parse(ev.data);
+    const s = JSON.parse(ev.data), old = state.sessions.get(s.id);
     state.sessions.set(s.id, s);
     if (!state.sid) return connect(s.id); // 처음 생긴 세션을 바로 보여 준다
-    queueRender();
+    // 바쁜 세션은 사건마다 마지막 활동 시각만 바뀐 요약을 보낸다. 목록의 「n분 전」·활동순은 2초 늦어도 되므로 모아서 그린다
+    const rest = ({ lastT, seq, ...x }) => JSON.stringify(x);
+    if (old && rest(old) === rest(s)) {
+      state.listTimer ||= setTimeout(() => { state.listTimer = 0; queueRender("list"); }, 2000);
+      return;
+    }
+    // 보는 화면이 이 세션의 요약을 쓰는 경우(같은 줄의 대화, 프로젝트의 대화 이력, 이 세션을 받는 쪽으로 연 보내기 창·모은 글)만
+    // 화면 전체를, 아니면 목록만 다시 그린다
+    const uses = isProj(state.sid) || rootOf(s.id) === rootOf(state.sid) || ask?.sid === s.id || compose.basket.sid === s.id;
+    queueRender(uses ? "all" : "list");
   });
   // 서버는 프로젝트를 목록보다 먼저 보낸다(보던 id 가 프로젝트인지 목록을 받을 때 알아야 한다)
   es.addEventListener("projects", (ev) => {
@@ -429,6 +439,7 @@ function connect(sid) {
     state.replayLoading = null;
     state.replayToken++;
     canvas.invalidate();
+    tlCache = new Map();
     queueRender();
   });
   es.addEventListener("res", (ev) => {
@@ -441,7 +452,7 @@ function connect(sid) {
     const rec = { seq: d.seq, t: d.t, res: d.res };
     if (state.replay) state.replay.records.push(rec);
     else if (state.replayLoading) state.replayLoading.push(rec); // 기록을 받는 사이에 온 변경은 받은 뒤에 이어 붙인다
-    queueRender();
+    queueRender("view"); // 세션 목록은 요약(sess)이 올 때 그린다
   });
 }
 
@@ -505,10 +516,32 @@ function threadOf(id, withEmpty = false) {
   return [...state.sessions.values()].filter((s) => (withEmpty || !s.empty || s.id === state.sid) && rootOf(s.id) === root).sort((a, b) => a.startedAt - b.startedAt);
 }
 
-function queueRender() {
+// what: "all"(기본)·"view"(세션 목록을 뺀 화면)·"list"(세션 목록만). 한 프레임에 모아 한 번 그린다
+// 반짝임(작업 중·입력 필요 글자, 계획 「지금」 줄): 글자를 한 벌 더 겹치고(빛 색) 그 위를 띠 모양 가림막이 지나가게 한다.
+// transform 만 움직여 합성 단계에서 돌므로 주 스레드가 매 프레임 다시 그리지 않는다(background-position 을 움직이던
+// 전 방식은 쉴 때도 한 코어의 4분의 1쯤을 썼다). 보일지는 CSS 가 정한다(움직임 줄이기면 숨김).
+// 위상은 문서 시계에 맞춘다. 목록·「지금」 줄을 다시 만들어도 빛이 처음부터 다시 시작하지 않는다
+const SHINE_MS = 2400;
+function addShine(host) {
+  const win = el("span", "shine"), copy = el("span");
+  copy.append(...[...host.childNodes].map((n) => n.cloneNode(true)));
+  win.setAttribute("aria-hidden", "true");
+  win.append(copy);
+  win.style.animationDelay = copy.style.animationDelay = `${-((document.timeline.currentTime ?? performance.now()) % SHINE_MS)}ms`;
+  host.append(win);
+  return host;
+}
+
+function queueRender(what = "all") {
+  if (what !== "view") state.dirtyList = true;
+  if (what !== "list") state.dirtyView = true;
   if (state.renderQueued) return;
   state.renderQueued = true;
-  requestAnimationFrame(() => { state.renderQueued = false; render(); });
+  requestAnimationFrame(() => {
+    const list = state.dirtyList, view = state.dirtyView;
+    state.renderQueued = state.dirtyList = state.dirtyView = false;
+    render({ list, view });
+  });
 }
 
 // ---- 계산 ----
@@ -546,9 +579,10 @@ function bandItems(scene) {
 }
 
 // ---- 그리기 ----
-function render() {
+function render({ list = true, view = true } = {}) {
   const scene = viewScene(), now = viewNow();
-  renderSessions(now);
+  if (list) renderSessions(now);
+  if (!view) { placeComposer(); return; } // 목록을 다시 만들면 세션 줄에 붙은 보내기 창의 자리도 다시 맞춘다
   renderTop(scene, now);
   renderPlan(scene, now);
   renderTimeline(scene, now);
@@ -594,7 +628,9 @@ function sessRow(thread, now) {
   logo.setAttribute("aria-label", agentName(s));
   const r2 = el("div", "row2 txt");
   // 상태 글자는 따로 감싸 작업 중·입력 필요면 빛이 지나가게 한다(CSS .stw)
-  r2.append(logo, el("span", `stw ${s.status}`, SESS_KO[s.status] || s.status), ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
+  const stw = el("span", `stw ${s.status}`, SESS_KO[s.status] || s.status);
+  if (s.status === "working" || s.status === "input") addShine(stw);
+  r2.append(logo, stw, ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
   b.title = `${sessName(s)}\n${agentName(s)} · ${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
   b.append(r1, r2);
   b.addEventListener("click", () => { if (s.id !== state.sid) connect(s.id); }); // 앞 대화를 보는 중이어도 줄이 보이는 대화로 간다
@@ -991,12 +1027,14 @@ function renderPlan(scene, now) {
   }
   // 지금 단계: 스크롤해도 위에 남는다
   nowBox.hidden = !cur;
-  if (cur) {
-    const st = own(scene.items, cur);
+  // 1초마다 불린다. 바뀔 때만 다시 만든다(전에는 매번 새로 만들어 반짝임이 매초 처음부터 다시 시작했다)
+  const st = cur && own(scene.items, cur), nowKey = st ? `${st.status}\n${st.title}` : null;
+  if (st && (nowKey !== renderPlan.nowKey || !nowBox.firstChild)) {
     const head = el("span", `st-${st.status}`);
     head.append(el("span", "ico", ST_ICO[st.status]), document.createTextNode(" 지금: "), el("span", "key", st.title));
-    nowBox.replaceChildren(head);
+    nowBox.replaceChildren(addShine(head));
   }
+  renderPlan.nowKey = nowKey;
   const ids = new Set(steps.map((s) => s.id));
   const parentOf = (x) => (x.parent && ids.has(x.parent) ? x.parent : "");
   // 끝났고, 그 아래도 모두 끝났고, 지금 단계를 품지 않은 단계만 숨긴다
@@ -1019,7 +1057,8 @@ function renderPlan(scene, now) {
   if (key === renderPlan.key && body.isConnected) {
     for (const li of body.querySelectorAll("li[data-id]")) {
       const stats = li.querySelector(":scope > .stats");
-      if (stats) stats.textContent = statsText(stepStats(scene, li.dataset.id, now));
+      const text = stats && statsText(stepStats(scene, li.dataset.id, now));
+      if (stats && stats.textContent !== text) stats.textContent = text;
     }
     return;
   }
@@ -1153,6 +1192,70 @@ function renderHistory(scene, now) {
   $("tl-new").hidden = true;
 }
 
+// 타임라인 줄 요소. 열쇠는 기록 번호와 그 줄의 모양을 바꾸는 값(실행 상태·걸린 시간, 보낸 글 상태, 묶은 수정 횟수)이다.
+// 기록 번호는 세션마다 따로 매기므로 다른 세션·스냅샷으로 바꿀 때 비운다
+let tlCache = new Map();
+function rowKey(scene, row, now) {
+  if (row.mark) return "mark";
+  const e = row.e;
+  if (e.type === "msg") return `m${e.seq}:${JSON.stringify(own(scene.msgs || {}, e.mid))}:${agentName(state.sessions.get(state.sid))}`;
+  if (e.type === "run") { const r = own(scene.runs, e.id); return `r${e.seq}:${JSON.stringify(r)}:${runDur(r, now) ?? ""}`; }
+  return `${e.type}${e.seq}:${row.n}`;
+}
+const runDur = (r, now) => { const d = r.state === "running" || r.state === "wait" ? now - r.start : r.dur ?? (r.end && r.start ? r.end - r.start : null); return d == null ? null : fmtDur(d); };
+function tlRow(scene, { mark, e, n }, now) {
+  if (mark) return el("li", "new-mark", "▲ 여기부터 새것");
+  const li = el("li");
+  li.append(el("span", "when", fmtClock(e.t)));
+  // 한 줄 = 시각 | 종류 표지 | 글 세 칸(.tl-k·.tl-t). 표지 칸 폭이 같아 글 머리가 줄마다 맞고, 넘어간 줄도 글 머리 아래에서 잇는다
+  const kind = (cls, label) => li.append(el("span", `tl-k${cls ? " k " + cls : ""}`, label));
+  const body = (...parts) => { const t = el("span", "tl-t"); t.append(...parts); li.append(t); return t; };
+  if (e.type === "msg") {
+    const m = own(scene.msgs || {}, e.mid);
+    kind(m.state, MSG_STATE_KO[m.state] || m.state);
+    body(`화판 → ${agentName(state.sessions.get(state.sid))} (${MSG_KIND_KO[m.kind]}${m.target ? " · " + m.target.id : ""}): ${m.text}`);
+    li.classList.add("prompt");
+    li.title = m.text;
+  } else if (e.type === "note") {
+    kind(e.kind || "note", NOTE_KO[e.kind] || "메모");
+    body(e.text + (e.on ? ` (${e.on})` : ""));
+    if (safeRef(e.ref)) { li.classList.add("copy"); li.dataset.ref = e.ref; }
+  } else if (e.type === "run") {
+    const r = own(scene.runs, e.id), dur = runDur(r, now);
+    kind(r.state, RUN_KO[r.state] || r.state);
+    const t = body(r.desc || r.cmd);
+    if (dur != null) t.append(el("span", "dur", ` · ${dur}`)); // 걸린 시간은 글 뒤에(표지를 짧게 두어 칸 폭을 맞춘다)
+    li.title = r.cmd + (r.error ? `\n${r.error}` : "");
+    if (r.agent) li.classList.add("sub");
+  } else {
+    if (e.agent) li.classList.add("sub");
+    if (e.f === "prompt") { li.classList.add(isSysPrompt(e) ? "sys" : "prompt"); li.title = e.text; }
+    // 사용자 입력은 「사용자」 표지를 붙여 화판에서 보낸 글·기계 기록과 가른다
+    if (e.f === "prompt" && !isSysPrompt(e)) { kind("user", "사용자"); body(e.text); }
+    else { const [label, text] = factParts(e); kind(`fact ${e.f}`, label); body(text); }
+    if (e.f === "edit") {
+      li.querySelector(".tl-t").append(el("span", "times", n > 1 ? `×${n}` : ""));
+      if (safeRef(e.path)) {
+        const line = String(e.lines || "").match(/^\d+/);
+        li.classList.add("copy");
+        li.dataset.ref = e.path + (line ? ":" + line[0] : "");
+        li.title = e.path;
+      }
+    }
+  }
+  return li;
+}
+// 자식들을 nodes 순서로 맞춘다. 빠진 요소를 먼저 떼고, 이미 제자리에 있는 요소는 건드리지 않는다
+function reconcile(parent, nodes) {
+  const want = new Set(nodes);
+  for (let c = parent.firstChild; c;) { const nx = c.nextSibling; if (!want.has(c)) c.remove(); c = nx; }
+  let cur = parent.firstChild;
+  for (const n of nodes) {
+    if (n === cur) cur = cur.nextSibling;
+    else parent.insertBefore(n, cur);
+  }
+}
+
 function renderTimeline(scene, now) {
   const proj = isProj(state.sid);
   $("tl-title").textContent = proj ? "대화 이력" : "타임라인";
@@ -1167,78 +1270,52 @@ function renderTimeline(scene, now) {
   const started = new Set(scene.timeline.filter((e) => e.f === "agent-start" && e.agent).map((e) => e.agent));
   const helper = (e) => e.f === "agent-stop" && !e.agentType && !started.has(e.agent);
   const entries = scene.timeline.slice(-400).reverse().filter((e) => !tlHide.has(tlKind(e)) && !(e.agent && tlHide.has("agent")) && !helper(e));
+  // 먼저 줄을 정한다: 「여기부터 새것」 표시, 같은 파일을 잇달아 고친 기록은 한 줄로(가장 최근 줄에 횟수를 붙인다)
+  const rows = [];
   let marked = false, prevEdit = null;
   for (const e of entries) {
     if (!marked && state.markerSeq && !state.replay && e.seq <= state.markerSeq && entries[0].seq > state.markerSeq) {
-      items.push(el("li", "new-mark", "▲ 여기부터 새것"));
+      rows.push({ mark: true });
       marked = true;
       prevEdit = null;
     }
-    // 같은 파일을 잇달아 고친 기록은 한 줄로 묶는다(가장 최근 줄에 횟수를 붙인다)
-    if (e.type === "fact" && e.f === "edit") {
-      if (prevEdit && prevEdit.path === e.path && prevEdit.agent === e.agent) {
-        prevEdit.n++;
-        prevEdit.times.textContent = `×${prevEdit.n}`;
-        continue;
-      }
-    }
-    const li = el("li");
-    li.append(el("span", "when", fmtClock(e.t)));
+    if (e.type === "fact" && e.f === "edit" && prevEdit && prevEdit.e.path === e.path && prevEdit.e.agent === e.agent) { prevEdit.n++; continue; }
     prevEdit = null;
-    // 한 줄 = 시각 | 종류 표지 | 글 세 칸(.tl-k·.tl-t). 표지 칸 폭이 같아 글 머리가 줄마다 맞고, 넘어간 줄도 글 머리 아래에서 잇는다
-    const kind = (cls, label) => li.append(el("span", `tl-k${cls ? " k " + cls : ""}`, label));
-    const body = (...parts) => { const t = el("span", "tl-t"); t.append(...parts); li.append(t); return t; };
-    if (e.type === "msg") {
-      const m = own(scene.msgs || {}, e.mid);
-      if (!m) continue;
-      kind(m.state, MSG_STATE_KO[m.state] || m.state);
-      body(`화판 → ${agentName(state.sessions.get(state.sid))} (${MSG_KIND_KO[m.kind]}${m.target ? " · " + m.target.id : ""}): ${m.text}`);
-      li.classList.add("prompt");
-      li.title = m.text;
-    } else if (e.type === "note") {
-      kind(e.kind || "note", NOTE_KO[e.kind] || "메모");
-      body(e.text + (e.on ? ` (${e.on})` : ""));
-      if (safeRef(e.ref)) { li.classList.add("copy"); li.dataset.ref = e.ref; }
-    } else if (e.type === "run") {
-      const r = own(scene.runs, e.id);
-      if (!r) continue;
-      const dur = r.state === "running" || r.state === "wait" ? now - r.start : r.dur ?? (r.end && r.start ? r.end - r.start : null);
-      kind(r.state, RUN_KO[r.state] || r.state);
-      const t = body(r.desc || r.cmd);
-      if (dur != null) t.append(el("span", "dur", ` · ${fmtDur(dur)}`)); // 걸린 시간은 글 뒤에(표지를 짧게 두어 칸 폭을 맞춘다)
-      li.title = r.cmd + (r.error ? `\n${r.error}` : "");
-      if (r.agent) li.classList.add("sub");
-    } else {
-      if (e.agent) li.classList.add("sub");
-      if (e.f === "prompt") { li.classList.add(isSysPrompt(e) ? "sys" : "prompt"); li.title = e.text; }
-      // 사용자 입력은 「사용자」 표지를 붙여 화판에서 보낸 글·기계 기록과 가른다
-      if (e.f === "prompt" && !isSysPrompt(e)) { kind("user", "사용자"); body(e.text); }
-      else { const [label, text] = factParts(e); kind(`fact ${e.f}`, label); body(text); }
-      if (e.f === "edit") {
-        const times = el("span", "times");
-        li.querySelector(".tl-t").append(times);
-        prevEdit = { path: e.path, agent: e.agent, n: 1, times };
-        if (safeRef(e.path)) {
-          const line = String(e.lines || "").match(/^\d+/);
-          li.classList.add("copy");
-          li.dataset.ref = e.path + (line ? ":" + line[0] : "");
-          li.title = e.path;
-        }
-      }
-    }
+    if ((e.type === "msg" && !own(scene.msgs || {}, e.mid)) || (e.type === "run" && !own(scene.runs, e.id))) continue;
+    const row = { e, n: 1 };
+    rows.push(row);
+    if (e.type === "fact" && e.f === "edit") prevEdit = row;
+  }
+  // 줄마다 그 모양을 정하는 값으로 열쇠를 만들고, 열쇠가 같으면 지난번 요소를 그대로 쓴다.
+  // 바뀌지 않은 줄을 다시 만들지 않으므로 사건 하나에 새 줄 하나만 배치된다(전에는 400줄을 매번 새로 만들었다)
+  const next = new Map();
+  for (const row of rows) {
+    let key = rowKey(scene, row, now);
+    while (next.has(key)) key += "'"; // 같은 열쇠가 둘이면(같은 기록 번호의 줄 둘) 따로 만든다
+    const li = tlCache.get(key) || tlRow(scene, row, now);
+    next.set(key, li);
     items.push(li);
   }
+  tlCache = next;
   // 새 항목은 위에 붙는다. 사용자가 아래(옛 기록)를 보고 있으면 보던 자리를 지키고 「새 항목」 단추를 띄운다
   const latest = scene.timeline.length ? scene.timeline[scene.timeline.length - 1].seq : 0;
   const away = box.scrollTop > 8 && !state.replay;
-  const before = box.scrollHeight;
-  ol.replaceChildren(...items);
+  // 보던 줄(칸 위쪽에 걸친 첫 줄)을 기준으로 삼는다. 줄을 넣고 「새 항목」 단추까지 띄운 뒤 그 줄이 같은 자리에 오게 스크롤을 옮긴다
+  // (단추도 목록을 밀어낸다). 그 줄이 없어졌으면(모양이 바뀌어 새로 만듦) 높이 차이로 맞춘다
+  let anchor = null, top = 0;
+  const before = away ? box.scrollHeight : 0;
+  if (away) {
+    const edge = box.getBoundingClientRect().top;
+    anchor = [...ol.children].find((li) => li.getBoundingClientRect().bottom > edge) || null;
+    if (anchor) top = anchor.getBoundingClientRect().top;
+  }
+  reconcile(ol, items);
   if (!away) state.tlTopSeq = latest;
-  else box.scrollTop += box.scrollHeight - before;
   const fresh = scene.timeline.filter((e) => e.seq > state.tlTopSeq).length;
   const btn = $("tl-new");
   btn.hidden = !away || !fresh;
   btn.textContent = `▲ 새 항목 ${fresh}개`;
+  if (away) box.scrollTop += anchor?.isConnected ? anchor.getBoundingClientRect().top - top : box.scrollHeight - before;
 }
 $("tl-new").addEventListener("click", () => { $("timeline").scrollTo({ top: 0, behavior: "smooth" }); });
 $("timeline").addEventListener("scroll", () => {

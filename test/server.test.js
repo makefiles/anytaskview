@@ -37,6 +37,25 @@ test("보안: Host·열쇠·Origin·읽기 토큰·본문 형식", async (t) => 
   assert.equal(st(path.join(f.home, "key.json")), 0o600);
 });
 
+test("정적 파일: ETag 가 같으면 304(읽기 토큰은 그대로 필요), 화면은 Mermaid 를 처음부터 싣지 않는다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const cookie = `atv_r=${f.keys().read}`;
+  const first = await f.request("GET", "/vendor/mermaid.js", { headers: { cookie } });
+  assert.equal(first.status, 200);
+  assert.ok(first.headers.etag);
+  assert.equal(first.headers["cache-control"], "no-cache");
+  const again = await f.request("GET", "/vendor/mermaid.js", { headers: { cookie, "if-none-match": first.headers.etag } });
+  assert.equal(again.status, 304);
+  assert.equal(again.text, "");
+  assert.equal(again.headers.etag, first.headers.etag);
+  assert.equal((await f.request("GET", "/vendor/mermaid.js", { headers: { cookie, "if-none-match": '"x"' } })).status, 200);
+  assert.equal((await f.request("GET", "/vendor/mermaid.js", { headers: { "if-none-match": first.headers.etag } })).status, 401);
+  const page = await f.read("/");
+  assert.equal(page.status, 200);
+  assert.ok(!page.text.includes("mermaid.js") && page.text.includes("/vendor/elk.js"));
+});
+
 test("깨진 요청 줄에도 서버가 죽지 않는다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
@@ -865,6 +884,11 @@ test("프로젝트 화판: project 인자는 지금 소속과 같아야 하고 c
   assert.match(await call("draw", { clear: true, project: A }), /^거부: 프로젝트 화판은/);
   assert.equal(await call("note", { text: "결정 대기", kind: "wait", on: "u2", project: A }), "기록 · u2 승인 대기");
   assert.match(await call("ids", { project: A }), /^plan: u1 "단위 1" doing, u2 "단위 2" wait \| draw: b "큰 상자" box$/);
+  // 세션을 시작할 때 실리는 프로젝트 안내: 끝난 단위는 최근 셋만 제목을 싣고 나머지는 id 만(ids 도구는 그대로 다 싣는다)
+  await call("plan", { steps: [3, 4, 5, 6, 7].map((n) => ({ id: `u${n}`, title: `단위 ${n}`, status: "done" })), project: A });
+  const note = JSON.parse((await f.hook("S1", { f: "start", source: "resume" }, { pid: P1 })).text).out;
+  assert.match(note, /plan: 끝남 2: u3 u4, u1 "단위 1" doing, u2 "단위 2" wait, u5 "단위 5" done, u6 "단위 6" done, u7 "단위 7" done \| draw: b "큰 상자" box/);
+  assert.match(await call("ids", { project: A }), /u3 "단위 3" done/);
   const pb = f.board.pboards.get(A).scene;
   assert.deepEqual([pb.items.u1.by, pb.items.b.by, pb.timeline.at(-1).by], ["S1", "S1", "S1"]);
   assert.equal(f.board.sessions.get("S1").scene.items.u1, undefined, "세션 화판에는 쓰지 않는다");
@@ -873,6 +897,10 @@ test("프로젝트 화판: project 인자는 지금 소속과 같아야 하고 c
   assert.ok((await f.read(`/api/sessions/${A}/log`)).json.length >= 4);
   await f.restart();
   assert.equal(f.board.pboards.get(A).scene.items.u2.status, "wait", "다시 띄워도 기록에서 되살아난다");
+  // 큰 그림에는 서버가 끝난 단위에 승인 대기를 붙이지 않는다(다른 대화가 끝낸 단위일 수 있다)
+  await call("plan", { steps: [{ id: "u1", status: "done" }, { id: "u2", status: "done" }], project: A });
+  assert.equal(await call("note", { text: "다음 단위 결정", kind: "wait", project: A }), "기록 (지금 단계 없음)");
+  assert.equal(f.board.pboards.get(A).scene.items.u2.status, "done");
   assert.equal((await board(f, { op: "proj-drop", pid: A })).status, 200);
   assert.ok(!fs.existsSync(path.join(f.home, "projects", `${A}.jsonl`)));
   assert.match(fs.readdirSync(path.join(f.home, "trash")).join(" "), new RegExp(`^${A}\\.\\d+\\.jsonl$`));

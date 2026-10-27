@@ -8,13 +8,14 @@ const status = { type: ["string", "null"], enum: [...STATUSES, null] };
 
 export const INSTRUCTIONS = `anytaskview: live progress board. Tools plan, draw, note, ids, project.
 The user watches this board in a browser tab to follow your work. Hooks already post file edits, commands and subagents, so never draw those.
+Board calls ride along: put them first in the same message as your other tool calls. A message holding only board calls costs a whole extra turn (the full context is read again), so do not send one, except the wait or blocked note below.
 When to call (at these moments, not on every tool call):
-- After you form a plan: plan once with all steps.
-- When a step starts or ends: plan with only the changed statuses. The current step is the step most recently set to doing, so set the old one done and the new one doing in the same call.
-- Right before you answer the user, if the step changed since your last plan call.
-- Before launching subagents: plan or draw what they will do.
-- Right before you ask the user to approve something: note kind wait. When stuck: note kind blocked.
-- Draw the structure of the problem once early in every multi-step task, right after your first plan call. Pick the form that fits the content and mix two or three forms in a view: boxes (shape, icon) and edges for the parts, suspects or options whose status you will update; a table for comparisons, options and results; mermaid for a flow the user reads as a whole (sequence, state, gantt, timeline, pie or xychart, mindmap, ER, class). Then update statuses as you go and redraw when that structure changes. Add ref (path:line) to parts tied to a file; the board marks them when the file is edited.
+- After you form a plan: plan once with all steps, in the same message as your first draw and the first tool calls of the work.
+- When a step starts or ends: plan with only the changed statuses, in the message that starts the next work. The current step is the step most recently set to doing, so set the old one done and the new one doing in the same call.
+- Closing: in the message with what you expect to be your last tool calls before you answer, mark done the steps whose work is finished; a step whose check is still running stays doing. If you will ask the user to approve something, add a note kind wait to that same message even before the check result is in (it marks the step as waiting until the user answers; do not mark that step done yourself). After the last tool result, answer directly: do not send board calls just to close steps (the board already shows the session as idle); your next tool calls close them. The one exception: if you stop to ask the user (approval, or help because you are stuck) and that note kind wait or blocked is not on the board yet, send it alone.
+- Before launching subagents: plan or draw what they will do, in the same message as the launch.
+- When stuck: note kind blocked.
+- Draw the structure of the problem once early in every multi-step task, with your first plan call. Pick the form that fits the content and mix two or three forms in a view: boxes (shape, icon) and edges for the parts, suspects or options whose status you will update; a table for comparisons, options and results; mermaid for a flow the user reads as a whole (sequence, state, gantt, timeline, pie or xychart, mindmap, ER, class). Then update statuses as you go and redraw when that structure changes. Add ref (path:line) to parts tied to a file; the board marks them when the file is edited.
 Rules: ids are yours and stable; resending an id updates only the fields you send; null clears a field. Send only changes, never the whole scene. Do not look at screenshots of the board.
 Keep each view small (about 8 boxes, short tables and diagrams). Draw problem-solving units (features, suspects, call paths), not folder layouts. The anytaskview skill has examples of each form and the command that opens the board in the user's browser (use it when the user asks to open the board).
 plan = the steps of your work. draw list + item = structure of a deliverable (document outline, checklist).

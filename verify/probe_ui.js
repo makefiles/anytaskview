@@ -1473,7 +1473,8 @@ async function main() {
     for (let k = 0; k < 2; k++) await evaluate(`document.querySelector('#group-menu .gm-del').click()`);
     await waitFor(`${JSON.stringify(olds)}.every((id) => !window.__atv.sessions.has(id))`);
     expect(board.sessions.has(sid), "지금 세션이 지워짐");
-    expect(!(await evaluate(`document.querySelector('#sess-body .pmenu[data-past=""]')`)), "지난 세션 머리가 남음");
+    // 목록은 다음 프레임에 다시 그린다(상태가 바뀐 바로 그때 읽으면 옛 목록이 보일 수 있다)
+    await waitFor(`!document.querySelector('#sess-body .pmenu[data-past=""]')`, 2000).catch(() => { throw new Error("지난 세션 머리가 남음"); });
     return `세션 ${before} → ${await evaluate(`window.__atv.sessions.size`)}`;
   });
   await check("작업 중 표시: 작업 중·입력 필요 줄은 왼쪽 띠와 바탕, 상태 글자와 계획 「지금」 줄에 빛이 지나가고(움직임 줄이기면 멈춤), 맨 위 표지는 움직이지 않음", async () => {
@@ -1488,24 +1489,73 @@ async function main() {
     const look = () => evaluate(`(() => {
       const color = (v) => { const i = document.createElement('i'); i.style.color = v; document.body.append(i); const c = getComputedStyle(i).color; i.remove(); return c; };
       const work = document.querySelector('#sess-body .sess.working'), inp = document.querySelector('#sess-body .sess.input');
-      const w = getComputedStyle(work.querySelector('.stw')), i = getComputedStyle(inp.querySelector('.stw')), now = getComputedStyle(document.querySelector('#plan-now > span'));
-      return { w: w.animationName, i: i.animationName, now: now.animationName, fill: w.color, chip: getComputedStyle(document.getElementById('sess-chip')).animationName,
+      // 빛은 겹친 글자(.shine > span)와 띠 가림막(.shine)이 transform 으로 움직여 만든다. 바탕 글자는 원래 색 그대로다
+      const win = (host) => { const s = host.querySelector(':scope > .shine'); return s && getComputedStyle(s).display !== 'none' ? getComputedStyle(s).animationName + '+' + getComputedStyle(s.firstChild).animationName : 'none'; };
+      const stw = work.querySelector('.stw');
+      return { w: win(stw), i: win(inp.querySelector('.stw')), now: win(document.querySelector('#plan-now > span')), fill: getComputedStyle(stw).color, peak: getComputedStyle(stw.querySelector('.shine > span')).color, shine: color('var(--shine)'),
+        hidden: stw.querySelector('.shine').getAttribute('aria-hidden'), chip: getComputedStyle(document.getElementById('sess-chip')).animationName,
         workLeft: getComputedStyle(work).borderLeftColor, inLeft: getComputedStyle(inp).borderLeftColor, doing: color('var(--s-doing)'), wait: color('var(--s-wait)'),
         workBg: getComputedStyle(work).backgroundColor, inBg: getComputedStyle(inp).backgroundColor };
     })()`);
     const r = await look();
-    expect(r.w === "shimmer" && r.i === "shimmer" && r.now === "shimmer" && r.fill === "rgba(0, 0, 0, 0)", `반짝임 ${r.w}/${r.i}/${r.now} ${r.fill}`);
+    const both = "shine-win+shine-copy";
+    expect(r.w === both && r.i === both && r.now === both && r.fill === r.doing && r.peak === r.shine && r.hidden === "true", `반짝임 ${JSON.stringify(r)}`);
+    // 글자 폭의 세 배인 가림막이 계획 칸에 가로 스크롤을 만들지 않는다
+    const wide = await evaluate(`(() => { const p = document.getElementById('plan'); return p.scrollWidth - p.clientWidth; })()`);
+    expect(wide <= 0, `계획 칸이 가로로 ${wide}px 넘침`);
+    // 1초마다 「지금」 줄을 고치고 목록을 다시 그려도 빛은 처음부터 다시 시작하지 않는다(위상이 문서 시계를 따른다)
+    const phase = `(() => [document.querySelector('#plan-now > span > .shine'), document.querySelector('#sess-body .sess.working .shine')].map((e) => Math.round((e.getAnimations()[0].effect.getComputedTiming().progress * 2400 - document.timeline.currentTime % 2400 + 4800) % 2400)))()`;
+    const p1 = await evaluate(phase);
+    const nodes = `[document.querySelector('#plan-now > span'), document.querySelector('#sess-body .sess.working .stw')]`;
+    await evaluate(`window.__shineOld = ${nodes}`);
+    // 「지금」 줄은 단계 이름이 바뀌면, 목록은 마지막 활동 시각만 바뀐 요약을 모아 2초 뒤에 다시 만든다
+    await mcp("plan", { steps: [{ id: "s1", title: stepTitles[0] + " (반짝임 확인)" }] });
+    await post("/api/hook", { sid, fact: { f: "run-start", id: "shine-1", cmd: "sleep 1", desc: "목록 다시 그리기" } });
+    await waitFor(`(() => { const n = ${nodes}; return n[0] !== window.__shineOld[0] && n[1] !== window.__shineOld[1]; })()`, 4000);
+    await sleep(300);
+    const p2 = await evaluate(phase);
+    await mcp("plan", { steps: [{ id: "s1", title: stepTitles[0] }] });
+    expect([...p1, ...p2].every((d) => d < 60 || d > 2340), `반짝임 위상이 문서 시계와 어긋남(다시 시작함): ${p1} → ${p2}`);
     expect(r.chip === "none", `맨 위 표지가 움직임: ${r.chip}`);
     expect(r.workLeft === r.doing && r.inLeft === r.wait && r.workBg !== "rgba(0, 0, 0, 0)" && r.inBg !== "rgba(0, 0, 0, 0)", JSON.stringify(r));
     await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     const still = await look();
     await cdp.send("Emulation.setEmulatedMedia", { features: [] });
     expect(still.w === "none" && still.i === "none" && still.now === "none" && still.fill === still.doing, `움직임 줄이기 ${JSON.stringify(still)}`);
+    await post("/api/hook", { sid, fact: { f: "run-end", id: "shine-1", cmd: "sleep 1", desc: "목록 다시 그리기" } });
     // 세션이 쉬면 계획 「지금」 줄은 멈춘다(단계는 여전히 진행 중)
     await post("/api/hook", { sid, fact: { f: "stop", last: "쉼" } });
     await waitFor(`!document.getElementById('plan-now').classList.contains('live')`);
   });
   await open(sid);
+
+  await check("타임라인은 있던 줄을 다시 만들지 않고 새 줄만 넣으며, 보지 않는 세션의 사건은 보는 화면을 다시 그리지 않음", async () => {
+    await waitFor(`document.querySelectorAll('#tl-body li').length > 3`);
+    await evaluate(`window.__tl = [...document.querySelectorAll('#tl-body li')]; window.__plan = document.querySelector('#plan-body > ul')`);
+    await mcp("note", { text: "줄 재사용 확인" });
+    await waitFor(`document.querySelector('#tl-body li')?.textContent.includes('줄 재사용 확인')`);
+    const kept = await evaluate(`window.__tl.filter((li) => li.isConnected).length + '/' + window.__tl.length`);
+    const [k, n] = kept.split("/").map(Number);
+    expect(k >= n - 1, `있던 줄을 다시 만듦: ${kept}`); // 400줄을 넘으면 맨 끝 한 줄은 빠질 수 있다
+    await evaluate(`window.__tl = [...document.querySelectorAll('#tl-body li')]`);
+    const other = `other-${process.pid}`;
+    await post("/api/hook", { sid: other, fact: { f: "start", cwd: "/tmp/다른", source: "startup" } });
+    await post("/api/hook", { sid: other, fact: { f: "prompt", text: "다른 세션" } });
+    await waitFor(`[...document.querySelectorAll('#sess-body .sess')].some((b) => b.textContent.includes('다른 세션'))`);
+    const same = await evaluate(`window.__tl.every((li, i) => document.querySelectorAll('#tl-body li')[i] === li) && document.querySelector('#plan-body > ul') === window.__plan`);
+    expect(same, "다른 세션의 사건에 타임라인·계획이 다시 만들어짐");
+    // 옛 기록을 보는 중에 위에 줄이 붙어도 보던 줄은 화면에서 제자리에 있다(코드 보정과 브라우저 스크롤 고정이 겹치지 않음)
+    for (let i = 0; i < 30; i++) await mcp("note", { text: `스크롤 채우기 ${i}` });
+    await waitFor(`document.getElementById('timeline').scrollHeight > document.getElementById('timeline').clientHeight + 300`);
+    await evaluate(`(() => { const box = document.getElementById('timeline'); box.scrollTop = 200; window.__row = [...document.querySelectorAll('#tl-body li')].find((li) => li.getBoundingClientRect().top >= box.getBoundingClientRect().top + 40); window.__rowTop = window.__row.getBoundingClientRect().top; return 1; })()`);
+    await sleep(100);
+    await mcp("note", { text: "위에 붙는 줄" });
+    await waitFor(`!document.getElementById('tl-new').hidden`);
+    const moved = await evaluate(`Math.round(window.__row.getBoundingClientRect().top - window.__rowTop)`);
+    expect(moved === 0, `보던 줄이 ${moved}px 밀림`);
+    await evaluate(`document.getElementById('timeline').scrollTop = 0`);
+    return `있던 줄 ${kept} 그대로`;
+  });
 
   for (const theme of ["light", "dark"]) {
     await check(`${theme} 테마의 모든 버튼·범위 입력 대비가 4.5 이상임`, async () => {

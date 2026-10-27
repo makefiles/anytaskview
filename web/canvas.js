@@ -77,7 +77,19 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   // (사건이 잦으면 배치가 끝나기 전에 계속 새로 시작해 자리 잡기가 늦어지고 ELK 계산이 쌓였다)
   let lastKey = null, pendingKey = null, rev = 0, prevJson = new Map(), mermaidTheme = null, mermaidSeq = 0;
 
+  // Mermaid(5.5MB)는 mermaid 부품이 처음 나올 때 불러온다. 그림이 없는 화판은 열 때마다 받고 읽느라 늦어지지 않는다
+  // 받지 못했으면 오류를 그린 배치를 확정하지 않아, 다음 그리기(다음 사건) 때 다시 배치하며 다시 받는다. 쉬는 화판은 사건이 올 때까지 기다린다
+  let mermaidLoad = null, mermaidRetry = false;
+  const loadMermaid = () => (mermaidLoad ||= new Promise((ok, no) => {
+    const s = document.createElement("script");
+    s.src = "/vendor/mermaid.js";
+    s.onload = () => ok();
+    s.onerror = () => { mermaidLoad = null; mermaidRetry = true; s.remove(); no(new Error("Mermaid 를 불러오지 못했습니다")); };
+    document.head.append(s);
+  }));
+
   async function mermaidSvg(src) {
+    try { await loadMermaid(); } catch (e) { return { error: e.message }; }
     const theme = getTheme();
     if (theme !== mermaidTheme) {
       mermaidCache.clear();
@@ -404,7 +416,8 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     try { best = await bestLayout({ byParent, parentOf, chain, size, groupMin, edges }, scene.view.dir || "RIGHT"); }
     catch (e) { console.error("ELK 배치 실패", e); if (myRev === rev) pendingKey = null; return; }
     if (myRev !== rev) return; // 늦게 끝난 옛 배치는 버린다
-    lastKey = key;
+    lastKey = mermaidRetry ? null : key;
+    mermaidRetry = false;
     pendingKey = null;
 
     const out = best.out;

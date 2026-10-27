@@ -49,5 +49,5 @@ fi
 ( set -C; : >"$D/$P.done" ) 2>/dev/null || exit 0
 # 명령문이 아니라 사실로 쓴다(Claude Code 문서: 명령 모양의 글은 주입 방어에 걸릴 수 있다)
 cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"anytaskview: ${LIMIT} tool calls have run since the user's last message and this conversation's board has no drawing yet. The user follows the work on that board; the board's rule for a multi-step task is one draw of the problem structure right after the first plan, in the forms that fit (boxes, a table, a diagram). This reminder appears once per conversation."}}
+{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"anytaskview: ${LIMIT} tool calls have run since the user's last message and this conversation's board has no drawing yet. The user follows the work on that board; the board's rule for a multi-step task is one draw of the problem structure with the first plan, in the forms that fit (boxes, a table, a diagram), sent in the same message as other tool calls. This reminder appears once per conversation."}}
 EOF
