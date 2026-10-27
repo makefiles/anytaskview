@@ -3,11 +3,11 @@
 **English summary.** anytaskview is a Claude Code plugin that shows what Claude is doing on a live board in your local browser: the plan and its current step, a diagram Claude draws while it works, notes and decisions, and facts collected automatically by hooks (file edits, commands, subagents). Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to Claude. The board UI and Claude-facing texts are in Korean.
 
 - Requirements: Claude Code with plugin support, Node.js 22.12 or later, Linux (macOS untested, Windows through WSL), a recent browser.
-- Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md).
+- Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md). Agents given only this repository URL should follow INSTALL.md from the top; the two commands alone do not start or open the board.
 - OpenAI Codex (CLI, desktop app, VS Code) works too: `codex plugin marketplace add makefiles/anytaskview`, `codex plugin add anytaskview@anytaskview`, allow the five board tools in `~/.codex/config.toml`, and trust the hooks in `/hooks`. See the Codex part of [INSTALL.md](INSTALL.md).
 - Security: the board listens on 127.0.0.1 only and every request needs a token; nothing is sent off the machine. Details and limits: [SECURITY.md](SECURITY.md).
 - License: Apache-2.0. Bundled browser libraries keep their own licenses (ELK: EPL-2.0, Mermaid: MIT).
-- Trademarks: Claude and the Claude logo are trademarks of Anthropic, PBC; Codex and the Codex logo are trademarks of OpenAI. The board shows these logos only to tell which agent a session belongs to. anytaskview is not affiliated with or endorsed by either company.
+- Trademarks: Claude and the Claude logo are trademarks of Anthropic, PBC; Codex, ChatGPT and the OpenAI logo are trademarks of OpenAI. The board shows these logos (the OpenAI logo recoloured blue for Codex sessions) only to tell which agent a session belongs to. anytaskview is not affiliated with or endorsed by either company.
 
 ---
 
@@ -40,7 +40,7 @@ Claude Code 안에서는 `/plugin marketplace add makefiles/anytaskview` 와 `/p
 
 자세한 순서와 확인 방법, 갱신·삭제는 [INSTALL.md](INSTALL.md) 에 있습니다.
 
-OpenAI Codex(터미널 `codex`, ChatGPT 데스크톱 앱, VS Code)에서도 씁니다. `codex plugin marketplace add makefiles/anytaskview` 와 `codex plugin add anytaskview@anytaskview` 로 설치하고, 그리기 도구 다섯을 사용자 Codex 설정에서 늘 허용한 뒤 `/hooks` 에서 훅을 믿어 줍니다. 순서는 [INSTALL.md](INSTALL.md) 의 「Codex 에 설치」 에 있습니다. Codex 세션은 목록 줄에 Codex 로고가 붙고, 화판에서 보낸 글은 쉬는 세션이면 바로, 일하는 중이면 그 차례가 끝난 뒤 받습니다.
+OpenAI Codex(터미널 `codex`, ChatGPT 데스크톱 앱, VS Code)에서도 씁니다. `codex plugin marketplace add makefiles/anytaskview` 와 `codex plugin add anytaskview@anytaskview` 로 설치하고, 그리기 도구 다섯을 사용자 Codex 설정에서 늘 허용한 뒤 `/hooks` 에서 훅을 믿어 줍니다. 순서는 [INSTALL.md](INSTALL.md) 의 「Codex 에 설치」 에 있습니다. Codex 세션은 목록 줄에 파란 OpenAI 로고가 붙고, 화판에서 보낸 글은 쉬는 세션이면 바로, 일하는 중이면 그 차례가 끝난 뒤 받습니다.
 
 ### LLM 에게 설치를 맡기려면
 
@@ -48,7 +48,7 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 
 > https://github.com/makefiles/anytaskview 의 INSTALL.md 를 읽고 그대로 설치하고 확인해 줘
 
-INSTALL.md 는 에이전트가 그대로 따라 할 수 있도록 명령과 확인 기준을 단계마다 적었습니다. 화판 주소에는 비밀 값이 들어 있으므로 에이전트가 그 주소를 대화창에 옮겨 적지 않고, 사용자에게 브라우저로 직접 열도록 안내하게 했습니다.
+저장소 주소만 받은 에이전트도 위 두 명령에서 멈추지 말고 INSTALL.md 를 처음부터 따라야 합니다(두 명령만으로는 화판이 뜨거나 열리지 않습니다). INSTALL.md 는 에이전트가 그대로 따라 할 수 있도록 명령과 확인 기준을 단계마다 적었습니다. 화판 주소에는 비밀 값이 들어 있으므로 에이전트가 그 주소를 대화창에 옮겨 적지 않고, 사용자에게 브라우저로 직접 열도록 안내하게 했습니다.
 
 ## 처음 열기
 
@@ -102,4 +102,4 @@ claude --plugin-dir .        # 이 폴더를 한 세션에만 붙여 시험
 
 Apache License 2.0 ([LICENSE](LICENSE)). `web/vendor/` 의 ELK(EPL-2.0)와 Mermaid(MIT)는 각자의 라이선스를 따릅니다([web/vendor/README.md](web/vendor/README.md)).
 
-Claude 와 Claude 로고는 Anthropic, PBC 의, Codex 와 Codex 로고는 OpenAI 의 상표입니다. 화판은 세션이 어느 에이전트의 것인지 알아보게 하려고만 이 로고를 보이며, anytaskview 는 두 회사와 관계가 없고 두 회사의 보증을 받지 않았습니다.
+Claude 와 Claude 로고는 Anthropic, PBC 의, Codex·ChatGPT 와 OpenAI 로고는 OpenAI 의 상표입니다. 화판은 세션이 어느 에이전트의 것인지 알아보게 하려고만 이 로고를 보이며(Codex 세션에는 OpenAI 로고를 파란색으로 칠해 씁니다), anytaskview 는 두 회사와 관계가 없고 두 회사의 보증을 받지 않았습니다.
