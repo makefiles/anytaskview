@@ -85,7 +85,7 @@
       <button id="zoom-fit" class="mini" type="button" title="화면에 맞추기">맞춤</button>
       <button id="zoom-100" class="mini" type="button" title="100% 로 되돌리기">원래 크기</button>
       <button id="zoom-in" class="mini" type="button" title="확대">+</button>
-      <button id="auto-place" class="mini" type="button" hidden title="Ctrl + 오른쪽 버튼으로 옮긴 도형을 모두 자동 자리로 되돌립니다">자동 배치로</button>
+      <button id="auto-place" class="mini" type="button" hidden title="Ctrl + 끌기로 옮긴 도형을 모두 자동 자리로 되돌립니다">자동 배치로</button>
       <span id="zoom-label" class="muted"></span>
       <button id="follow" class="mini" type="button" aria-pressed="true" title="진행 중인 상자를 따라 화면을 옮깁니다. 직접 움직이면 꺼집니다">따라가기</button>
     </div>
@@ -144,7 +144,7 @@
     <dt>프로젝트로 묶기</dt><dd>세션 목록 위 「+ 프로젝트」 로 만들고, 세션 줄을 끌어다 놓습니다.</dd>
     <dt>지난 화면 보기</dt><dd>맨 아래 재생 막대를 끕니다. 「실시간」 을 누르면 돌아옵니다.</dd>
     <dt>찾기</dt><dd>맨 위 「찾기」(또는 <kbd>/</kbd> · <kbd>Ctrl</kbd> + <kbd>K</kbd>)에 낱말을 씁니다. 이 화판의 그림·계획, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트, 다른 세션의 기록에서 찾고, 고르면 그 자리로 갑니다.</dd>
-    <dt>도형 옮기기</dt><dd><kbd>Ctrl</kbd> 을 누른 채 도형을 오른쪽 버튼으로 끌어 원하는 자리에 놓습니다. 놓은 자리는 다른 브라우저·다시 보기에서도 같고, 에이전트가 그림을 고쳐도 그대로입니다. 그림 위 「자동 배치로」 를 누르면 모두 처음 자리로 돌아갑니다.</dd>
+    <dt>도형 옮기기</dt><dd><kbd>Ctrl</kbd> 을 누른 채 도형을 끌어 원하는 자리에 놓습니다. 놓은 자리는 다른 브라우저·다시 보기에서도 같고, 에이전트가 그림을 고쳐도 그대로입니다. 그림 위 「자동 배치로」 를 누르면 모두 처음 자리로 돌아갑니다.</dd>
     <dt>그림 화면 옮기기</dt><dd>그림이 칸보다 크면 빈 곳을 마우스로 잡고 끌어 상하좌우로 봅니다. 「맞춤」 을 누르면 그림 전체가 칸에 들어갑니다.</dd>
   </dl>
 
@@ -168,8 +168,8 @@
     <dt><kbd>Shift</kbd> + <kbd>Enter</kbd></dt><dd>보내기 창에서 줄 바꾸기</dd>
     <dt>상자·단계에서 <kbd>Enter</kbd></dt><dd>그 상자·단계에 대해 보내기(<kbd>Tab</kbd> 으로 상자·단계에 갑니다)</dd>
     <dt><kbd>Ctrl</kbd> + 휠</dt><dd>그림 확대·축소(마우스 자리를 중심으로)</dd>
-    <dt><kbd>Ctrl</kbd> + 오른쪽 버튼 끌기</dt><dd>도형 옮기기(묶음은 안의 도형과 함께, 묶음 안 도형은 그 묶음 안에서)</dd>
-    <dt><kbd>Ctrl</kbd> + 오른쪽 클릭</dt><dd>옮긴 도형 하나만 처음 자리로</dd>
+    <dt><kbd>Ctrl</kbd> + 끌기</dt><dd>도형 옮기기(묶음은 안의 도형과 함께, 묶음 안 도형은 그 묶음 안에서)</dd>
+    <dt><kbd>Ctrl</kbd> + 클릭</dt><dd>옮긴 도형 하나만 처음 자리로(경로는 복사하지 않습니다)</dd>
     <dt>도형에서 <kbd>Shift</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>도형을 10px 씩 옮기기(<kbd>Tab</kbd> 으로 도형에 갑니다)</dd>
     <dt>경계선 끌기</dt><dd>패널 폭·높이 바꾸기. 두 번 누르면 기본값</dd>
     <dt>경계선에서 <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>16px 씩 옮기기</dd>
@@ -254,7 +254,7 @@
   <details>
     <summary>도형 옮기기</summary>
     <ul>
-      <li><kbd>Ctrl</kbd> 을 누른 채 오른쪽 버튼으로 도형을 끌어 놓습니다. 그냥 끌면(왼쪽 버튼) 지금처럼 그림 화면이 움직입니다.</li>
+      <li><kbd>Ctrl</kbd> 을 누른 채 도형을 끌어 놓습니다. <kbd>Ctrl</kbd> 없이 끌면 지금처럼 그림 화면이 움직이고, 누르면 경로를 복사합니다.</li>
       <li>묶음을 옮기면 안의 도형이 함께 갑니다. 묶음 안의 도형은 그 묶음 밖으로 나가지 않습니다. 목록 안의 항목과 선은 따로 옮기지 않고, 옮긴 도형에 닿는 선은 다시 그어집니다.</li>
       <li>놓은 자리는 화판 기록에 남습니다. 다른 탭·브라우저와 다시 보기에서도 같고, 에이전트가 새 도형을 그려 다시 배치해도 옮긴 도형은 그 자리에 있습니다. 겹치면 다시 옮기거나 「자동 배치로」 를 누릅니다.</li>
       <li>에이전트가 도형을 다른 묶음으로 옮기거나 지우면 그 도형의 놓은 자리도 없어집니다.</li>

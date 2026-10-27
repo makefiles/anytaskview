@@ -564,7 +564,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     onPlaced();
   }
 
-  // ---- 도형 옮기기: Ctrl + 오른쪽 버튼으로 끈다. 움직이지 않고 누르면 그 도형만 자동 자리로. 초점이 있으면 Shift + 화살표 ----
+  // ---- 도형 옮기기: Ctrl + 왼쪽 버튼으로 끈다. 움직이지 않고 누르면 그 도형만 자동 자리로. 초점이 있으면 Shift + 화살표 ----
   // 놓으면 바로 그 자리에 두고(pending) 기록이 오기를 기다린다. 기록하지 못하면 되돌린다
   // inAt: 끌기 시작 때 그 부품의 묶음. 그사이 Claude 가 묶음을 바꿨으면 서버가 옛 묶음 기준의 자리를 받지 않는다
   function commit(id, raw, inAt = own(lastScene?.items || {}, id)?.in ?? null) {
@@ -591,7 +591,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     return !!why;
   };
   root.addEventListener("pointerdown", (ev) => {
-    if (ev.button !== 2 || !ev.ctrlKey) return;
+    if (ev.button !== 0 || !ev.ctrlKey) return;
     const e = movable(ev);
     if (!e) return;
     ev.preventDefault();
@@ -604,7 +604,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   root.addEventListener("pointermove", (ev) => {
     if (!drag || ev.pointerId !== drag.pointerId) return;
     if (!drag.moved && Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) < 4) return;
-    if (!drag.moved) { drag.moved = true; drag.el.classList.add("dragging"); }
+    if (!drag.moved) { drag.moved = true; drag.el.classList.add("dragging"); root.classList.add("moving"); }
     const at = local(ev);
     drag.pos = { x: drag.base.x + at.x - drag.start.x, y: drag.base.y + at.y - drag.start.y };
     if (!drag.raf) drag.raf = requestAnimationFrame(() => { if (drag) { drag.raf = 0; place(lastScene); } });
@@ -613,9 +613,13 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     if (!drag || ev.pointerId !== drag.pointerId) return;
     const d = drag;
     drag = null;
-    menuGuardT = performance.now();
     if (d.raf) cancelAnimationFrame(d.raf);
     d.el.classList.remove("dragging");
+    root.classList.remove("moving");
+    // 끌기·Ctrl + 클릭 바로 뒤의 클릭 하나는 경로 복사로 치지 않는다(Ctrl 을 먼저 떼고 버튼을 놓아도). 클릭이 오지 않을 때
+    // 다음 진짜 클릭을 먹지 않게 다음 차례에 푼다
+    swallowClick = true;
+    setTimeout(() => { swallowClick = false; }, 0);
     if (cancel) { place(lastScene); return; }
     if (d.moved) commit(d.id, d.pos, d.inAt);
     else if (posOfScene(d.id)) commit(d.id, null, d.inAt); // 움직이지 않고 누름: 옮긴 도형이면 자동 자리로
@@ -625,12 +629,10 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   const posOfScene = (id) => (pending.has(id) ? pending.get(id).pos : own(lastScene?.items || {}, id)?.pos || null);
   root.addEventListener("pointerup", (ev) => endDrag(ev, false));
   root.addEventListener("pointercancel", (ev) => endDrag(ev, true));
-  // Ctrl + 오른쪽 클릭의 브라우저 메뉴를 그림 어디서든 막는다(Linux·macOS 는 누를 때, Windows 는 뗄 때 뜬다).
-  // 끄는 동안은 포인터를 그림이 붙잡고 있어 메뉴 이벤트가 도형이 아니라 그림 자체로 온다
-  root.addEventListener("contextmenu", (ev) => { if (ev.ctrlKey || drag) ev.preventDefault(); });
-  // Windows 는 오른쪽 버튼을 뗄 때 메뉴가 뜨고, 그때 Ctrl 을 이미 뗐을 수 있다. 끌기를 끝낸 바로 뒤의 메뉴는 막는다
-  let menuGuardT = -1e9;
-  document.addEventListener("contextmenu", (ev) => { if (performance.now() - menuGuardT < 500) ev.preventDefault(); }, true);
+  // macOS 는 Ctrl + 왼쪽 클릭을 오른쪽 클릭으로 보아 메뉴를 띄운다. 끄는 중(누른 뒤 뗄 때까지)에만 막고,
+  // Windows·Linux 의 Ctrl + 오른쪽 클릭 메뉴는 그대로 둔다
+  let swallowClick = false;
+  root.addEventListener("contextmenu", (ev) => { if (drag) ev.preventDefault(); });
   root.addEventListener("keydown", (ev) => {
     const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[ev.key];
     if (!step || !ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) return;
@@ -642,8 +644,9 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     if (base) commit(e.dataset.id, { x: base.x + step[0] * MOVE_STEP, y: base.y + step[1] * MOVE_STEP });
   });
 
-  // 부품이나 항목을 누르면 ref 를 복사한다
+  // 부품이나 항목을 누르면 ref 를 복사한다. Ctrl 을 누른 채면 도형 옮기기라 하지 않는다
   root.addEventListener("click", (ev) => {
+    if (ev.ctrlKey || swallowClick) return;
     const mail = ev.target.closest(".badge.mail");
     if (mail) { onMail(mail.closest(".part")?.dataset.id); return; } // 보낸 글 수는 복사하지 않고 보내기 창을 연다
     const hit = ev.target.closest("[data-ref]");
@@ -653,7 +656,17 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   return {
     render,
     // 재고 있던 배치도 버린다(rev). 그대로 두면 끝난 뒤 lastKey 를 채워 다시 배치하라는 요청을 지운다
-    reset() { rev++; lastKey = pendingKey = null; prevJson = new Map(); mermaidCache.clear(); layout = null; pending.clear(); drag = null; },
+    reset() {
+      rev++; lastKey = pendingKey = null; prevJson = new Map(); mermaidCache.clear(); layout = null; pending.clear();
+      // 끄는 중에 다른 세션으로 바뀌었다: 끄기를 버린다(들린 모양·커서·글자 고르기 막기를 풀고 포인터를 놓는다)
+      if (drag) {
+        if (drag.raf) cancelAnimationFrame(drag.raf);
+        drag.el.classList.remove("dragging");
+        try { root.releasePointerCapture(drag.pointerId); } catch { /* 이미 놓음 */ }
+        drag = null;
+      }
+      root.classList.remove("moving");
+    },
     invalidate() { rev++; lastKey = pendingKey = null; },
     isEmpty: () => nodes.size === 0,
     busy: () => pendingKey !== null, // 배치를 재는 중(부품이 아직 옛 자리나 0,0 에 있다)

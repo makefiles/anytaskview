@@ -194,9 +194,10 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .elabel { position: absolute; font-size: 12px; line-height: 16px; color: var(--muted); background: var(--bg); padding: 0 3px; white-space: nowrap; }
 
 .part { position: absolute; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--s-todo); border-radius: 6px; padding: 6px 30px 6px 9px; max-width: 260px; }
-/* Ctrl + 오른쪽 버튼으로 끄는 도형: 다른 도형 위로 올리고 그림자로 들린 것처럼 보인다 */
+/* Ctrl + 끌기로 옮기는 도형: 다른 도형 위로 올리고 그림자로 들린 것처럼 보인다 */
 .part.dragging { z-index: 5; box-shadow: 0 6px 18px rgb(0 0 0 / 0.28); cursor: grabbing; }
 .part.group.dragging { z-index: 0; }
+#canvas.moving { user-select: none; cursor: grabbing; } /* 끄는 동안 글자를 고르지 않는다 */
 .part.nostatus { border-left-color: var(--line); }
 .part.group { background: transparent; border-style: dashed; border-left-style: solid; padding: 0; max-width: none; }
 .part.group > .lbl { padding: 4px 30px 0 9px; color: var(--muted); }

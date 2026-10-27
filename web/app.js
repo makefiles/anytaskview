@@ -109,7 +109,7 @@ const canvas = createCanvas($("canvas"), {
   getTheme: theme,
   // 배치를 고를 때 쓰는 칸 크기(100% 기준). 지금 배율로 나누면 줄여 둔 화면에서는 긴 띠도 「다 들어간다」가 되어 그대로 남는다
   getViewport: () => ({ w: scroller.clientWidth - 32, h: scroller.clientHeight - 32 }),
-  // 도형 옮기기(Ctrl + 오른쪽 끌기·Shift + 화살표): 옮긴 자리는 화판 기록에 남는다
+  // 도형 옮기기(Ctrl + 왼쪽 끌기·Shift + 화살표): 옮긴 자리는 화판 기록에 남는다
   canMove: () => (!canWrite() ? "도형을 옮기려면 화판 쓰기 열쇠가 필요합니다(맨 위 「쓰기 열쇠 없음」 의 설명)" : state.replay || state.replayLoading ? "다시 보기 중에는 옮기지 않습니다. 「실시간」 으로 돌아온 뒤 옮겨 주세요" : null),
   onMove: async (id, pos, inAt) => (await boardOp({ op: "move", sid: state.sid, id, in: inAt, ...(pos ? pos : { x: null }) })).ok,
   onRefuse: toast,
@@ -290,7 +290,7 @@ scroller.addEventListener("pointerdown", () => { if (view.follow) setFollow(fals
 const pan = { id: null, x: 0, y: 0, left: 0, top: 0, moved: false };
 const scrollable = () => scroller.scrollWidth > scroller.clientWidth + 1 || scroller.scrollHeight > scroller.clientHeight + 1;
 scroller.addEventListener("pointerdown", (ev) => {
-  if (ev.button !== 0 || ev.pointerType === "touch" || !scrollable() || ev.target.closest("button, input, textarea, a, .badge")) return;
+  if (ev.button !== 0 || ev.ctrlKey || ev.pointerType === "touch" || !scrollable() || ev.target.closest("button, input, textarea, a, .badge")) return; // Ctrl 이면 도형 옮기기
   Object.assign(pan, { id: ev.pointerId, x: ev.clientX, y: ev.clientY, left: scroller.scrollLeft, top: scroller.scrollTop, moved: false });
 });
 scroller.addEventListener("pointermove", (ev) => {

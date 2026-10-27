@@ -1558,7 +1558,7 @@ async function main() {
     return `있던 줄 ${kept} 그대로`;
   });
 
-  // ---- 19: 도형 옮기기(Ctrl + 오른쪽 끌기) ----
+  // ---- 19: 도형 옮기기(Ctrl + 왼쪽 끌기) ----
   const mv = `move-${process.pid}`;
   const mvHook = (fact) => post("/api/hook", { sid: mv, pid: process.pid + 140, fact });
   const mvDraw = (input) => post("/api/mcp", { env: mv, cwd, tool: "draw", input });
@@ -1566,25 +1566,27 @@ async function main() {
   await mvHook({ f: "prompt", text: "도형 옮기기 시험" });
   await mvDraw({ ops: [
     { id: "g", kind: "group", label: "묶음" }, { id: "a", kind: "box", label: "가 상자", in: "g" }, { id: "b", kind: "box", label: "나 상자", in: "g" },
-    { id: "c", kind: "box", label: "다 상자" }, { id: "ac", kind: "edge", from: "a", to: "c" }, { id: "bc", kind: "edge", from: "b", to: "c" },
+    { id: "c", kind: "box", label: "다 상자", ref: "/tmp/옮기기/c.js:3" }, { id: "ac", kind: "edge", from: "a", to: "c" }, { id: "bc", kind: "edge", from: "b", to: "c" },
   ] });
   await open(mv);
   await settledPositions();
   const rect = (id) => evaluate(`(() => { const r = document.querySelector('#canvas .part[data-id="${id}"]').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })()`);
   const pathD = (id) => evaluate(`document.querySelector('#canvas path[data-id="${id}"]')?.getAttribute('d') || ''`);
-  const rightDrag = async (id, dx, dy, top = false) => {
+  const ctrlDrag = async (id, dx, dy, top = false) => {
     const r = await rect(id), x = r.x + Math.min(20, r.w / 2), y = top ? r.y + 10 : r.y + r.h / 2; // top: 묶음 제목 자리
-    const ev = (type, px, py, buttons) => cdp.send("Input.dispatchMouseEvent", { type, x: px, y: py, button: "right", buttons, modifiers: 2, clickCount: 1 });
-    await ev("mousePressed", x, y, 2);
-    for (let i = 1; i <= 8; i++) await ev("mouseMoved", x + (dx * i) / 8, y + (dy * i) / 8, 2);
+    const ev = (type, px, py, buttons) => cdp.send("Input.dispatchMouseEvent", { type, x: px, y: py, button: "left", buttons, modifiers: 2, clickCount: 1 });
+    await ev("mousePressed", x, y, 1);
+    for (let i = 1; i <= 8; i++) await ev("mouseMoved", x + (dx * i) / 8, y + (dy * i) / 8, 1);
     await ev("mouseReleased", x + dx, y + dy, 0);
   };
   const posOf = (id) => board.sessions.get(mv).scene.items[id].pos;
-  await check("도형 옮기기: Ctrl + 오른쪽 끌기로 옮기고 기록에 남으며, 닿는 선만 다시 긋고 「자동 배치로」 가 보임", async () => {
+  await check("도형 옮기기: Ctrl + 왼쪽 끌기로 옮기고 기록에 남으며, 닿는 선만 다시 긋고 「자동 배치로」 가 보임(화면 끌기·경로 복사·글자 고르기는 하지 않음)", async () => {
     await evaluate(`window.__ctx = 0; document.addEventListener('contextmenu', (e) => { if (!e.defaultPrevented) window.__ctx++; }, { capture: false }); 1`);
     const before = await rect("c"), dAc = await pathD("ac"), zoom = await evaluate("window.__atv && Number(localStorage.getItem('atv.zoom') || 1)");
     expect(await evaluate(`document.getElementById('auto-place').hidden`), "옮기기 전에 「자동 배치로」 가 보임");
-    await rightDrag("c", 90, 60);
+    const scroll0 = await evaluate(`[document.getElementById('canvas-scroll').scrollLeft, document.getElementById('canvas-scroll').scrollTop].join()`);
+    await evaluate(`document.getElementById('toast').hidden = true; 1`);
+    await ctrlDrag("c", 90, 60);
     await waitFor(`!!${JSON.stringify(mv)} && document.getElementById('auto-place').hidden === false`);
     const p = posOf("c");
     expect(p && Number.isInteger(p.x) && Number.isInteger(p.y), `기록된 자리 없음 ${JSON.stringify(p)}`);
@@ -1592,18 +1594,21 @@ async function main() {
     const after = await rect("c");
     expect(Math.abs(after.x - before.x - 90) <= 2 && Math.abs(after.y - before.y - 60) <= 2, `옮긴 거리 ${after.x - before.x},${after.y - before.y}(배율 ${zoom})`);
     expect((await pathD("ac")) !== dAc, "닿는 선을 다시 긋지 않음");
-    expect((await evaluate("window.__ctx")) === 0, "Ctrl + 오른쪽 클릭에 브라우저 메뉴가 뜸");
+    expect((await evaluate("window.__ctx")) === 0, "Ctrl + 클릭에 브라우저 메뉴가 뜸");
+    expect(await evaluate(`document.getElementById('toast').hidden`), `끈 뒤 경로를 복사함: ${await evaluate(`document.getElementById('toast').textContent`)}`);
+    expect((await evaluate(`[document.getElementById('canvas-scroll').scrollLeft, document.getElementById('canvas-scroll').scrollTop].join()`)) === scroll0, "Ctrl + 끌기에 그림 화면도 움직임");
+    expect((await evaluate(`String(getSelection())`)) === "", "끄는 동안 글자가 골라짐");
     return `c → ${JSON.stringify(p)}`;
   });
   await check("도형 옮기기: 묶음 안 도형은 묶음 밖으로 나가지 않고, 묶음을 옮기면 안의 도형이 함께 가며, 다시 열어도 그 자리", async () => {
     const g0 = await rect("g");
-    await rightDrag("a", -400, -400);
+    await ctrlDrag("a", -400, -400);
     await waitFor(`true`);
     for (let i = 0; i < 40 && !posOf("a"); i++) await sleep(50);
     const a = await rect("a"), g = await rect("g");
     expect(a.x >= g.x && a.y >= g.y && a.x + a.w <= g.x + g.w + 1 && a.y + a.h <= g.y + g.h + 1, `묶음 밖으로 나감 ${JSON.stringify({ a, g })}`);
     const b0 = await rect("b");
-    await rightDrag("g", 40, 120, true);
+    await ctrlDrag("g", 40, 120, true);
     for (let i = 0; i < 40 && !posOf("g"); i++) await sleep(50);
     await sleep(200);
     const g1 = await rect("g"), b1 = await rect("b");
@@ -1627,9 +1632,10 @@ async function main() {
     await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39, modifiers: 8 });
     for (let i = 0; i < 40 && posOf("c").x === p0.x; i++) await sleep(50);
     expect(posOf("c").x === p0.x + 10 && posOf("c").y === p0.y, `Shift + → ${JSON.stringify(posOf("c"))}`);
-    await rightDrag("c", 0, 0);
+    await ctrlDrag("c", 0, 0);
     for (let i = 0; i < 40 && posOf("c"); i++) await sleep(50);
-    expect(!posOf("c") && posOf("g"), "Ctrl + 오른쪽 클릭이 그 도형만 되돌리지 않음");
+    expect(!posOf("c") && posOf("g"), "Ctrl + 클릭이 그 도형만 되돌리지 않음");
+    expect(await evaluate(`document.getElementById('toast').hidden || !document.getElementById('toast').textContent.includes('c.js')`), "Ctrl + 클릭이 경로를 복사함");
     await evaluate(`document.getElementById('auto-place').click()`);
     for (let i = 0; i < 40 && Object.values(board.sessions.get(mv).scene.items).some((x) => x.pos); i++) await sleep(50);
     expect(!Object.values(board.sessions.get(mv).scene.items).some((x) => x.pos), "「자동 배치로」 뒤에도 옮긴 자리가 남음");
