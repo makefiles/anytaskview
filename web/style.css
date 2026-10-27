@@ -4,6 +4,7 @@
   --accent: #1f5fd1; --focus: #1f5fd1; --flash: #fff3b0;
   --s-todo: #7b818c; --s-doing: #1f5fd1; --s-done: #1a7f37; --s-fail: #c42b1c; --s-blocked: #c2410c; --s-wait: #9a6700;
   --band-bg: #fff4e5; --band-fg: #6b3500; --edge: #6b7280; --input-bg: #ffffff; --input-fg: #1f2328;
+  --on-accent: #ffffff;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -12,6 +13,7 @@
     --accent: #6ea8ff; --focus: #6ea8ff; --flash: #4a4320;
     --s-todo: #9aa1ab; --s-doing: #6ea8ff; --s-done: #56c26a; --s-fail: #ff6b5e; --s-blocked: #ff9a52; --s-wait: #e3b341;
     --band-bg: #3a2a12; --band-fg: #ffd9a8; --edge: #8b939e; --input-bg: #24282d; --input-fg: #e6e8eb;
+    --on-accent: #15171a;
     color-scheme: dark;
   }
 }
@@ -20,16 +22,17 @@
   --accent: #6ea8ff; --focus: #6ea8ff; --flash: #4a4320;
   --s-todo: #9aa1ab; --s-doing: #6ea8ff; --s-done: #56c26a; --s-fail: #ff6b5e; --s-blocked: #ff9a52; --s-wait: #e3b341;
   --band-bg: #3a2a12; --band-fg: #ffd9a8; --edge: #8b939e; --input-bg: #24282d; --input-fg: #e6e8eb;
+  --on-accent: #15171a;
   color-scheme: dark;
 }
 
-/* 글자는 14(본문)·13(타임라인·코드)·12(보조) 셋만 쓰고, 줄 높이는 px 로 4px 격자에 맞춘다 */
+/* 글자는 14(본문)·13(타임라인·보조 글)·12(표지·코드·작은 단추) 셋만 쓰고, 줄 높이는 px 로 4px 격자에 맞춘다 */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; } /* display 를 정한 요소도 hidden 이면 숨긴다 */
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg); color: var(--fg); font: 14px/20px system-ui, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
-  display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden;
+  display: grid; grid-template-rows: auto auto 1fr auto; grid-template-columns: minmax(0, 1fr); overflow: hidden; /* 맨 위 줄의 최소 폭이 화면 폭을 밀어내지 않게 */
 }
 button, input, select {
   font: inherit; color: var(--input-fg); background: var(--input-bg); border: 1px solid var(--line); border-radius: 6px;
@@ -42,21 +45,38 @@ button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 code, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; }
 h2 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--muted); margin: 0; }
-.muted { color: var(--muted); font-size: 12px; line-height: 16px; }
+.muted { color: var(--muted); font-size: 13px; line-height: 18px; }
+
+/* 아이콘(.i)과 받는 쪽 로고(.logo): index.html 의 SVG 심벌. 아이콘은 글자색을 따른다 */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+svg.i { width: 16px; height: 16px; flex: none; }
+svg.logo { width: 16px; height: 16px; flex: none; color: var(--fg); }
+button:has(> svg) { display: inline-flex; align-items: center; gap: 6px; }
+/* 맨 위 「Claude/Codex 에 보내기」: 다른 단추와 가르도록 강조색 테두리·글자 */
+button.send { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+button.send:disabled { border-color: var(--line); color: var(--input-fg); font-weight: 400; }
+/* 지금 보내기: 색을 채운 주 단추 하나(보내기 창) */
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+button.primary:hover { filter: brightness(1.08); }
+button.primary:disabled { background: var(--input-bg); border-color: var(--line); color: var(--input-fg); filter: none; }
+/* 맨 위의 테마·설정·도움말: 아이콘만(이름은 title·aria-label) */
+button.icon { padding: 5px 6px; }
 .phead { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }
 .phead h2 { flex: none; }
 
 /* 띠(#band)가 숨으면 칸을 차지하지 않으므로, 각 영역의 행을 못박아 둔다 */
 #top { grid-row: 1; } #band { grid-row: 2; } main { grid-row: 3; } #replay { grid-row: 4; }
 #top { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 42px; }
-#headline { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#headline { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex-shrink: 4; } /* 좁으면 먼저 줄어들어 오른쪽 단추를 밀어내지 않는다 */
 #stall { color: var(--s-blocked); font-weight: 600; }
 .grow { flex: 1; }
 .chip { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; line-height: 18px; border: 1px solid currentColor; white-space: nowrap; }
 .chip.warn { color: var(--s-blocked); }
 .chip.working { color: var(--s-doing); } .chip.input { color: var(--s-wait); } .chip.idle { color: var(--s-todo); } .chip.ended { color: var(--muted); }
 .chip.proj { color: var(--accent); } .chip.proj.ended { color: var(--muted); }
-#proj-link { flex: none; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#proj-link { flex: 0 1 auto; min-width: 6em; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 좁아지면 단계 줄 → 이름 → 프로젝트 순으로 줄어들고, 단추는 줄지도 꺾이지도 않는다 */
+#top > button:not(#sess-name):not(#proj-link), #top > .chip { flex: none; white-space: nowrap; }
 #proj-link.none { color: var(--muted); border-style: dashed; }
 
 /* 주의 띠: 승인 대기 → 막힘 → 실패 순서. 항목마다 「보기」로 그 자리에 간다 */
@@ -68,7 +88,7 @@ h2 { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--muted); 
 #band button { color: var(--band-fg); background: transparent; border-color: currentColor; }
 
 /* 세 칸과 그 사이 경계선. 폭은 app.js 가 변수로 정한다 */
-main { display: grid; grid-template-columns: var(--w-left, 220px) 6px minmax(0, 1fr) 6px var(--w-right, 30%); min-height: 0; }
+main { display: grid; grid-template-columns: var(--w-left, 260px) 6px minmax(0, 1fr) 6px var(--w-right, 30%); min-height: 0; }
 /* 숨긴(display:none) 경계선은 격자 칸을 차지하지 않으므로, 접을 때는 칸 목록에서도 그 칸을 뺀다 */
 main.fold-left { grid-template-columns: 40px minmax(0, 1fr) 6px var(--w-right, 30%); }
 main.fold-left #split-left { display: none; }
@@ -89,8 +109,11 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .sess.sel { background: var(--panel-2); border-color: var(--accent); }
 .sess.ended { opacity: .6; }
 .sess .row1 { display: flex; gap: 6px; align-items: baseline; font-weight: 600; line-height: 18px; }
-.sess .row1 .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sess .row2 { color: var(--muted); font-size: 12px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 제목은 두 줄까지 보이고 넘치면 말줄임 */
+.sess .row1 .txt { overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.sess .row2 { color: var(--muted); font-size: 13px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess .row2 svg.logo { width: 14px; height: 14px; margin-right: 4px; vertical-align: -3px; }
+#sess-agent { width: 18px; height: 18px; }
 .sico { flex: none; width: 14px; text-align: center; color: var(--s-todo); }
 .sico.working { color: var(--s-doing); } .sico.input { color: var(--s-wait); } .sico.ended { color: var(--muted); }
 
@@ -118,10 +141,11 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .part.group > .lbl { padding: 4px 30px 0 9px; color: var(--muted); }
 .part .lbl { font-weight: 600; overflow-wrap: anywhere; }
 .part .ref { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 16px; color: var(--muted); overflow-wrap: anywhere; }
-.part .pnote { font-size: 12px; line-height: 16px; color: var(--muted); }
+.part .pnote { font-size: 13px; line-height: 18px; color: var(--muted); }
 .part .stchip { position: absolute; right: 5px; top: 5px; font-size: 12px; line-height: 16px; width: 22px; text-align: center; color: var(--s-todo); }
 .part .badges { position: absolute; right: 6px; bottom: -9px; display: flex; gap: 4px; }
-.badge { font-size: 12px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--panel); line-height: 16px; }
+/* 표지는 상자 아래 테두리에 걸친다. 바탕색 테를 둘러 테두리 선과 떨어져 보이게 한다 */
+.badge { font-size: 12px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--panel); line-height: 16px; box-shadow: 0 0 0 2px var(--bg); }
 .badge.edited { background: var(--s-done); }
 .part.has-ref { cursor: copy; }
 .part.text .body { white-space: pre-wrap; font-size: 13px; max-width: 320px; }
@@ -145,6 +169,7 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .part.st-doing { box-shadow: 0 0 0 1px var(--s-doing); }
 .flash { animation: flash 2s ease-out; }
 @keyframes flash { from { background: var(--flash); } to { background: var(--panel); } }
+@media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
 .part.group.flash { animation: none; }
 
 /* 오른쪽: 계획(위)과 타임라인(아래). 높이는 app.js 가 변수로 정하고, 접으면 머리줄만 남는다 */
@@ -164,7 +189,7 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .tree .step.cur { background: var(--panel-2); outline: 1px solid var(--s-doing); }
 .tree .head { display: flex; gap: 6px; }
 .tree .title { font-weight: 600; }
-.tree .stats, .tree .snote { color: var(--muted); font-size: 12px; line-height: 16px; padding-left: 20px; }
+.tree .stats, .tree .snote { color: var(--muted); font-size: 13px; line-height: 18px; padding-left: 20px; }
 .tag { font-size: 12px; line-height: 16px; padding: 0 5px; border-radius: 4px; background: var(--panel-2); color: var(--muted); margin-left: 4px; }
 
 #tl-filters { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
@@ -172,7 +197,13 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #tl-body { list-style: none; margin: 0; padding: 0; }
 #tl-body li { padding: 2px 0; border-bottom: 1px solid var(--panel-2); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
 #tl-body li.sub { padding-left: 14px; color: var(--muted); }
-#tl-body li .when { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+#tl-body li .when { color: var(--muted); font-size: 13px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+/* 타임라인(.hang): 시각을 왼쪽 칸에 두고 글은 그 오른쪽에 내어 써서 줄이 바뀌어도 글 머리가 맞는다 */
+#tl-body.hang li { position: relative; padding-left: 64px; }
+#tl-body.hang li .when { position: absolute; left: 0; top: 2px; font-weight: 400; } /* 굵은 줄(사용자·화판 글)에서도 칸 폭을 넘지 않게 */
+#tl-body.hang li.sub { padding-left: 78px; }
+#tl-body.hang li.new-mark { padding-left: 0; }
+#tl-body .k.user { color: var(--fg); }
 #tl-body li.prompt { font-weight: 600; }
 #tl-body li.prompt, #tl-body li.sys { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 #tl-body li.sys { color: var(--muted); }
@@ -187,12 +218,12 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 
 #replay { display: flex; align-items: center; gap: 10px; padding: 6px 14px; background: var(--panel); border-top: 1px solid var(--line); }
 #slider { flex: 1; accent-color: var(--accent); background: transparent; border: 0; }
-#replay-label { color: var(--muted); font-size: 12px; min-width: 170px; }
+#replay-label { color: var(--muted); font-size: 13px; min-width: 170px; }
 #toast { position: fixed; z-index: 16; right: 16px; bottom: 56px; background: var(--fg); color: var(--bg); padding: 6px 12px; border-radius: 6px; font-size: 13px; }
 #measure { position: absolute; left: -10000px; top: 0; visibility: hidden; }
 
 /* 맨 위 줄의 세션 이름(눌러서 바꾸기)과 묶음·보내기 */
-#sess-name { border: 0; background: transparent; padding: 0 2px; font-weight: 600; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+#sess-name { border: 0; background: transparent; padding: 0 2px; font-weight: 600; min-width: 4em; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
 #sess-name:hover { text-decoration: underline dotted; }
 #name-form { display: flex; gap: 4px; }
 #name-input { width: 24ch; padding: 0 6px; }
@@ -212,12 +243,16 @@ main.fold-left .ghead { display: none; }
 /* Claude 에 보내기: 오른쪽 아래에 떠 있는 작은 창 */
 #composer { position: fixed; left: 8px; top: 8px; z-index: 15; width: min(380px, calc(100vw - 16px)); max-height: 60vh; overflow: auto; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 #composer .to { margin: 0; font-size: 13px; line-height: 18px; color: var(--muted); overflow-wrap: anywhere; }
-#ask { position: fixed; z-index: 14; padding: 0 8px; font-size: 12px; line-height: 20px; border-radius: 10px; border-color: var(--accent); color: var(--accent); background: var(--panel); box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
+#composer h2 { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); }
+#composer .hint { margin: 0; font-size: 13px; line-height: 18px; color: var(--muted); }
+#composer .hint:empty { display: none; }
+/* 상자·단계 위 말풍선: 받는 쪽 로고 + 보내기. 높이 24px(누르기 쉬운 최소 크기) */
+#ask { position: fixed; z-index: 14; padding: 0 8px; font-size: 12px; line-height: 22px; gap: 4px; border-radius: 12px; border-color: var(--accent); color: var(--accent); background: var(--panel); box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
+#ask svg.logo { width: 14px; height: 14px; }
 #composer .crow button { flex: none; }
 #composer .field { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 #composer textarea { font: inherit; width: 100%; resize: vertical; color: var(--input-fg); background: var(--input-bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
 #composer .crow { display: flex; align-items: center; gap: 8px; }
-#composer .crow .muted { flex: 1; }
 #c-list { list-style: none; margin: 0; padding: 0; }
 /* 모은 글 띠: 화면 아래 가운데, 재생 막대 위 */
 #basket { position: fixed; left: 50%; transform: translateX(-50%); bottom: 56px; z-index: 13; width: min(480px, calc(100vw - 32px)); max-height: 45vh; overflow: auto; padding: 8px 12px; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); display: grid; gap: 6px; }
@@ -257,14 +292,28 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 #help, #settings { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 10px 16px 14px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
 #help::backdrop, #settings::backdrop { background: rgba(0, 0, 0, .35); }
 #help h3, #settings h3 { font-size: 14px; line-height: 20px; font-weight: 600; margin: 12px 0 4px; }
-#help p, #help li, #help dt, #help dd, #settings p { font-size: 13px; line-height: 20px; }
+#settings p { font-size: 13px; line-height: 20px; }
 #help p, #settings p { margin: 0; }
 #settings label { display: grid; gap: 2px; margin: 8px 0 4px; font-size: 13px; line-height: 20px; }
 #settings input { padding: 2px 6px; }
 #settings .crow { display: flex; margin-top: 10px; }
-#help ul { margin: 0; padding-left: 18px; }
-#help dl.keys { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; }
-#help dd { margin: 0; color: var(--muted); }
+/* 도움말: 자주 하는 일·표시의 뜻·단축키는 왼쪽 이름, 오른쪽 설명의 두 칸. 자세한 규칙은 접어 둔다 */
+#help { width: min(720px, calc(100vw - 32px)); padding: 12px 20px 18px; }
+#help .lead, #help li, #help dt, #help dd { font-size: 14px; line-height: 22px; }
+#help h3 { margin: 18px 0 6px; }
+#help > .phead { position: sticky; top: -12px; z-index: 1; margin: -12px 0 6px; padding: 12px 0 6px; background: var(--panel); } /* 내려 읽어도 「닫기」 가 보인다 */
+#help dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; }
+#help dd { margin: 0; }
+#help dl.tasks dt { font-weight: 600; }
+#help dl.legend dt { display: flex; align-items: center; gap: 6px; }
+#help .legend [class*="st-"] { color: var(--st); font-weight: 600; }
+#help .legend .badge { cursor: default; box-shadow: none; }
+#help dl.keys dd { color: var(--muted); }
+#help details { border-top: 1px solid var(--line); }
+#help details:last-of-type { border-bottom: 1px solid var(--line); }
+#help summary { cursor: pointer; padding: 8px 0; font-weight: 600; font-size: 14px; line-height: 22px; }
+#help details ul { margin: 0 0 12px; padding-left: 20px; }
+#help li + li { margin-top: 4px; }
 kbd { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; line-height: 16px; padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); }
 
 /* 세션 줄과 묶음: 줄을 끌어 묶음(머리나 그 아래 어디든)에 놓는다. ⋯ 는 줄에 마우스를 올리거나 초점이 있을 때 보인다 */
@@ -280,6 +329,7 @@ body.dragging .gsec.drop { outline: 2px solid var(--accent); background: var(--p
 #group-menu { position: fixed; z-index: 20; min-width: 180px; max-width: 280px; max-height: 60vh; overflow: auto; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
 #group-menu .gm-title { font-size: 12px; line-height: 16px; color: var(--muted); padding: 2px 8px 4px; }
 #group-menu .gm-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 4px 8px; font-size: 13px; line-height: 20px; }
+#group-menu .gm-item:has(> svg) { display: flex; }
 #group-menu .gm-item:hover, #group-menu .gm-item:focus-visible { background: var(--panel-2); }
 #group-menu .gm-item[aria-checked="true"]::before { content: "✓ "; }
 #group-menu input { width: 100%; }

@@ -30,6 +30,16 @@ function el(tag, cls, text) {
   if (text !== undefined) e.textContent = text;
   return e;
 }
+// index.html 의 SVG 심벌(아이콘·로고)을 쓴다. 글자 노드가 없어 단추의 textContent 는 그대로다
+function icon(id, cls) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"), use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  svg.setAttribute("class", cls);
+  svg.setAttribute("aria-hidden", "true");
+  use.setAttribute("href", `#${id}`);
+  svg.append(use);
+  return svg;
+}
+const setIcon = (svg, id) => { const use = svg.querySelector("use"); if (use.getAttribute("href") !== `#${id}`) use.setAttribute("href", `#${id}`); };
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* 저장이 막힌 브라우저에서도 화면은 돈다 */ } },
@@ -54,7 +64,14 @@ function fmtAgo(t, now) {
   if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}시간 전`;
   return new Date(t).toLocaleDateString("ko-KR");
 }
-const fmtClock = (t) => new Date(t).toLocaleTimeString("ko-KR", { hour12: false });
+// 단계에 걸린 시간은 분 단위로 보인다(초 단위는 1초마다 바뀌어 눈을 끈다)
+function fmtMin(ms) {
+  if (!(ms >= 0)) return "";
+  const m = Math.floor(ms / 60_000);
+  return m < 1 ? "1분 미만" : m < 60 ? `${m}분` : `${Math.floor(m / 60)}시간 ${m % 60}분`;
+}
+const pad2 = (n) => String(n).padStart(2, "0");
+const fmtClock = (t) => { const d = new Date(t); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
 const base = (p) => String(p || "").split("/").filter(Boolean).pop() || p || "";
 const sessName = (s) => s.name || s.title || base(s.cwd) || s.id.slice(0, 8);
 
@@ -142,13 +159,13 @@ const projOf = (sid) => {
 
 // ---- 패널 폭·접힘 ----
 // left 는 px, right·plan 은 비율. 화면 크기가 바뀌어도 같은 느낌이 나게 하고, 쓸 때마다 범위로 자른다
-const LAYOUT_DEFAULT = { left: 220, right: 0.3, plan: 0.4, foldLeft: false, foldPlan: false, foldTl: false };
+const LAYOUT_DEFAULT = { left: 260, right: 0.3, plan: 0.4, foldLeft: false, foldPlan: false, foldTl: false };
 const layout = { ...LAYOUT_DEFAULT, ...store.json("atv.layout", {}) };
 const main = document.querySelector("main"), side = $("side");
 
 function applyLayout() {
   const W = main.clientWidth || window.innerWidth, H = side.clientHeight || 400;
-  layout.left = clamp(num(layout.left, 220), 160, 360);
+  layout.left = clamp(num(layout.left, LAYOUT_DEFAULT.left), 160, 360);
   const left = layout.foldLeft ? 40 : layout.left;
   // 오른쪽: 300px~화면 60%, 그림 칸은 화면 30% 이상 남긴다
   const rightMax = Math.max(300, Math.min(0.6 * W, W - left - 12 - 0.3 * W));
@@ -459,7 +476,7 @@ function stepStats(scene, id, now) {
   return { files, cmds, fails, elapsed };
 }
 // 프로젝트 화판의 단위에는 훅 사실(파일·명령)이 붙지 않으므로 걸린 시간만 보인다
-const statsText = (x) => (isProj(state.sid) ? fmtDur(x.elapsed) : `${fmtDur(x.elapsed)} · 파일 ${x.files} · 명령 ${x.cmds}${x.fails ? `(실패 ${x.fails})` : ""}`);
+const statsText = (x) => (isProj(state.sid) ? fmtMin(x.elapsed) : `${fmtMin(x.elapsed)} · 파일 ${x.files} · 명령 ${x.cmds}${x.fails ? `(실패 ${x.fails})` : ""}`);
 // 날짜가 다르면 날짜도(프로젝트의 대화 이력은 며칠에 걸친다)
 const fmtWhen = (t, now) => (new Date(t).toDateString() === new Date(now).toDateString() ? fmtClock(t) : new Date(t).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }));
 
@@ -493,7 +510,11 @@ function render() {
   const hasParts = Object.values(scene.items).some((it) => it.kind !== "step");
   $("empty").hidden = hasParts;
   $("empty").textContent = isProj(state.sid) ? "아직 큰 그림이 없습니다. 이 프로젝트에 든 대화의 Claude·Codex 가 작업 단위를 시작·끝낼 때 그립니다." : `아직 그림이 없습니다. ${agentName(state.sessions.get(state.sid))} 가 draw 로 그리면 여기에 나타납니다.`;
-  if (!ONLY_TL) canvas.render(scene).then(() => { followNow(); placeComposer(); }).catch((e) => console.error("그림 실패", e));
+  if (!ONLY_TL) canvas.render(scene).then(() => {
+    for (const p of $("canvas").querySelectorAll(".part[data-id]")) markSend(p, "상자");
+    followNow();
+    placeComposer();
+  }).catch((e) => console.error("그림 실패", e));
   markSeen();
 }
 
@@ -503,16 +524,30 @@ function render() {
 const gfold = new Set(Array.isArray(store.json("atv.gfold", [])) ? store.json("atv.gfold", []) : []);
 const DRAG_TYPE = "text/x-atv-sid";
 const canWrite = () => !!store.get("atv.w");
+// 상자·단계에서 보내기 창을 열 수 있는가(프로젝트 화판·재생 중·쓰기 열쇠 없음이면 아니다)
+const sendable = () => canWrite() && !state.replay && !!state.sid && !isProj(state.sid);
+// 열 수 있을 때만 화면 읽기 프로그램에 Enter 동작을 알린다
+function markSend(e, what) {
+  if (sendable()) { e.setAttribute("aria-keyshortcuts", "Enter"); e.setAttribute("aria-description", `Enter: 이 ${what}에 대해 보내기`); }
+  else { e.removeAttribute("aria-keyshortcuts"); e.removeAttribute("aria-description"); }
+}
 function sessRow(thread, now) {
   const s = thread[0], mine = thread.some((x) => x.id === state.sid);
   const row = el("div", "srow");
   const b = el("button", "sess" + (mine ? " sel" : "") + (s.status === "ended" ? " ended" : ""));
   b.type = "button";
+  if (mine) b.setAttribute("aria-current", "true");
   const r1 = el("div", "row1");
   r1.append(el("span", `sico ${s.status}`, SESS_ICO[s.status] || "○"), el("span", "txt", sessName(s)));
   const more = thread.length > 1 ? ` · 대화 ${thread.length}` : "";
-  const r2 = el("div", "row2 txt", `${s.agent === "codex" ? "Codex · " : ""}${SESS_KO[s.status] || s.status} · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
-  b.title = `${sessName(s)}\n${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
+  // 둘째 줄 맨 앞의 로고가 받는 쪽이다. 화면 읽기 프로그램에는 이름으로 읽힌다
+  const logo = icon(agentLogo(s), "logo");
+  logo.removeAttribute("aria-hidden");
+  logo.setAttribute("role", "img");
+  logo.setAttribute("aria-label", agentName(s));
+  const r2 = el("div", "row2 txt");
+  r2.append(logo, `${SESS_KO[s.status] || s.status} · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
+  b.title = `${sessName(s)}\n${agentName(s)} · ${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
   b.append(r1, r2);
   b.addEventListener("click", () => { if (s.id !== state.sid) connect(s.id); }); // 앞 대화를 보는 중이어도 줄이 보이는 대화로 간다
   const menu = el("button", "mini smenu", "⋯");
@@ -582,6 +617,7 @@ function projHead(p, count) {
   const pr = state.projects.projects[p];
   const name = el("button", "gfold" + (state.sid === p ? " sel" : ""), `${pr.name} · ${count}`);
   name.type = "button";
+  if (state.sid === p) name.setAttribute("aria-current", "true");
   name.dataset.pid = p;
   name.title = `${pr.name}${pr.purpose ? `\n${pr.purpose}` : ""}\n눌러서 큰 그림 보기${pr.cur ? ` · 지금 ${pr.cur}` : ""}${pr.left ? ` · 남은 단계 ${pr.left}` : ""}`;
   name.addEventListener("click", () => { if (state.sid !== p) connect(p); });
@@ -711,12 +747,15 @@ function renderTop(scene, now) {
   if ($("name-form").hidden) $("sess-name").textContent = proj || s ? name : "";
   $("sess-name").title = proj ? "눌러서 이 프로젝트의 이름을 바꿉니다" : "눌러서 이 세션의 이름을 바꿉니다";
   $("sess-name").hidden = !(s || proj) || !$("name-form").hidden;
+  $("sess-agent").toggleAttribute("hidden", !s || !!proj); // svg 에는 hidden 속성(IDL)이 없다
+  if (s) { setIcon($("sess-agent"), agentLogo(s)); $("sess-agent").setAttribute("aria-label", agentName(s)); }
   renderThreadNav(s);
   renderProjLink(s);
   // 프로젝트 화판은 대화가 아니라 받을 Claude 가 없다. 대화를 골라 보낸다
   $("compose").disabled = !canWrite() || !!proj;
   const who = agentName(state.sessions.get(state.sid));
-  $("compose").textContent = `${who} 에 보내기`;
+  setIcon($("compose").querySelector("svg"), agentLogo(state.sessions.get(state.sid)));
+  $("compose").querySelector("span").textContent = `${who} 에 보내기`;
   $("compose").title = proj ? "프로젝트 화판에서는 보내지 않습니다. 오른쪽 아래 대화 이력에서 대화를 골라 보내세요" : canWrite() ? `지금 보는 세션 전체에 대해 의견·지시를 써서 ${who} 에 보냅니다. 상자·단계에 대해서는 그 위의 「보내기」 를 누릅니다` : $("nokey").title;
   renderComposer(scene);
   const needs = band.some((x) => x.kind === "input" || x.kind === "wait");
@@ -849,6 +888,7 @@ function renderPlan(scene, now) {
       const li = el("li", "step" + (s.id === cur ? " cur" : ""));
       li.dataset.id = s.id;
       li.tabIndex = 0; // 키보드로 단계에 가서 Enter 로 Claude 에 보낸다
+      markSend(li, "단계");
       const head = el("div", `head st-${s.status}`);
       head.append(el("span", "ico", ST_ICO[s.status]), el("span", "title", s.title));
       if (s.status !== "todo" && s.status !== "doing") head.append(el("span", "tag", ST_KO[s.status]));
@@ -973,6 +1013,8 @@ function renderTimeline(scene, now) {
   $("tl-title").textContent = proj ? "대화 이력" : "타임라인";
   $("tl-filters").hidden = proj;
   $("popout").hidden = proj;
+  // 시각을 왼쪽 칸에 두고 글은 그 오른쪽에 내어 쓴다(대화 이력은 날짜가 붙어 폭이 달라 그대로 둔다)
+  $("tl-body").classList.toggle("hang", !proj);
   if (proj) return renderHistory(scene, now);
   const ol = $("tl-body"), box = $("timeline");
   const items = [];
@@ -1017,7 +1059,9 @@ function renderTimeline(scene, now) {
     } else {
       if (e.agent) li.classList.add("sub");
       if (e.f === "prompt") { li.classList.add(isSysPrompt(e) ? "sys" : "prompt"); li.title = e.text; }
-      li.append(document.createTextNode(factText(e)));
+      // 사용자 입력은 「사용자」 표지를 붙여 화판에서 보낸 글·기계 기록과 가른다
+      if (e.f === "prompt" && !isSysPrompt(e)) li.append(el("span", "k user", "사용자"), document.createTextNode(e.text));
+      else li.append(document.createTextNode(factText(e)));
       if (e.f === "edit") {
         const times = el("span", "times");
         li.append(times);
@@ -1119,10 +1163,13 @@ $("live").addEventListener("click", () => {
 });
 
 // ---- 테마 ----
-const THEMES = ["", "light", "dark"], THEME_KO = { "": "자동", light: "밝게", dark: "어둡게" };
+const THEMES = ["", "light", "dark"], THEME_KO = { "": "자동", light: "밝게", dark: "어둡게" }, THEME_ICO = { "": "i-auto", light: "i-sun", dark: "i-moon" };
 function applyTheme(t) {
   if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
-  $("theme").textContent = `테마: ${THEME_KO[t]}`;
+  const next = THEMES[(THEMES.indexOf(t) + 1) % THEMES.length];
+  setIcon($("theme").querySelector("svg"), THEME_ICO[t]);
+  $("theme").setAttribute("aria-label", `테마: ${THEME_KO[t]}`);
+  $("theme").title = `테마: ${THEME_KO[t]} · 누르면 ${THEME_KO[next]}`;
 }
 applyTheme(store.get("atv.theme") || "");
 $("theme").addEventListener("click", () => {
@@ -1300,6 +1347,7 @@ function messageItem(sid) {
   b.type = "button";
   b.setAttribute("role", "menuitem");
   const s = state.sessions.get(sid);
+  b.prepend(icon(agentLogo(s), "logo"));
   if (!s || s.status === "ended") {
     b.setAttribute("aria-disabled", "true");
     b.title = "끝난 대화에는 보낼 수 없습니다";
@@ -1516,6 +1564,7 @@ const SEND_HINT_CODEX = {
   working: "일하는 중이라 이번 차례가 끝난 뒤 새 차례로 받습니다.",
 };
 const agentName = (s) => (s?.agent === "codex" ? "Codex" : "Claude");
+const agentLogo = (s) => (s?.agent === "codex" ? "logo-codex" : "logo-claude");
 function renderComposer(scene, force = false) {
   if (composer.hidden || !ask) return;
   const mine = ask.sid === state.sid;
@@ -1538,7 +1587,11 @@ function renderComposer(scene, force = false) {
   $("c-collect").disabled = $("c-send").disabled;
   const codex = s?.agent === "codex";
   const head = `${agentName(s)} 에 보내기`;
-  if ($("composer").querySelector("h2").textContent !== head) { $("composer").querySelector("h2").textContent = head; $("composer").setAttribute("aria-label", head); }
+  if ($("c-head").textContent !== head) {
+    $("c-head").textContent = head;
+    $("composer").setAttribute("aria-label", head);
+    setIcon($("composer").querySelector("h2 svg"), agentLogo(s));
+  }
   $("c-hint").textContent = (compose.saved ? "" : "저장되지 않음: 이 탭을 닫으면 쓰던 글이 사라집니다. ") + (ended ? "끝난 세션에는 보낼 수 없습니다."
     : codex && s.qerr ? `Codex 에 보내지 못했습니다(${s.qerr}). 다음에 보낼 때나 그 세션의 차례가 끝날 때 다시 보냅니다.`
     : codex ? (s.inbox ? SEND_HINT_CODEX[s.status] || "Codex 가 받을 준비가 됐습니다. 승인 창은 대신하지 못하니 Codex 화면에서 답하세요."
@@ -1749,10 +1802,11 @@ const askBtn = $("ask");
 let askFor = null, askHide = 0;
 const askHost = (t) => (t instanceof Element ? t.closest("#canvas .part[data-id], #plan-body li[data-id]") : null);
 function showAsk(hit) {
-  if (!canWrite() || state.replay || !state.sid || isProj(state.sid)) return;
+  if (!sendable()) return;
   clearTimeout(askHide);
   askFor = hit;
   const who = agentName(state.sessions.get(state.sid));
+  setIcon(askBtn.querySelector("svg"), agentLogo(state.sessions.get(state.sid)));
   askBtn.setAttribute("aria-label", hit.matches("li") ? `이 단계에 대해 ${who} 에 보내기` : `이 상자에 대해 ${who} 에 보내기`);
   askBtn.hidden = false;
   // 상자는 오른쪽 위 가장자리에 걸쳐 올려 이름을 가리지 않는다(위가 화판 밖이면 안쪽). 상자와 맞닿게 두어야
@@ -1769,7 +1823,7 @@ function hideAsk(now = false) {
   if (now) go(); else askHide = setTimeout(go, 400);
 }
 function askAbout(hit) {
-  if (!canWrite() || state.replay || !state.sid || isProj(state.sid)) return;
+  if (!sendable()) return;
   const id = hit.dataset.id, inPlan = hit.matches("li");
   const find = () => (inPlan ? $("plan-body").querySelector(`li[data-id="${CSS.escape(id)}"]`) : canvas.elementOf(id));
   hideAsk(true);

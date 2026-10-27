@@ -401,6 +401,38 @@ async function main() {
       await cdp.send("Emulation.clearDeviceMetricsOverride");
     }
   });
+  await check("1440·1100px 화면: 맨 위 줄이 넘치지 않고(긴 제목·단계 줄은 줄어듦), 아이콘 단추에 이름이 있으며, 타임라인 시각이 시:분:초", async () => {
+    const out = [];
+    try {
+      for (const width of [1440, 1100]) {
+        await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
+        await waitFor(`innerWidth === ${width}`);
+        // 가장 넓은 경우를 만든다: 긴 이름·프로젝트·단계 줄(1초 뒤 화면이 다시 그려 되돌린다)
+        const top = await evaluate(`(() => {
+          const long = '아주 긴 세션 이름으로 맨 위 줄이 넘치는지 보는 시험 '.repeat(3);
+          document.getElementById('sess-name').textContent = long;
+          document.getElementById('headline').textContent = '지금 ' + long + ' · 1분 미만 · 파일 12 · 명령 34(실패 5)';
+          const pl = document.getElementById('proj-link'), plHidden = pl.hidden;
+          pl.hidden = false; pl.textContent = '프로젝트 ' + long;
+          const t = document.getElementById('top'), last = document.getElementById('help-open').getBoundingClientRect();
+          const compose = document.getElementById('compose').getBoundingClientRect();
+          const r = { sw: t.scrollWidth, cw: t.clientWidth, right: Math.round(last.right), vw: innerWidth, bodyW: document.body.scrollWidth, composeH: Math.round(compose.height) };
+          pl.hidden = plHidden;
+          return r;
+        })()`);
+        expect(top.composeH <= 30, `${width}px 에서 보내기 단추 글자가 꺾임 ${JSON.stringify(top)}`);
+        expect(top.bodyW <= top.vw, `${width}px 에서 화면 폭을 넘음 ${JSON.stringify(top)}`);
+        expect(top.sw <= top.cw && top.right <= top.vw, `${width}px 에서 맨 위 줄 넘침 ${JSON.stringify(top)}`);
+        out.push(`${width}: ${top.sw}/${top.cw}px`);
+      }
+      expect(await evaluate(`['theme', 'settings-open', 'help-open'].every((id) => document.getElementById(id).getAttribute('aria-label'))`), "아이콘 단추에 이름(aria-label)이 없음");
+      expect(await evaluate(`/^\\d{2}:\\d{2}:\\d{2}$/.test(document.querySelector('#tl-body li .when')?.textContent || '')`), "타임라인 시각이 시:분:초 가 아님");
+      return out.join(", ");
+    } finally {
+      await cdp.send("Emulation.clearDeviceMetricsOverride");
+      await settledPositions(); // 화면 폭이 바뀌어 다시 고른 배치가 끝난 뒤 다음 검사로 간다
+    }
+  });
   await check("배율 단추가 그림만 키우고 부품 배치는 그대로 둠", async () => {
     const layoutOf = `JSON.stringify([...document.querySelectorAll('#canvas .part')].map((p) => [p.dataset.id, p.style.left, p.style.top]))`;
     const before = await evaluate(layoutOf);
@@ -515,6 +547,7 @@ async function main() {
     await evaluate(`document.querySelector('#canvas .part[data-id="big"]').focus()`);
     await sleep(200);
     expect(await evaluate(`document.getElementById('ask').hidden`), "프로젝트 화판에 말풍선이 뜸(받을 Claude 가 없다)");
+    expect(await evaluate(`!document.querySelector('#canvas .part[aria-keyshortcuts], #plan-body li[aria-keyshortcuts]')`), "프로젝트 화판의 상자·단계가 Enter 보내기를 알림");
     // 다른 세션의 사건으로 대화 이력을 다시 그려도 그 단추의 초점이 남는다
     await waitFor(`document.querySelector('#tl-body .hist') !== null`);
     await evaluate(`document.querySelector('#tl-body .hist').focus()`);
@@ -585,7 +618,9 @@ async function main() {
     await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: (box.x + box.r) / 2, y: (box.y + box.b) / 2 });
     await waitFor(`!document.getElementById('ask').hidden`);
     // 실제 마우스로 말풍선까지 옮겨 누른다(묶음 안 상자라 사이에 묶음을 지나면 묶음의 말풍선으로 바뀐다)
-    const ab = await evaluate(`(() => { const r = document.getElementById('ask').getBoundingClientRect(); return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 }; })()`);
+    const ab = await evaluate(`(() => { const r = document.getElementById('ask').getBoundingClientRect(); return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2, h: r.height }; })()`);
+    expect(ab.h >= 24, `말풍선 높이 ${ab.h}px(24px 이상이어야 누르기 쉽다)`);
+    expect(await evaluate(`document.querySelector('#canvas .part[data-id="box-a"]').getAttribute('aria-keyshortcuts') === 'Enter'`), "보낼 수 있는 상자가 Enter 보내기를 알리지 않음");
     const from = { x: (box.x + box.r) / 2, y: (box.y + box.b) / 2 };
     for (let i = 1; i <= 20; i++) await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x + (ab.x - from.x) * i / 20, y: from.y + (ab.y - from.y) * i / 20 });
     for (const type of ["mousePressed", "mouseReleased"]) await cdp.send("Input.dispatchMouseEvent", { type, x: ab.x, y: ab.y, button: "left", clickCount: 1 });
@@ -663,21 +698,25 @@ async function main() {
     await waitFor(`window.__atv.sid === '${sid}' && document.querySelectorAll('#canvas .part').length > 0`);
     await post("/api/hook", { sid: other, pid: process.pid + 7, fact: { f: "end", reason: "other" } });
   });
-  await check("Codex 세션: 목록 줄에 「Codex」, 보내기 창 제목·안내가 받는 쪽 이름으로 바뀜", async () => {
+  await check("Codex 세션: 목록 줄·메뉴·보내기 창의 로고와 제목·안내가 받는 쪽으로 바뀜", async () => {
     const cx = `codex-${process.pid}`;
+    const logoOf = (sel) => `document.querySelector(${JSON.stringify(sel)})?.querySelector('use')?.getAttribute('href')`;
     await post("/api/hook", { sid: cx, pid: process.pid + 9, fact: { f: "start", cwd: "/tmp/코덱스", source: "startup", via: "codex" } });
     await post("/api/hook", { sid: cx, pid: process.pid + 9, fact: { f: "prompt", text: "코덱스 세션의 일" } });
     await post("/api/hook", { sid: cx, pid: process.pid + 9, fact: { f: "stop", last: "" } });
-    await waitFor(`document.querySelector('#sess-body .sess[data-sid="${cx}"] .row2')?.textContent.startsWith('Codex · ')`);
+    await waitFor(`${logoOf(`#sess-body .sess[data-sid="${cx}"] .row2 svg.logo`)} === '#logo-codex' &&
+      document.querySelector('#sess-body .sess[data-sid="${cx}"] .row2 svg.logo').getAttribute('aria-label') === 'Codex' &&
+      ${logoOf(`#sess-body .sess[data-sid="${sid}"] .row2 svg.logo`)} === '#logo-claude'`);
     await evaluate(`document.querySelector('#sess-body .smenu[data-sid="${cx}"]').click()`);
-    await waitFor(`!document.getElementById('group-menu').hidden && document.querySelector('#group-menu .gm-item')?.textContent === '메시지 보내기…'`);
+    await waitFor(`!document.getElementById('group-menu').hidden && document.querySelector('#group-menu .gm-item')?.textContent === '메시지 보내기…' && ${logoOf("#group-menu .gm-item")} === '#logo-codex'`);
     await evaluate(`document.querySelector('#group-menu .gm-item').click()`);
-    await waitFor(`!document.getElementById('composer').hidden && document.querySelector('#composer h2').textContent === 'Codex 에 보내기' && document.getElementById('c-hint').textContent.includes('바로 깨웁니다')`);
+    await waitFor(`!document.getElementById('composer').hidden && document.querySelector('#composer h2').textContent === 'Codex 에 보내기' && ${logoOf("#composer h2")} === '#logo-codex' && document.getElementById('c-hint').textContent.includes('바로 깨웁니다')`);
     await key("Escape", "Escape", 27);
     await waitFor(`document.getElementById('composer').hidden`);
     // Claude 세션의 보내기 창은 제목이 다시 Claude 로 돌아온다
+    expect(await evaluate(`${logoOf("#compose")} === '#logo-claude' && document.getElementById('compose').textContent === 'Claude 에 보내기'`), "맨 위 보내기 단추가 Claude 가 아님");
     await evaluate(`document.getElementById('compose').click()`);
-    await waitFor(`!document.getElementById('composer').hidden && document.querySelector('#composer h2').textContent === 'Claude 에 보내기'`);
+    await waitFor(`!document.getElementById('composer').hidden && document.querySelector('#composer h2').textContent === 'Claude 에 보내기' && ${logoOf("#composer h2")} === '#logo-claude'`);
     await key("Escape", "Escape", 27);
     await waitFor(`document.getElementById('composer').hidden`);
     await post("/api/hook", { sid: cx, pid: process.pid + 9, fact: { f: "end", reason: "other" } });

@@ -8,8 +8,21 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<!-- 아이콘은 여기 한 번 그려 두고 <use href="#..."> 로 쓴다. 로고 둘은 받는 쪽(Claude·Codex)을 알아보게 하는 것으로,
+     각 회사가 낸 VS Code 확장(Claude Code, Codex)에 든 공식 파일의 경로를 바꾸지 않고 옮겼다(README 의 상표 고지) -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M3 11.5 21 4l-7.5 17-2.6-6.9L3 11.5Zm7.9 2.6L21 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></g></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h9M19 7h1M4 17h3M13 17h7"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="17" r="2.5"/></g></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.2" r="1.2" fill="currentColor"/></symbol>
+  <symbol id="logo-claude" viewBox="0 0 24 24"><path fill="#D97757" d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></symbol>
+  <symbol id="logo-codex" viewBox="0 0 24 24"><path fill="currentColor" d="M20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20C16.4183 20 20 16.4183 20 12ZM16 13.5C16.5523 13.5 17 13.9477 17 14.5C17 15.0523 16.5523 15.5 16 15.5H13C12.4477 15.5 12 15.0523 12 14.5C12 13.9477 12.4477 13.5 13 13.5H16ZM7.98535 8.64258C8.42937 8.37617 8.99745 8.49427 9.30078 8.90039L9.35742 8.98535L10.8574 11.4854L10.9199 11.6074C11.0269 11.858 11.0269 12.142 10.9199 12.3926L10.8574 12.5146L9.35742 15.0146C9.07324 15.4881 8.45888 15.6415 7.98535 15.3574C7.51188 15.0732 7.35846 14.4589 7.64258 13.9854L8.83301 12L7.64258 10.0146L7.59473 9.92383C7.37931 9.46516 7.54152 8.90898 7.98535 8.64258ZM22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z"/></symbol>
+</svg>
 <header id="top">
   <span id="sess-chip" class="chip"></span>
+  <svg id="sess-agent" class="logo" role="img" hidden><use href="#logo-claude"/></svg>
   <button id="sess-name" class="name" type="button" title="눌러서 이 세션의 이름을 바꿉니다"></button>
   <form id="name-form" hidden><input id="name-input" maxlength="80" aria-label="세션 이름"><button type="submit" class="mini">저장</button><button type="button" id="name-cancel" class="mini">취소</button></form>
   <span id="thread-nav" hidden title="/clear·이어받기 문구로 이어진 대화입니다. 그림은 대화마다 따로 있습니다"><button id="thread-prev" class="mini" type="button" title="앞 대화">◀</button><span id="thread-pos" class="muted"></span><button id="thread-next" class="mini" type="button" title="다음 대화">▶</button></span>
@@ -18,10 +31,10 @@
   <span id="stall" hidden></span>
   <span class="grow"></span>
   <span id="nokey" class="chip warn" hidden title="이름 바꾸기·프로젝트·Claude 에 보내기·설정에는 화판 쓰기 열쇠가 필요합니다. 터미널에서 scripts/atv board --url 이 찍는 주소를 이 브라우저로 한 번 여세요">쓰기 열쇠 없음</span>
-  <button id="compose" type="button" title="지금 보는 세션 전체에 대해 의견·지시를 써서 Claude 에 보냅니다. 상자·단계에 대해서는 그 위의 「보내기」 를 누릅니다">Claude 에 보내기</button>
-  <button id="theme" type="button" title="테마 바꾸기">테마: 자동</button>
-  <button id="settings-open" type="button" title="이어받기 문구 설정">설정</button>
-  <button id="help-open" type="button" title="사용법과 단축키(?)">도움말</button>
+  <button id="compose" class="send" type="button" title="지금 보는 세션 전체에 대해 의견·지시를 써서 Claude 에 보냅니다. 상자·단계에 대해서는 그 위의 「보내기」 를 누릅니다"><svg class="logo" aria-hidden="true"><use href="#logo-claude"/></svg><span>Claude 에 보내기</span></button>
+  <button id="theme" class="icon" type="button" aria-label="테마: 자동" title="테마: 자동"><svg class="i" aria-hidden="true"><use href="#i-auto"/></svg></button>
+  <button id="settings-open" class="icon" type="button" aria-label="설정" title="설정: 이어받기 문구"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg></button>
+  <button id="help-open" class="icon" type="button" aria-label="도움말" title="도움말: 사용법과 단축키(?)"><svg class="i" aria-hidden="true"><use href="#i-help"/></svg></button>
 </header>
 <div id="band" hidden></div>
 <main>
@@ -67,14 +80,15 @@
   <button id="live" type="button">실시간</button>
 </footer>
 <form id="composer" hidden aria-label="Claude 에 보내기">
-  <div class="phead"><h2>Claude 에 보내기</h2><span class="grow"></span><button type="button" id="composer-close" class="mini">닫기</button></div>
+  <div class="phead"><h2><svg class="logo" aria-hidden="true"><use href="#logo-claude"/></svg><span id="c-head">Claude 에 보내기</span></h2><span class="grow"></span><button type="button" id="composer-close" class="mini">닫기</button></div>
   <p id="c-to" class="to"></p>
   <div class="field" role="radiogroup" aria-label="종류">
     <label><input type="radio" name="c-kind" value="comment" checked> 의견</label>
     <label><input type="radio" name="c-kind" value="instruction"> 지시</label>
   </div>
-  <textarea id="c-text" rows="3" aria-label="보낼 글" placeholder="Enter 로 보내고 Shift+Enter 로 줄을 바꿉니다"></textarea>
-  <div class="crow"><span id="c-hint" class="muted"></span><button type="button" id="c-collect" title="보내지 않고 모아 두었다가 화면 아래 띠에서 한꺼번에 보냅니다">모아 두기</button><button type="submit" id="c-send">보내기</button></div>
+  <textarea id="c-text" rows="3" aria-label="보낼 글" aria-describedby="c-hint" placeholder="Enter 로 보내고 Shift+Enter 로 줄을 바꿉니다"></textarea>
+  <p id="c-hint" class="hint"></p>
+  <div class="crow"><span class="grow"></span><button type="button" id="c-collect" title="보내지 않고 모아 두었다가 화면 아래 띠에서 한꺼번에 보냅니다">모아 두기</button><button type="submit" id="c-send" class="primary"><svg class="i" aria-hidden="true"><use href="#i-send"/></svg>보내기</button></div>
   <ol id="c-list"></ol>
 </form>
 <section id="basket" hidden aria-label="모은 글">
@@ -83,59 +97,103 @@
 </section>
 <dialog id="help" aria-labelledby="help-title">
   <div class="phead"><h2 id="help-title">도움말</h2><span class="grow"></span><button type="button" id="help-close" class="mini">닫기</button></div>
-  <h3>이 화판은</h3>
-  <p>Claude 가 일하면서 올린 계획·그림·메모와, 훅이 자동으로 올린 명령·파일 수정·하위 에이전트를 한 화면에 보여 줍니다. 여러 단계짜리 작업이면 Claude 가 계획을 올린 뒤 문제 구조를 한 번 그립니다. 그림 없이 도구를 8번 넘게 쓰면 그 대화의 Claude 에 한 번 알림이 갑니다.</p>
-  <h3>주소</h3>
-  <p>처음 한 번만 터미널에서 플러그인 폴더의 <code>scripts/atv board --url</code> 이 찍는 주소로 엽니다. 그 뒤로는 이 브라우저에서 <code>http://127.0.0.1:4871/</code> 만 열면 됩니다(읽기 쿠키는 1년, 쓰기 열쇠는 이 브라우저에 남습니다). 다른 브라우저나 시크릿 창을 쓰거나 쿠키를 지웠을 때만 다시 받습니다.</p>
-  <h3>세션 목록</h3>
-  <ul>
-    <li>입력이 필요한 세션이 맨 위, 끝난 세션이 맨 아래에 옵니다.</li>
-    <li><code>/clear</code> 나 이어받기 문구(설정)로 이어진 대화는 한 줄로 모입니다. 맨 위 이름 옆 ◀ ▶ 로 앞뒤 대화를 봅니다. resume·continue 는 같은 대화로 이어집니다.</li>
-    <li>세션 목록 위 「+ 프로젝트」 로 프로젝트를 만들고, 세션 줄을 끌어 프로젝트에 놓으면 들어갑니다. 「프로젝트 없음」 에 놓으면 빠지고, 뺀 대화는 자동으로 다시 넣지 않습니다. 키보드로는 줄 오른쪽 ⋯ 메뉴를 씁니다. 이어진 대화는 함께 옮겨 갑니다.</li>
-    <li>맨 위 이름을 누르면 세션 이름을 바꿉니다.</li>
-    <li>입력도 그림도 없이 끝난 세션(CLI 명령이 잠깐 띄운 것)은 목록에서 숨깁니다.</li>
-    <li>필요 없는 줄은 ⋯ 메뉴의 「지우기」 를 두 번 눌러 지웁니다. 끝난 대화만 지우고 진행 중인 대화는 남깁니다. 기록은 상태 폴더의 <code>trash</code> 에 30일 동안 남았다가 비워집니다.</li>
-  </ul>
-  <h3>프로젝트</h3>
-  <ul>
-    <li>여러 대화에 걸친 일 하나가 프로젝트입니다. 프로젝트마다 큰 그림 화판(작업 단위, 지금 위치, 남은 일, 결정 대기)이 있고, 프로젝트에 든 대화의 Claude 가 단위를 시작·끝낼 때와 결정 때 고칩니다. 목록에서 프로젝트 이름을 누르면 큰 그림이 보이고, 오른쪽 아래 「대화 이력」 에서 대화를 누르면 그 대화의 화판으로 갑니다.</li>
-    <li>대화가 프로젝트에 드는 길: 사용자가 끌어 놓기 → 이어받기 문구(설정) → Claude 가 새 대화를 시작할 때 받은 후보에서 고르기 순서로 앞선 쪽을 따릅니다. 어느 것에도 맞지 않으면 「프로젝트 없음」 입니다. <code>/clear</code> 로 이어진 대화는 앞 대화의 프로젝트를 물려받고, 사용자가 뺀 줄은 빠진 채로 이어집니다.</li>
-    <li>세션 화판 맨 위의 「프로젝트 …」 를 누르면 그 프로젝트의 큰 그림으로, 「프로젝트 없음」 을 누르면 넣을 프로젝트를 고릅니다.</li>
-    <li>프로젝트 이름 옆 ⋯ 로 이름을 바꾸거나 「끝」 으로 표시합니다. 끝난 프로젝트는 목록 맨 아래에 접혀 있습니다. 끌어 놓기·이어받기 문구·Claude 로 대화가 들어오면 다시 진행으로 돌아가고, <code>/clear</code> 로 이어진 대화는 끝난 프로젝트를 물려받지 않습니다. 「풀기」 는 프로젝트만 없애고 대화는 남깁니다.</li>
-  </ul>
-  <h3>그림</h3>
-  <ul>
-    <li>화판이 여러 배치(가로·세로·줄 바꿈, 묶음 안팎 방향 섞기)를 재 보고, 화면에 가장 크게 들어가면서 칸 모양에 가까운 것을 고릅니다.</li>
-    <li>「맞춤」 은 화면에 맞추고 「원래 크기」 는 100% 로 돌립니다.</li>
-    <li>「따라가기」 를 켜면 진행 중인 상자로 화면이 옮겨 갑니다. 직접 스크롤하거나 누르면 꺼집니다.</li>
-    <li>파일 위치가 붙은 상자나 항목을 누르면 그 위치(경로:줄)가 복사됩니다. 상자에는 파일 이름만 보이고, 마우스를 올리면 전체 경로가 보입니다.</li>
-    <li>「수정됨」 은 Claude 가 그 상자의 파일을 고쳤다는 표시이고, 「이유 n」 은 그 상자에 붙은 메모 수입니다.</li>
-  </ul>
-  <h3>계획·타임라인·재생</h3>
-  <ul>
-    <li>끝난 단계는 숨기고 개수만 보입니다. 「끝난 단계 n개 보기」 로 폅니다.</li>
-    <li>타임라인 위 단추로 종류별로 거르고, 「새 창」 으로 떼어 봅니다.</li>
-    <li>아래 재생 막대를 끌면 그때의 화판을 다시 봅니다. 「실시간」 으로 돌아옵니다.</li>
-  </ul>
-  <h3>Claude 에 보내기</h3>
-  <ul>
-    <li>그림의 상자나 계획의 단계에 마우스를 올리면 오른쪽 위에 「보내기」 가 뜹니다. 누르면 그 옆에 창이 열리고, 그 상자에 대한 의견·지시를 보냅니다. 키보드로는 <kbd>Tab</kbd> 으로 상자·단계에 간 뒤 <kbd>Enter</kbd> 를 누릅니다.</li>
-    <li>다른 세션에는 세션 줄 ⋯ 메뉴의 「메시지 보내기…」 로 보냅니다. 보던 화면은 그대로입니다. 보는 세션 전체에는 맨 위 「Claude 에 보내기」 로 보냅니다.</li>
-    <li><kbd>Enter</kbd> 로 보내고 <kbd>Shift</kbd> + <kbd>Enter</kbd> 로 줄을 바꿉니다. 쉬는 세션은 깨우고, 일하는 중이면 그 차례 안에서 받습니다. 승인을 대신하지는 못합니다. 보낸 글의 상태(대기·보냄·만료)는 타임라인에 남습니다. 쓰다 닫은 글은 받는 곳(세션·상자)마다 남아 다시 열면 이어 씁니다. 탭이나 브라우저를 닫아도 남습니다.</li>
-    <li>여러 상자·단계에 할 말을 한 번에 보내려면 창의 「모아 두기」 를 누릅니다. 모은 글은 화면 아래 띠에 보이고, 「보기」 로 확인해 뺄 수 있으며 「한꺼번에 보내기」 로 함께 보냅니다(하나라도 보낼 수 없으면 하나도 보내지 않습니다). 한 세션에 보낼 글만 모읍니다. 모은 글은 탭이나 브라우저를 닫아도 남고 다른 탭에서도 보입니다. 받을 대화가 끝났거나 지워졌으면 보낼 수 없으니 빼거나 비웁니다. 보내는 사이 탭이 닫혀 다시 보내도 한 번만 들어갑니다.</li>
-    <li>글을 보낸 상자·단계에는 <code>✉</code> 와 보낸 글 수가 붙습니다. 아직 Claude 가 받지 않은 글이 있으면 승인 대기와 같은 색이고, 누르면 그 대상의 보내기 창이 열립니다.</li>
-    <li>Codex 세션(세션 줄에 「Codex」)에는 화판 서버가 <code>codex queue</code> 로 보냅니다. 쉬는 세션은 깨우고, 일하는 중이면 그 차례가 끝난 직후 새 차례로 받습니다. <code>/clear</code> 로 새 대화가 시작되면 앞 대화에는 보낼 수 없습니다.</li>
-  </ul>
-  <h3>단축키·마우스</h3>
+  <p class="lead">이 화판은 Claude·Codex 가 일하면서 올린 계획·그림·메모와, 훅이 자동으로 올린 명령·파일 수정·하위 에이전트를 한 화면에 보여 줍니다.</p>
+
+  <h3>자주 하는 일</h3>
+  <dl class="tasks">
+    <dt>세션 보기</dt><dd>왼쪽 목록에서 고릅니다. 입력이 필요한 세션이 맨 위에 옵니다.</dd>
+    <dt>에이전트에 보내기</dt><dd>상자나 계획 단계에 마우스를 올리면 뜨는 「보내기」 를 누릅니다. 세션 전체에 보낼 때는 맨 위 「Claude 에 보내기」(Codex 세션이면 「Codex 에 보내기」)를 누릅니다.</dd>
+    <dt>여러 글 한 번에</dt><dd>보내기 창에서 「모아 두기」 를 누른 뒤, 화면 아래 띠의 「한꺼번에 보내기」 를 누릅니다.</dd>
+    <dt>프로젝트로 묶기</dt><dd>세션 목록 위 「+ 프로젝트」 로 만들고, 세션 줄을 끌어다 놓습니다.</dd>
+    <dt>지난 화면 보기</dt><dd>맨 아래 재생 막대를 끕니다. 「실시간」 을 누르면 돌아옵니다.</dd>
+  </dl>
+
+  <h3>화면 표시의 뜻</h3>
+  <dl class="legend">
+    <dt><svg class="logo" aria-hidden="true"><use href="#logo-claude"/></svg> <svg class="logo" aria-hidden="true"><use href="#logo-codex"/></svg></dt><dd>그 세션의 에이전트(Claude · Codex)</dd>
+    <dt><span class="st-doing">▶</span> <span class="st-done">✓</span> <span class="st-fail">✗</span></dt><dd>진행 중 · 끝 · 실패</dd>
+    <dt><span class="st-wait">…</span> <span class="st-blocked">‼</span> <span class="st-todo">○</span></dt><dd>승인 대기 · 막힘 · 할 일(세션 목록에서는 ○ 가 쉬는 중)</dd>
+    <dt><span class="st-wait">?</span></dt><dd>세션이 사용자 입력을 기다림</dd>
+    <dt><span class="badge edited">수정됨</span></dt><dd>에이전트가 그 상자의 파일을 고쳤음</dd>
+    <dt><span class="badge">이유 1</span></dt><dd>그 상자에 붙은 메모 수</dd>
+    <dt><span class="badge mail queued">✉1</span></dt><dd>그 상자·단계에 보낸 글 수. 이 색이면 에이전트가 아직 받지 않은 글이 있습니다. 누르면 보내기 창이 열립니다.</dd>
+  </dl>
+
+  <h3>단축키 · 마우스</h3>
   <dl class="keys">
     <dt><kbd>?</kbd></dt><dd>도움말 열기·닫기</dd>
     <dt><kbd>Esc</kbd></dt><dd>도움말·보내기 창·이름 입력 닫기</dd>
+    <dt><kbd>Enter</kbd></dt><dd>보내기 창에서 보내기, 이름 저장</dd>
+    <dt><kbd>Shift</kbd> + <kbd>Enter</kbd></dt><dd>보내기 창에서 줄 바꾸기</dd>
+    <dt>상자·단계에서 <kbd>Enter</kbd></dt><dd>그 상자·단계에 대해 보내기(<kbd>Tab</kbd> 으로 상자·단계에 갑니다)</dd>
     <dt><kbd>Ctrl</kbd> + 휠</dt><dd>그림 확대·축소(마우스 자리를 중심으로)</dd>
     <dt>경계선 끌기</dt><dd>패널 폭·높이 바꾸기. 두 번 누르면 기본값</dd>
-    <dt>경계선에서 <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>16px 씩 옮기기(<kbd>Tab</kbd> 으로 경계선에 갑니다)</dd>
-    <dt><kbd>Enter</kbd></dt><dd>세션·프로젝트 이름 저장, 보내기 창에서 보내기</dd>
-    <dt>상자·단계에서 <kbd>Enter</kbd></dt><dd>그 상자·단계에 대해 Claude 에 보내기</dd>
+    <dt>경계선에서 <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>16px 씩 옮기기</dd>
   </dl>
+
+  <h3>자세히</h3>
+  <details>
+    <summary>보내기</summary>
+    <ul>
+      <li>쉬는 세션은 보내면 바로 깨웁니다.</li>
+      <li>일하는 중이면 Claude 는 그 차례 안에서, Codex 는 그 차례가 끝난 직후 새 차례로 받습니다.</li>
+      <li>승인 창은 대신하지 못합니다. 승인은 터미널이나 Codex 화면에서 합니다.</li>
+      <li>다른 세션에는 세션 줄 ⋯ 메뉴의 「메시지 보내기…」 로 보냅니다. 보던 화면은 그대로입니다.</li>
+      <li>보낸 글의 상태(대기 · 보냄 · 만료)는 타임라인에 남습니다.</li>
+      <li>쓰다가 닫은 글은 받는 곳(세션 · 상자)마다 남습니다. 탭이나 브라우저를 닫아도 다시 열면 이어 씁니다.</li>
+      <li>「모아 두기」 는 한 세션에 보낼 글만 모읍니다. 아래 띠의 「보기」 로 확인하고 뺄 수 있습니다.</li>
+      <li>「한꺼번에 보내기」 는 하나라도 보낼 수 없으면 하나도 보내지 않습니다. 받을 대화가 끝났거나 지워졌으면 빼거나 비웁니다.</li>
+      <li>모은 글은 탭이나 브라우저를 닫아도 남고, 다른 탭에서도 보입니다. 보내는 사이 탭이 닫혀 다시 보내도 한 번만 들어갑니다.</li>
+      <li>Codex 세션에는 화판 서버가 <code>codex queue</code> 로 보냅니다. <code>/clear</code> 로 새 대화가 시작되면 앞 대화에는 보낼 수 없습니다.</li>
+    </ul>
+  </details>
+  <details>
+    <summary>세션 목록</summary>
+    <ul>
+      <li>입력이 필요한 세션이 맨 위, 끝난 세션이 맨 아래에 옵니다.</li>
+      <li><code>/clear</code> 나 이어받기 문구(설정)로 이어진 대화는 한 줄로 모입니다. 맨 위 이름 옆 ◀ ▶ 로 앞뒤 대화를 봅니다.</li>
+      <li>resume · continue 는 같은 대화로 이어집니다.</li>
+      <li>맨 위 이름을 누르면 세션 이름을 바꿉니다.</li>
+      <li>입력도 그림도 없이 끝난 세션(CLI 명령이 잠깐 띄운 것)은 숨깁니다.</li>
+      <li>줄 오른쪽 ⋯ 메뉴로 메시지를 보내거나, 프로젝트로 옮기거나, 줄을 지웁니다.</li>
+      <li>「지우기」 는 두 번 눌러야 지워집니다. 끝난 대화만 지우고 진행 중인 대화는 남깁니다. 지운 기록은 상태 폴더의 <code>trash</code> 에 30일 동안 남습니다.</li>
+    </ul>
+  </details>
+  <details>
+    <summary>프로젝트</summary>
+    <ul>
+      <li>프로젝트는 여러 대화에 걸친 일 하나입니다. 프로젝트마다 큰 그림 화판(작업 단위, 지금 위치, 남은 일, 결정 대기)이 있습니다.</li>
+      <li>큰 그림은 프로젝트에 든 대화의 에이전트가 단위를 시작·끝낼 때와 결정할 때 고칩니다.</li>
+      <li>목록에서 프로젝트 이름을 누르면 큰 그림이 보입니다. 오른쪽 아래 「대화 이력」 에서 대화를 누르면 그 대화의 화판으로 갑니다.</li>
+      <li>세션 화판 맨 위의 「프로젝트 …」 를 누르면 그 큰 그림으로 갑니다. 「프로젝트 없음」 을 누르면 넣을 프로젝트를 고릅니다.</li>
+      <li>줄을 「프로젝트 없음」 에 놓으면 프로젝트에서 빠지고, 뺀 대화는 자동으로 다시 넣지 않습니다. 이어진 대화는 함께 옮겨 갑니다.</li>
+      <li>대화가 프로젝트에 드는 길은 사용자가 끌어 놓기 → 이어받기 문구(설정) → 에이전트가 새 대화를 시작할 때 받은 후보에서 고르기 순서로 앞선 쪽을 따릅니다. 어느 것에도 맞지 않으면 「프로젝트 없음」 입니다.</li>
+      <li><code>/clear</code> 로 이어진 대화는 앞 대화의 프로젝트를 물려받습니다. 사용자가 뺀 줄은 빠진 채로 이어지고, 끝난 프로젝트는 물려받지 않습니다.</li>
+      <li>프로젝트 이름 옆 ⋯ 로 이름을 바꾸거나 「끝」 으로 표시합니다. 끝난 프로젝트는 목록 맨 아래에 접혀 있고, 끌어 놓기 · 이어받기 문구 · 에이전트로 대화가 들어오면 다시 진행으로 돌아갑니다.</li>
+      <li>「풀기」 는 프로젝트만 없애고 대화는 남깁니다.</li>
+    </ul>
+  </details>
+  <details>
+    <summary>그림 · 계획 · 타임라인</summary>
+    <ul>
+      <li>여러 단계짜리 작업이면 에이전트가 계획을 올린 뒤 문제 구조를 한 번 그립니다. 그림 없이 도구를 8번 넘게 쓰면 그 대화의 에이전트에 한 번 알림이 갑니다.</li>
+      <li>화판이 여러 배치를 재 보고, 화면에 가장 크게 들어가면서 칸 모양에 가까운 것을 고릅니다.</li>
+      <li>「맞춤」 은 그림을 화면에 맞추고, 「원래 크기」 는 100% 로 돌립니다.</li>
+      <li>「따라가기」 를 켜면 진행 중인 상자로 화면이 옮겨 갑니다. 직접 스크롤하거나 누르면 꺼집니다.</li>
+      <li>파일 위치가 붙은 상자·항목을 누르면 그 위치(경로:줄)가 복사됩니다. 상자에는 파일 이름만 보이고, 마우스를 올리면 전체 경로가 보입니다.</li>
+      <li>계획의 끝난 단계는 숨기고 개수만 보입니다. 「끝난 단계 n개 보기」 로 폅니다.</li>
+      <li>타임라인 위 단추로 종류별로 거르고, 「새 창」 으로 떼어 봅니다.</li>
+    </ul>
+  </details>
+  <details>
+    <summary>화판 주소 · 쓰기 열쇠</summary>
+    <ul>
+      <li>처음 한 번만 터미널에서 플러그인 폴더의 <code>scripts/atv board --url</code> 이 찍는 주소로 엽니다.</li>
+      <li>그 뒤로는 이 브라우저에서 <code>http://127.0.0.1:4871/</code> 만 열면 됩니다. 읽기 쿠키는 1년 동안, 쓰기 열쇠는 이 브라우저에 남습니다.</li>
+      <li>다른 브라우저나 시크릿 창을 쓰거나 쿠키를 지웠을 때만 주소를 다시 받습니다.</li>
+      <li>맨 위에 「쓰기 열쇠 없음」 이 보이면 이름 바꾸기 · 프로젝트 · 보내기 · 설정을 쓸 수 없습니다. 위 주소로 한 번 다시 여세요.</li>
+    </ul>
+  </details>
 </dialog>
 <dialog id="settings" aria-labelledby="settings-title">
   <form id="settings-form">
@@ -149,7 +207,7 @@
   </form>
 </dialog>
 <div id="group-menu" role="menu" aria-label="메시지·프로젝트·지우기" hidden></div>
-<button id="ask" type="button" hidden>보내기</button>
+<button id="ask" type="button" hidden><svg class="logo" aria-hidden="true"><use href="#logo-claude"/></svg>보내기</button>
 <div id="toast" role="status" hidden></div>
 <script src="/vendor/elk.js"></script>
 <script src="/vendor/mermaid.js"></script>
