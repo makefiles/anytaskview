@@ -1218,6 +1218,122 @@ async function main() {
   });
   await open(sid);
 
+  // 13: 표·상자 모양·아이콘·Mermaid 크기, 세션 정렬·지난 세션·끝난 세션 숨기기·자동 휴지통 날수
+  await check("표·상자 모양·아이콘: 표 칸은 글로만, 짧은 줄은 빈칸으로 채우고, 모양 윤곽은 상태 색, 아이콘은 그 심벌, Mermaid 는 칠과 크기 상한을 지킴", async () => {
+    const rich = `rich-${process.pid}`;
+    await post("/api/hook", { sid: rich, pid: process.pid + 40, fact: { f: "start", cwd: "/tmp/표", source: "startup" } });
+    await post("/api/mcp", { env: rich, cwd, tool: "draw", input: { ops: [
+      { id: "tb", kind: "table", label: "비교", cols: ["방안", "위험"], rows: [["<img src=x onerror=alert(1)>", "낮음"], ["캐시"]] },
+      { id: "dm", kind: "box", label: "판단", shape: "diamond", status: "doing", icon: "db" },
+      { id: "rd", kind: "box", label: "둥근 상자", shape: "round", status: "done" },
+      { id: "pi", kind: "mermaid", label: "비율", src: "pie\n  \"A\" : 60\n  \"B\" : 40" },
+      { id: "e1", kind: "edge", from: "dm", to: "rd" },
+    ] } });
+    await open(rich);
+    await waitFor(`document.querySelector('[data-id="pi"] .msvg svg') !== null && document.querySelector('#canvas svg.edges path') !== null`);
+    await settledPositions();
+    const r = await evaluate(`(() => {
+      const color = (v) => { const i = document.createElement('i'); i.style.color = v; document.body.append(i); const c = getComputedStyle(i).color; i.remove(); return c; };
+      const tb = document.querySelector('[data-id="tb"] table');
+      const dm = document.querySelector('[data-id="dm"]'), shp = getComputedStyle(dm.querySelector('svg.shp path'));
+      const rd = getComputedStyle(document.querySelector('[data-id="rd"]'));
+      const pie = document.querySelector('[data-id="pi"] .msvg svg');
+      return {
+        cells: [...tb.querySelectorAll('th, td')].map((c) => c.textContent), img: !!tb.querySelector('img'),
+        widths: [...tb.querySelectorAll('tr')].map((tr) => tr.children.length),
+        stroke: shp.stroke, fill: shp.fill, doing: color('var(--s-doing)'), done: color('var(--s-done)'), rdBorder: rd.borderTopColor, rdLeft: rd.borderLeftWidth,
+        icon: dm.querySelector('.lbl > svg.pic use')?.getAttribute('href'), sym: !!document.getElementById('ic-db'),
+        fills: [...new Set([...pie.querySelectorAll('path')].map((p) => getComputedStyle(p).fill))], pieW: Number(pie.getAttribute('width')), pieH: Number(pie.getAttribute('height')),
+        edge: getComputedStyle(document.querySelector('#canvas svg.edges > g path')).fill,
+      };
+    })()`);
+    expect(!r.img && r.cells.includes("<img src=x onerror=alert(1)>"), "표 칸이 글로 들어가지 않았습니다");
+    expect(r.widths.every((w) => w === 2), `짧은 줄을 빈칸으로 채우지 않음: ${r.widths}`);
+    expect(r.stroke === r.doing && r.fill !== "none", `마름모 윤곽 ${r.stroke}/${r.fill}, 진행 색 ${r.doing}`);
+    expect(r.rdBorder === r.done && r.rdLeft !== "4px", `둥근 상자 테두리 ${r.rdBorder} ${r.rdLeft}`);
+    expect(r.icon === "#ic-db" && r.sym, `아이콘 ${r.icon}`);
+    expect(r.fills.filter((f) => f !== "none").length >= 2, `원 차트 칠이 빠짐: ${r.fills}`);
+    expect(r.pieW > 0 && r.pieW <= 640 && r.pieH > 0, `Mermaid 크기 ${r.pieW}×${r.pieH}`);
+    expect(r.edge === "none", `선 칠 ${r.edge}`);
+    return `원 ${r.pieW}×${r.pieH}`;
+  });
+
+  const sortSid = (n) => `sort-${n}-${process.pid}`;
+  // 그 세션 줄이 든 묶음(프로젝트, 없으면 목록 전체)의 줄 순서
+  const rowsOf = (member = sortSid("a")) => evaluate(`(() => {
+    const row = document.querySelector('#sess-body .sess[data-sid="${member}"]');
+    const sec = row?.closest('.gsec') || document.getElementById('sess-body');
+    return [...sec.querySelectorAll('.sess')].map((b) => b.dataset.sid);
+  })()`);
+  const pickSort = async (label) => {
+    await evaluate(`document.getElementById('sess-sort').click()`);
+    await waitFor(`!document.getElementById('group-menu').hidden && document.getElementById('group-menu').getAttribute('aria-label') === '정렬'`);
+    await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((b) => b.textContent === ${JSON.stringify(label)}).click()`);
+    await waitFor(`document.getElementById('group-menu').hidden`);
+  };
+  await check("세션 정렬: 기본 시작순은 활동해도 자리를 지키고, 활동순·이름순으로 바꾸면 순서가 바뀌며 브라우저에 기억함", async () => {
+    for (const [i, n] of ["a", "b"].entries()) {
+      await post("/api/hook", { sid: sortSid(n), pid: process.pid + 50 + i, fact: { f: "start", cwd: "/tmp/정렬", source: "startup" } });
+      await post("/api/hook", { sid: sortSid(n), pid: process.pid + 50 + i, fact: { f: "prompt", text: n === "a" ? "가 정렬 시험" : "나 정렬 시험" } });
+      await sleep(20); // 시작 시각이 갈리게
+    }
+    await open(sortSid("a"));
+    expect(await evaluate(`document.getElementById('sess-sort').textContent.startsWith('시작순')`), "기본 정렬이 시작순이 아닙니다");
+    const before = await rowsOf();
+    expect(before.indexOf(sortSid("b")) < before.indexOf(sortSid("a")), `시작순에서 늦게 시작한 줄이 위가 아님: ${before}`);
+    await post("/api/hook", { sid: sortSid("a"), pid: process.pid + 50, fact: { f: "prompt", text: "가 정렬 시험 다시" } });
+    await sleep(300);
+    const still = await rowsOf();
+    expect(still.indexOf(sortSid("b")) < still.indexOf(sortSid("a")), `시작순에서 활동한 줄이 움직임: ${still}`);
+    await pickSort("활동순");
+    await waitFor(`(() => { const r = [...document.querySelectorAll('#sess-body .sess')].map((b) => b.dataset.sid); return r.indexOf(${JSON.stringify(sortSid("a"))}) < r.indexOf(${JSON.stringify(sortSid("b"))}); })()`);
+    await pickSort("이름순");
+    const named = await evaluate(`[...document.querySelectorAll('#sess-body .sess')].filter((b) => b.dataset.sid.startsWith('sort-')).map((b) => b.querySelector('.row1 .txt').textContent)`);
+    expect(named[0].startsWith("가") && named[1].startsWith("나"), `이름순: ${named}`);
+    await open(sortSid("a"));
+    expect(await evaluate(`localStorage.getItem('atv.sessSort') === 'name' && document.getElementById('sess-sort').textContent.startsWith('이름순')`), "고른 정렬을 기억하지 못함");
+    await pickSort("시작순");
+  });
+  await check("지난 세션: 끝난 지 하루 지난 줄은 접힌 「지난 세션」 으로 가고, 끝난 세션 숨기기는 끝난 줄을 숨기고 그 수를 알림", async () => {
+    const old = sortSid("old");
+    await post("/api/hook", { sid: old, pid: process.pid + 60, fact: { f: "start", cwd: "/tmp/정렬", source: "startup" } });
+    await post("/api/hook", { sid: old, pid: process.pid + 60, fact: { f: "prompt", text: "다 지난 일" } });
+    await post("/api/hook", { sid: old, pid: process.pid + 60, fact: { f: "end", reason: "other" } });
+    board.sessions.get(old).scene.sess.lastT = Date.now() - 2 * 86_400_000;
+    await open(sortSid("a")); // 새 연결의 요약에서 옛 시각을 받는다
+    await waitFor(`[...document.querySelectorAll('#sess-body .pastfold')].some((b) => b.dataset.past === '' && b.getAttribute('aria-expanded') === 'false')`);
+    expect(!(await rowsOf()).includes(old), "접힌 지난 세션 줄이 보입니다");
+    await evaluate(`document.querySelector('#sess-body .pastfold[data-past=""]').click()`);
+    await waitFor(`document.querySelector('#sess-body .sess[data-sid="${old}"]') !== null && document.querySelector('#sess-body .pastfold[data-past=""]').getAttribute('aria-expanded') === 'true'`);
+    expect(await evaluate(`JSON.parse(localStorage.getItem('atv.pastOpen')).includes('')`), "펼침을 기억하지 못함");
+    await pickSort("끝난 세션 숨기기");
+    await waitFor(`document.querySelector('#sess-body .sess[data-sid="${old}"]') === null && [...document.querySelectorAll('#sess-body .gempty')].some((p) => /끝난 세션 \\d+개를 숨겼습니다/.test(p.textContent))`);
+    const ended = await evaluate(`[...document.querySelectorAll('#sess-body .sess')].filter((b) => b.classList.contains('ended') && !b.classList.contains('sel')).length`);
+    expect(ended === 0, `숨기기 뒤에도 끝난 줄 ${ended}개`);
+    await pickSort("끝난 세션 숨기기");
+    await waitFor(`document.querySelector('#sess-body .sess[data-sid="${old}"]') !== null`);
+    // 접어 두어도 지금 보는 지난 줄은 단추 아래에 보인다
+    await evaluate(`document.querySelector('#sess-body .pastfold[data-past=""]').click()`);
+    await waitFor(`document.querySelector('#sess-body .pastfold[data-past=""]').getAttribute('aria-expanded') === 'false' && document.querySelector('#sess-body .sess[data-sid="${old}"]') === null`);
+    await open(old);
+    await waitFor(`document.querySelector('#sess-body .sess.sel[data-sid="${old}"]') !== null && document.querySelector('#sess-body .pastfold[data-past=""]').getAttribute('aria-expanded') === 'false'`);
+    expect(await evaluate(`document.getElementById('sess-sort').getAttribute('aria-label') === '정렬: 시작순'`), "정렬 단추의 이름이 없습니다");
+  });
+  await check("설정: 지난 세션을 휴지통으로 옮기는 날수는 기본 30, 바꾸면 서버에 저장되고 비우면 끔", async () => {
+    await evaluate(`document.getElementById('settings-open').click()`);
+    await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-trash').value === '30'`);
+    await evaluate(`(() => { document.getElementById('cfg-trash').value = '7'; document.getElementById('settings-form').requestSubmit(); })()`);
+    await waitFor(`!document.getElementById('settings').open`);
+    expect(board.config.trashDays === 7, `저장된 날수 ${board.config.trashDays}`);
+    expect(board.sessions.has(sortSid("old")), "7일보다 덜 된 대화를 옮김");
+    await evaluate(`document.getElementById('settings-open').click()`);
+    await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-trash').value === '7'`);
+    await evaluate(`(() => { document.getElementById('cfg-trash').value = ''; document.getElementById('settings-form').requestSubmit(); })()`);
+    await waitFor(`!document.getElementById('settings').open`);
+    expect(board.config.trashDays === null, `비웠는데 ${board.config.trashDays}`);
+  });
+  await open(sid);
+
   for (const theme of ["light", "dark"]) {
     await check(`${theme} 테마의 모든 버튼·범위 입력 대비가 4.5 이상임`, async () => {
       await evaluate(`(() => {

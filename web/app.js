@@ -91,7 +91,7 @@ const state = {
   tlTopSeq: 0,           // 타임라인을 맨 위(최신)에서 마지막으로 본 사건 번호
   followed: null,        // 따라가기로 마지막에 옮겨 간 부품 id
   projects: { projects: {}, members: {} }, // 프로젝트 정의·소속과 큰 그림 요약(서버의 projects.json)
-  config: { resume: null }, // 서버 설정(이어받기 문구)
+  config: { resume: null, trashDays: 30 }, // 서버 설정(이어받기 문구, 지난 대화를 휴지통으로 옮기기까지 날수·null 이면 끔)
   dragging: null,        // 목록에서 끌고 있는 세션 id
 };
 
@@ -422,7 +422,7 @@ addEventListener("pageshow", (ev) => { if (ev.persisted) connect(state.sid); });
 function defaultSession() {
   const fromHash = decodeURIComponent((location.hash.match(/#s=([^&]+)/) || [])[1] || "");
   if (fromHash && known(fromHash)) return fromHash;
-  const list = threads();
+  const list = threads("activity"); // 목록 정렬과 상관없이 지금 가장 바쁜(입력 필요 > 최근) 대화를 연다
   return list.length ? list[0][0].id : null;
 }
 // 입력을 기다리는 세션을 맨 위로, 끝난 세션을 맨 아래로
@@ -443,8 +443,10 @@ function rootOf(id) {
   }
 }
 // 목록의 한 줄 = 뿌리가 같은 세션들. 맨 앞이 대표(입력 필요 > 최근)다.
-// 끝났는데 입력도 그림도 없는 세션은 빼되 지금 보는 세션은 남긴다
-function threads() {
+// 끝났는데 입력도 그림도 없는 세션은 빼되 지금 보는 세션은 남긴다.
+// 줄 순서(사용자가 「정렬」 에서 고름): activity 는 대표 순서 그대로(입력 필요 위, 끝난 것 아래, 최근 활동 순),
+// start 는 뿌리 대화가 늦게 시작한 줄부터(활동·상태로 자리를 바꾸지 않는다), name 은 대표 이름 가나다순
+function threads(order = sessSort()) {
   const by = new Map();
   for (const s of sortedSessions()) {
     if (s.empty && s.id !== state.sid) continue;
@@ -452,8 +454,20 @@ function threads() {
     if (!by.has(r)) by.set(r, []);
     by.get(r).push(s);
   }
-  return [...by.values()];
+  const list = [...by.values()];
+  const start = (t) => state.sessions.get(rootOf(t[0].id))?.startedAt || 0;
+  if (order === "start") list.sort((a, b) => start(b) - start(a));
+  else if (order === "name") list.sort((a, b) => sessName(a[0]).localeCompare(sessName(b[0]), "ko") || start(b) - start(a));
+  return list;
 }
+const SORTS = { start: "시작순", activity: "활동순", name: "이름순" };
+const sessSort = () => { const v = store.get("atv.sessSort"); return Object.hasOwn(SORTS, v) ? v : "start"; };
+const hideEnded = () => store.get("atv.hideEnded") === "1";
+// 모두 끝났고 마지막 활동이 하루 넘게 지난 줄은 그 묶음 아래의 접힌 「지난 세션」 으로 보낸다
+const PAST_MS = 86_400_000;
+const allEnded = (t) => t.every((s) => s.status === "ended");
+const threadLast = (t) => Math.max(...t.map((s) => s.lastT || 0)); // 줄의 대화 가운데 가장 최근 활동(대표가 아닐 수 있다)
+const isPast = (t, now) => allEnded(t) && now - threadLast(t) > PAST_MS;
 // 한 줄 안의 대화들을 시작 순서로(맨 위 ◀ ▶). withEmpty 면 목록에서 숨긴 빈 대화도 넣는다(줄을 지울 때)
 function threadOf(id, withEmpty = false) {
   const root = rootOf(id);
@@ -633,30 +647,68 @@ function projHead(p, count) {
   }
   return head;
 }
-function projSection(p, members, now) {
+// total: 끝난 세션 숨기기 전의 줄 수. 머리의 수와 「끌어 놓으세요」 안내는 숨긴 줄까지 센다
+function projSection(p, members, now, total = members.length) {
   const sec = el("div", "gsec");
-  sec.append(projHead(p, members.length));
+  sec.append(projHead(p, total));
   if (!gfold.has(p)) {
-    sec.append(...members.map((t) => sessRow(t, now)));
-    if (!members.length) sec.append(el("div", "gempty", p ? "세션 줄을 여기로 끌어 놓으세요" : "여기로 끌어 놓으면 프로젝트에서 뺍니다"));
+    sec.append(...sectionRows(p, members, now));
+    if (!total) sec.append(el("div", "gempty", p ? "세션 줄을 여기로 끌어 놓으세요" : "여기로 끌어 놓으면 프로젝트에서 뺍니다"));
   }
   dropZone(sec, p);
   return sec;
+}
+// 묶음(프로젝트, 프로젝트 없음은 "") 하나의 줄들: 지금 줄, 그 아래 접힌 「지난 세션 · N」. 펼침은 묶음마다 기억한다.
+// 지난 세션 판정은 재생 중에도 지금 시각으로 한다(재생 시각으로 하면 줄이 접힘 밖으로 나온다)
+function sectionRows(key, list, now) {
+  const real = Date.now();
+  const recent = list.filter((t) => !isPast(t, real)), past = list.filter((t) => isPast(t, real));
+  const out = recent.map((t) => sessRow(t, now));
+  if (!past.length) return out;
+  const open = new Set(store.json("atv.pastOpen", [])), on = open.has(key);
+  const b = el("button", "pastfold", `${on ? "▾" : "▸"} 지난 세션 · ${past.length}`);
+  b.type = "button";
+  b.dataset.past = key;
+  b.setAttribute("aria-expanded", String(on));
+  b.title = "끝난 지 하루가 지난 대화입니다. 설정에서 정한 날수가 지나면 휴지통으로 옮깁니다(진행 중인 프로젝트의 대화는 남깁니다)";
+  b.addEventListener("click", () => {
+    if (on) open.delete(key); else open.add(key);
+    store.set("atv.pastOpen", JSON.stringify([...open]));
+    queueRender();
+  });
+  out.push(b);
+  // 접혀 있어도 지금 보는 줄은 단추 아래에 보인다(자리를 옮기지 않고 어느 줄을 보는지 알 수 있게)
+  const shown = on ? past : past.filter((t) => t.some((x) => x.id === state.sid));
+  out.push(...shown.map((t) => sessRow(t, now)));
+  return out;
 }
 function renderSessions(now) {
   const body = $("sess-body");
   // 이름을 쓰는 중이거나 끄는 중에는 목록을 다시 만들지 않는다(끄는 요소·놓을 자리가 바뀌면 놓기가 사라진다)
   if (body.querySelector("input") || state.dragging) return;
-  const list = threads().slice(0, 80);
+  let list = threads();
+  // 끝난 세션 숨기기: 모두 끝난 줄을 뺀다(지금 보는 줄은 남긴다). 숨긴 수는 목록 끝에 알린다
+  const before = list;
+  if (hideEnded()) list = list.filter((t) => !allEnded(t) || t.some((s) => s.id === state.sid));
+  const hidden = before.length - list.length;
+  // 줄이 너무 많으면 화면 순서와 상관없이 오래 쉰 줄부터 뺀다
+  if (list.length > 80) {
+    const keep = new Set([...list].sort((a, b) => threadLast(b) - threadLast(a)).slice(0, 80));
+    list = list.filter((t) => keep.has(t));
+  }
   const out = [];
   const projs = state.projects.projects, pids = Object.keys(projs);
-  if (!pids.length) out.push(...list.map((t) => sessRow(t, now)));
+  if (!pids.length) out.push(...sectionRows("", list, now));
   else {
-    const by = new Map([...pids, ""].map((p) => [p, []]));
+    const by = new Map([...pids, ""].map((p) => [p, []])), totals = new Map();
     for (const t of list) by.get(projOf(t[0].id) || "").push(t);
-    const recent = (p) => Math.max(projs[p].lastT || 0, ...by.get(p).map((t) => t[0].lastT));
-    const order = (done) => pids.filter((p) => !!projs[p].done === done).sort((a, b) => recent(b) - recent(a));
-    for (const p of [...order(false), ""]) out.push(projSection(p, by.get(p), now));
+    for (const t of before) { const p = projOf(t[0].id) || ""; totals.set(p, (totals.get(p) || 0) + 1); }
+    const recent = (p) => Math.max(projs[p].lastT || 0, ...by.get(p).map(threadLast));
+    const sort = sessSort();
+    const cmp = sort === "name" ? (a, b) => projs[a].name.localeCompare(projs[b].name, "ko")
+      : sort === "start" ? (a, b) => (projs[b].t || 0) - (projs[a].t || 0) : (a, b) => recent(b) - recent(a);
+    const order = (done) => pids.filter((p) => !!projs[p].done === done).sort(cmp);
+    for (const p of [...order(false), ""]) out.push(projSection(p, by.get(p), now, totals.get(p) || 0));
     const done = order(true);
     if (done.length) {
       const open = store.get("atv.doneOpen") === "1", head = el("div", "ghead");
@@ -667,16 +719,19 @@ function renderSessions(now) {
       b.addEventListener("click", () => { store.set("atv.doneOpen", open ? "0" : "1"); queueRender(); });
       head.append(b);
       out.push(head);
-      if (open) for (const p of done) out.push(projSection(p, by.get(p), now));
+      if (open) for (const p of done) out.push(projSection(p, by.get(p), now, totals.get(p) || 0));
     }
   }
-  if (!list.length) out.push(el("p", "row2 txt", "아직 세션이 없습니다. Claude Code·Codex 세션을 시작하면 여기에 나타납니다."));
+  if (!list.length && !hidden) out.push(el("p", "row2 txt", "아직 세션이 없습니다. Claude Code·Codex 세션을 시작하면 여기에 나타납니다."));
+  if (hidden) out.push(el("p", "gempty", `끝난 세션 ${hidden}개를 숨겼습니다. 목록 위 정렬 단추에서 다시 보입니다.`));
   // 목록은 사건마다 새로 만든다. 키보드 초점이 목록 안에 있었으면 같은 세션·프로젝트의 같은 단추로 되돌린다
   const act = document.activeElement;
   let keep = null, gone = false;
   if (act && body.contains(act) && act.dataset.sid) {
     keep = `.${act.classList.contains("smenu") ? "smenu" : "sess"}[data-sid="${CSS.escape(act.dataset.sid)}"]`;
     gone = !state.sessions.has(act.dataset.sid);
+  } else if (act && body.contains(act) && act.dataset.past !== undefined) {
+    keep = `.pastfold[data-past="${CSS.escape(act.dataset.past)}"]`;
   } else if (act && body.contains(act) && act.dataset.pid !== undefined) {
     keep = `.${["pmenu", "gtog", "gfold"].find((c) => act.classList.contains(c))}[data-pid="${CSS.escape(act.dataset.pid)}"]`;
     gone = !!act.dataset.pid && act.dataset.pid !== "-done" && !isProj(act.dataset.pid);
@@ -685,7 +740,9 @@ function renderSessions(now) {
   // 보던 자리에서 목록이 튀지 않게. 그 세션·프로젝트가 지워졌으면 첫 세션 줄로, 끝으로 표시해 접힌 「끝난 프로젝트」 안으로
   // 들어갔으면 그 머리로 옮겨 초점을 잃지 않게 한다
   const folded = !gone && act?.dataset.pid && isProj(act.dataset.pid) && state.projects.projects[act.dataset.pid].done;
-  if (keep) (body.querySelector(keep) || (gone ? body.querySelector(".sess") : folded ? body.querySelector(".dhead") : null))?.focus({ preventScroll: true });
+  // 줄이 접힌 「지난 세션」 안으로 들어갔으면 그 묶음의 「지난 세션」 단추로
+  const past = !gone && act?.dataset.sid && body.querySelector(`.pastfold[data-past="${CSS.escape(projOf(act.dataset.sid) || "")}"]`);
+  if (keep) (body.querySelector(keep) || (folded ? body.querySelector(".dhead") : past) || body.querySelector(".sess") || $("sess-sort")).focus({ preventScroll: true });
 }
 
 // 글자 자리를 잠깐 입력 칸으로 바꾼다(브라우저 prompt 창을 쓰지 않는다). Enter 저장, Esc 취소.
@@ -1193,20 +1250,21 @@ document.addEventListener("keydown", (ev) => {
   toggleHelp();
 });
 
-// ---- 설정: 이어받기 문구 ----
+// ---- 설정: 이어받기 문구, 지난 세션 정리 ----
 const settings = $("settings");
 $("settings-open").addEventListener("click", () => {
   const r = state.config.resume;
   $("cfg-phrase").value = r?.phrase || "";
   $("cfg-doc").value = r?.doc || "";
+  $("cfg-trash").value = state.config.trashDays ?? "";
   settings.showModal();
   $("cfg-phrase").focus();
 });
 $("settings-close").addEventListener("click", () => settings.close());
 $("settings-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const phrase = $("cfg-phrase").value.trim(), doc = $("cfg-doc").value.trim();
-  const out = await boardOp({ op: "config-set", resume: phrase ? { phrase, doc } : null });
+  const phrase = $("cfg-phrase").value.trim(), doc = $("cfg-doc").value.trim(), days = $("cfg-trash").value.trim();
+  const out = await boardOp({ op: "config-set", resume: phrase ? { phrase, doc } : null, trashDays: days ? Number(days) : null });
   if (!out.ok) return;
   settings.close();
   toast(out.msg);
@@ -1281,8 +1339,9 @@ $("group-add").addEventListener("click", () => {
 const gmenu = $("group-menu");
 // 메뉴를 연 단추를 찾는 함수. 메뉴가 열린 동안 목록이 다시 그려져도 닫을 때 그 단추를 다시 찾아 초점을 돌려준다
 let gmenuBack = null;
-function showMenu(anchor, back, items) {
+function showMenu(anchor, back, items, label = "메시지·프로젝트·지우기") {
   gmenu.replaceChildren(...items);
+  gmenu.setAttribute("aria-label", label);
   gmenuBack = back;
   anchor.setAttribute("aria-expanded", "true");
   gmenu.hidden = false;
@@ -1395,6 +1454,30 @@ function deleteItem(sid) {
   });
   return b;
 }
+// 머리줄 「정렬」: 줄 순서 하나를 고르고, 끝난 세션 숨기기를 켜고 끈다(이 브라우저에 기억)
+function sortLabel() {
+  $("sess-sort").textContent = `${SORTS[sessSort()]} ▾`;
+  $("sess-sort").setAttribute("aria-label", `정렬: ${SORTS[sessSort()]}${hideEnded() ? ", 끝난 세션 숨김" : ""}`);
+}
+$("sess-sort").addEventListener("click", () => {
+  const anchor = $("sess-sort");
+  const pick = (label, role, checked, run) => {
+    const b = el("button", "gm-item", label);
+    b.type = "button";
+    b.setAttribute("role", role);
+    b.setAttribute("aria-checked", String(checked));
+    b.addEventListener("click", () => { run(); closeGroupMenu(); sortLabel(); queueRender(); });
+    return b;
+  };
+  const sorts = Object.entries(SORTS).map(([k, label]) => pick(label, "menuitemradio", sessSort() === k, () => store.set("atv.sessSort", k)));
+  sorts[0].title = "새로 시작한 줄이 위에 오고, 그 뒤로는 자리가 바뀌지 않습니다(/clear·이어받기로 이어진 대화는 처음 대화의 자리에 붙습니다)";
+  sorts[1].title = "입력이 필요한 대화가 맨 위, 끝난 대화가 아래, 나머지는 최근에 움직인 순서입니다(일할 때마다 자리가 바뀝니다)";
+  sorts[2].title = "이름 가나다순입니다";
+  const hide = pick("끝난 세션 숨기기", "menuitemcheckbox", hideEnded(), () => store.set("atv.hideEnded", hideEnded() ? "0" : "1"));
+  showMenu(anchor, () => anchor, [el("div", "gm-title", "정렬"), ...sorts, el("hr", "gm-sep"), hide], "정렬");
+  (gmenu.querySelector('[aria-checked="true"]') || sorts[0]).focus();
+});
+sortLabel();
 function closeGroupMenu(back = true) {
   if (gmenu.hidden) return;
   gmenu.hidden = true;

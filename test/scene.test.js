@@ -286,3 +286,38 @@ test("같은 글 번호(cid): 만료된 글과 번호가 같으면 새로 넣는
   const again = evalSend(sc, { kind: "comment", text: "글", cid: X }, ctx, "m2");
   assert.equal(again.res.find((r) => r.k === "msg")?.v.mid, "m2");
 });
+
+test("draw: 표·상자 모양·아이콘을 받고 한도·모르는 값은 거부한다", () => {
+  const h = harness();
+  assert.equal(h.draw({ ops: [
+    { id: "t", kind: "table", label: "비교", status: "wait", cols: ["방안", "위험"], rows: [["색인", "쓰기 느려짐"], ["캐시"]], note: "추천: 색인" },
+    { id: "d", kind: "box", label: "판단", shape: "diamond", icon: "db" },
+    { id: "m", kind: "mermaid", src: "pie\n  \"A\" : 1", status: "doing" },
+  ] }), "적용 3");
+  assert.deepEqual(h.scene.items.t.rows, [["색인", "쓰기 느려짐"], ["캐시"]]);
+  assert.equal(h.scene.items.d.shape, "diamond");
+  assert.equal(h.scene.items.m.status, "doing");
+  assert.deepEqual(h.replay().items, h.scene.items, "재생도 같다");
+  // 모르는 모양·아이콘, 칸이 너무 많거나 긴 표, 글이 아닌 칸
+  const msg = h.draw({ ops: [
+    { id: "x1", kind: "box", shape: "star" },
+    { id: "x2", kind: "box", icon: "rocket" },
+    { id: "x3", kind: "table", cols: Array(9).fill("c") },
+    { id: "x4", kind: "table", rows: [["가".repeat(121)]] },
+    { id: "x5", kind: "table", rows: Array(41).fill(["a"]) },
+    { id: "x6", kind: "table", rows: [[1, 2]] },
+    { id: "x7", kind: "table", rows: "a" },
+  ] });
+  assert.match(msg, /^적용 0 · 거부 7/);
+  assert.match(msg, /shape 'star' 모름/);
+  assert.match(msg, /icon 'rocket' 모름/);
+  // 표에만 있는 필드는 다른 종류에서 무시하고 알린다. null 은 지운다
+  assert.match(h.draw({ ops: [{ id: "d", rows: [["a"]] }] }), /무시한 필드: d\.rows/);
+  h.draw({ ops: [{ id: "d", shape: null, icon: null }, { id: "t", rows: null }] });
+  assert.equal(h.scene.items.d.shape, undefined);
+  assert.equal(h.scene.items.d.icon, undefined);
+  assert.equal(h.scene.items.t.rows, undefined);
+  // 표·Mermaid 는 상태를 받으므로 막힘 메모가 그 상태를 바꾼다
+  assert.doesNotMatch(h.note({ text: "자료 없음", kind: "blocked", on: "m" }), /상태가 없음/);
+  assert.equal(h.scene.items.m.status, "blocked");
+});

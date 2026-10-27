@@ -1131,3 +1131,76 @@ test("소속 확인은 쓸 차례에 다시 본다(기다리는 사이 옮기면
   assert.equal((await sessMap(f)).D1.prev, "C2");
   assert.equal(f.board.projects.members.D1.why, "phrase");
 });
+
+test("지난 대화 자동 휴지통: 기본 30일, 진행 중인 프로젝트의 대화는 남기고 날수 설정·끄기를 따른다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const p = (n) => (1 << 22) + 100 + n;
+  for (const [i, id] of ["O1", "O2", "O3", "O4", "O5"].entries()) {
+    await f.hook(id, { f: "start", cwd: "/w" }, { pid: p(i) });
+    await f.hook(id, { f: "prompt", text: `일 ${id}` }, { pid: p(i) });
+    if (id !== "O5") await f.hook(id, { f: "end", reason: "other" }, { pid: p(i) });
+  }
+  const live = JSON.parse((await board(f, { op: "proj-new", name: "진행 중" })).text);
+  const done = JSON.parse((await board(f, { op: "proj-new", name: "끝남" })).text);
+  await board(f, { op: "proj-set", sids: ["O2"], pid: live.pid });
+  await board(f, { op: "proj-set", sids: ["O3"], pid: done.pid });
+  await board(f, { op: "proj-done", pid: done.pid, done: true });
+  const day = 86_400_000, now = Date.now();
+  // O4 는 29일 전, 나머지는 31일 전에 마지막으로 움직였다(O5 는 끝나지 않음)
+  for (const id of ["O1", "O2", "O3", "O5"]) f.board.sessions.get(id).scene.sess.lastT = now - 31 * day;
+  f.board.sessions.get("O4").scene.sess.lastT = now - 29 * day;
+
+  assert.equal(f.board.config.trashDays, undefined, "설정에 없으면 기본값(30일)을 쓴다");
+  assert.equal(await f.board.sweep(now), 2);
+  assert.deepEqual([...f.board.sessions.keys()].sort(), ["O2", "O4", "O5"], "끝난 프로젝트·프로젝트 밖의 오래된 대화만 옮긴다");
+  assert.deepEqual(fs.readdirSync(path.join(f.home, "trash")).map((n) => n.split(".")[0]).sort(), ["O1", "O3"]);
+  assert.equal(f.board.projects.members.O3, undefined, "옮긴 대화는 프로젝트 소속도 지운다");
+
+  // 날수: 1~3650 정수, null 은 끔. 저장하면 바로 한 번 돈다
+  for (const bad of [0, 3651, 1.5, "7"]) assert.equal((await board(f, { op: "config-set", resume: null, trashDays: bad })).status, 400, `거부: ${bad}`);
+  assert.equal((await board(f, { op: "config-set", resume: null, trashDays: 28 })).status, 200);
+  assert.equal(f.board.config.trashDays, 28);
+  for (let i = 0; i < 50 && f.board.sessions.has("O4"); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(!f.board.sessions.has("O4"), "날수를 줄이면 바로 옮긴다");
+  assert.ok(f.board.sessions.has("O2"), "진행 중인 프로젝트의 대화는 그대로");
+  assert.equal((await board(f, { op: "config-set", resume: null, trashDays: null })).status, 200);
+  assert.equal(f.board.config.trashDays, null);
+  await board(f, { op: "proj-done", pid: live.pid, done: true });
+  assert.equal(await f.board.sweep(now), 0, "끄면 옮기지 않는다");
+  // 날수를 빼고 보내면(이어받기 문구만 바꾸기) 날수는 그대로다
+  assert.equal((await board(f, { op: "config-set", resume: null })).status, 200);
+  assert.equal(f.board.config.trashDays, null);
+  const cfg = JSON.parse(fs.readFileSync(path.join(f.home, "config.json"), "utf8"));
+  assert.equal(cfg.trashDays, null, "설정 파일에 남는다");
+});
+
+test("지난 대화 자동 휴지통: 이어진 대화는 줄째로 보고, 설정 파일의 틀린 날수는 끈 것으로 본다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const pid = (1 << 22) + 200, day = 86_400_000, now = Date.now();
+  await f.hook("C1", { f: "start", cwd: "/w" }, { pid });
+  await f.hook("C1", { f: "prompt", text: "앞 대화" }, { pid });
+  await f.hook("C1", { f: "end", reason: "clear" }, { pid });
+  await f.hook("C2", { f: "start", cwd: "/w", source: "clear" }, { pid });
+  assert.equal(f.board.sessions.get("C2").scene.meta.prev, "C1", "시험 전제: /clear 로 이어짐");
+  f.board.sessions.get("C1").scene.sess.lastT = now - 40 * day;
+  assert.equal(await f.board.sweep(now), 0, "뒤 대화가 진행 중이면 앞 대화도 남긴다");
+  await f.hook("C2", { f: "end", reason: "other" }, { pid });
+  f.board.sessions.get("C2").scene.sess.lastT = now - 10 * day;
+  assert.equal(await f.board.sweep(now), 0, "줄의 가장 최근 활동이 날수 안이면 남긴다");
+  f.board.sessions.get("C2").scene.sess.lastT = now - 31 * day;
+  assert.equal(await f.board.sweep(now), 2, "줄째로 옮긴다");
+
+  // 설정 파일을 손으로 고쳐 틀린 날수가 들어가면 끈 것으로 본다(그대로 쓰면 날수와 상관없이 모두 옮긴다)
+  const file = path.join(f.home, "config.json");
+  for (const bad of [-1, "0", "abc", 0.5, true]) {
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), trashDays: bad }));
+    await f.restart();
+    const id = `B${String(bad).replace(/\W/g, "")}`;
+    await f.hook(id, { f: "start", cwd: "/w" }, { pid: pid + 1 });
+    await f.hook(id, { f: "end", reason: "other" }, { pid: pid + 1 });
+    f.board.sessions.get(id).scene.sess.lastT = now - 400 * day;
+    assert.equal(await f.board.sweep(now), 0, `틀린 날수 ${JSON.stringify(bad)}`);
+  }
+});

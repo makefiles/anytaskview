@@ -1,6 +1,6 @@
 // 가운데 그림: 부품을 DOM 으로 만들고 ELK 로 자리를 정한다.
 // 상태만 바뀌면 다시 배치하지 않는다. 크기나 구조가 바뀔 때만 이전 순서를 넣어 다시 배치하고, 가장 최근 배치 결과만 그린다.
-// 받은 글은 textContent 로만 넣는다. HTML 을 넣는 곳은 Mermaid 가 strict 로 그린 SVG 하나뿐이다.
+// 받은 글은 textContent 로만 넣는다. HTML 을 넣는 곳은 Mermaid 가 strict 로 그린 SVG 하나뿐이다(표 칸도 글로만 넣는다).
 
 import { own } from "/lib/scene.js";
 import { crossLines } from "/route.js";
@@ -18,10 +18,34 @@ function el(tag, cls, text) {
   if (text !== undefined) e.textContent = text;
   return e;
 }
+function svgEl(tag, attrs) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  return e;
+}
+// 상자 모양 가운데 CSS 테두리로 그리지 못하는 것의 윤곽(0~100 칸에 그리고 상자 크기에 맞춰 늘인다). round·circle 은 CSS 로 그린다
+const SHAPE_PATH = {
+  diamond: "M50,1 L99,50 L50,99 L1,50 Z",
+  hexagon: "M12,1 L88,1 L99,50 L88,99 L12,99 L1,50 Z",
+  cylinder: "M1,12 L1,88 A49,11 0 0 0 99,88 L99,12 A49,11 0 0 0 1,12 A49,11 0 0 0 99,12",
+  doc: "M1,1 L99,1 L99,86 C75,78 60,100 35,94 C20,90 10,88 1,92 Z",
+};
+const shaped = (p) => p.kind === "box" && p.shape && p.shape !== "rect";
+// Mermaid 그림의 최대 폭(px). 더 넓으면 비율대로 줄인다. 높이로는 줄이지 않는다(긴 시퀀스·간트의 글이 읽을 수 없게 작아진다)
+const MERMAID_MAX_W = 640;
+// 마름모·원·육각형은 글 상자(폭 a, 높이 b)가 윤곽 안에 들도록 크기를 정한다.
+// 마름모: a/W + b/H ≤ 1 을 W = 1.6a, H = 2.67b 로 맞춘다. 원(타원): (a/W)² + (b/H)² ≤ 1 을 W = H 비 그대로 √2 배로. 육각형: 위아래 변이 폭의 76%
+const SHAPE_FIT = {
+  diamond: (a, b) => ({ w: a * 1.6 + 24, h: b * 2.67 + 20 }),
+  circle: (a, b) => ({ w: Math.max(a * 1.42 + 24, 56), h: Math.max(b * 1.42 + 36, 56) }),
+  hexagon: (a, b) => ({ w: a / 0.76 + 16, h: b + 40 }),
+};
+// 원·막대 차트 색: Mermaid 기본(옅은 보라·노랑·연두)보다 서로 잘 구분되고 밝은·어두운 바탕에서 모두 읽히는 색
+const CHART_COLORS = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2", "#eeca3b", "#9d755d"];
 
 // 배치에 영향을 주는 값만 모은 열쇠. 이것이 같으면 다시 배치하지 않는다
 function layoutKey(scene, parts) {
-  return JSON.stringify([scene.view.dir, parts.map((p) => [p.id, p.kind, p.label, p.in, p.from, p.to, p.text, p.src, p.ref, p.note, p.value, p.max])]);
+  return JSON.stringify([scene.view.dir, parts.map((p) => [p.id, p.kind, p.label, p.in, p.from, p.to, p.text, p.src, p.ref, p.note, p.value, p.max, p.shape, p.icon, p.cols, p.rows])]);
 }
 
 // 배치 후보: 그림 전체를 한 방향으로 놓는 넷(LLM 이 준 방향·반대 방향, 각각 줄 바꿈 없음·있음)과, 바깥과 묶음 안의
@@ -59,7 +83,12 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
       mermaidCache.clear();
       mermaidTheme = theme;
       // suppressErrorRendering: 문법 오류 때 Mermaid 가 페이지 끝에 자체 오류 그림을 덧붙이지 않게 한다
-      window.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: theme === "dark" ? "dark" : "default", htmlLabels: false, flowchart: { htmlLabels: false }, suppressErrorRendering: true });
+      window.mermaid.initialize({
+        startOnLoad: false, securityLevel: "strict", theme: theme === "dark" ? "dark" : "default", htmlLabels: false, flowchart: { htmlLabels: false }, suppressErrorRendering: true,
+        // 간트는 그리는 자리의 폭(따로 그리면 1200px)에 맞춰 늘어나 줄이면 글이 아주 작아진다. 폭을 정해 둔다
+        gantt: { useWidth: 640, fontSize: 12, sectionFontSize: 12, barHeight: 18 },
+        themeVariables: { fontSize: "14px", pieSectionTextSize: "14px", pieLegendTextSize: "14px", pieTitleTextSize: "16px", ...Object.fromEntries(CHART_COLORS.map((c, i) => [`pie${i + 1}`, c])), pieOpacity: "0.9", xyChart: { plotColorPalette: CHART_COLORS.join(",") } },
+      });
     }
     if (mermaidCache.has(src)) return mermaidCache.get(src);
     const id = `atv-m${++mermaidSeq}`;
@@ -170,7 +199,18 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     const e = el("div");
     if (p.kind === "group") { e.append(el("div", "lbl", p.label || "")); }
     else if (p.kind === "box") {
-      e.append(el("div", "lbl", p.label || p.id));
+      if (SHAPE_PATH[p.shape]) {
+        const out = svgEl("svg", { class: "shp", viewBox: "0 0 100 100", preserveAspectRatio: "none", "aria-hidden": "true" });
+        out.append(svgEl("path", { d: SHAPE_PATH[p.shape], "vector-effect": "non-scaling-stroke" }));
+        e.append(out);
+      }
+      const lbl = el("div", "lbl", p.label || p.id);
+      if (p.icon) {
+        const pic = svgEl("svg", { class: "pic", "aria-hidden": "true" });
+        pic.append(svgEl("use", { href: `#ic-${p.icon}` }));
+        lbl.prepend(pic);
+      }
+      e.append(lbl);
       // 긴 절대 경로가 상자를 키우지 않게 파일 이름:줄만 보인다. 전체 경로는 툴팁과 복사에 남는다
       if (p.ref) e.append(el("div", "ref", String(p.ref).split("/").pop()));
       if (p.note) e.append(el("div", "pnote", p.note));
@@ -179,6 +219,23 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
       const ul = el("ul");
       fillItems(ul, scene, p.id);
       e.append(ul);
+    } else if (p.kind === "table") {
+      if (p.label) e.append(el("div", "lbl", p.label));
+      // 줄마다 칸 수가 달라도 표 모양이 깨지지 않게 가장 긴 줄에 맞춰 빈칸을 채운다
+      const cols = p.cols || [], rows = p.rows || [];
+      const width = Math.max(cols.length, ...rows.map((r) => r.length));
+      const line = (cells, tag) => {
+        const tr = el("tr");
+        for (let i = 0; i < width; i++) tr.append(el(tag, "", cells[i] ?? ""));
+        return tr;
+      };
+      const t = el("table", "tbl");
+      if (cols.length) { const head = el("thead"); head.append(line(cols, "th")); t.append(head); }
+      const body = el("tbody");
+      for (const r of rows) body.append(line(r, "td"));
+      t.append(body);
+      e.append(t);
+      if (p.note) e.append(el("div", "pnote", p.note));
     } else if (p.kind === "progress") {
       const max = p.max || 100, v = Math.min(p.value || 0, max);
       const bar = el("div", "bar"), fill = el("i");
@@ -195,6 +252,15 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
       if (out.svg) {
         box.innerHTML = out.svg; // Mermaid(strict)가 만든 SVG. 이 경로 하나만 HTML 을 넣는다
         for (const a of box.querySelectorAll("a")) a.replaceWith(...a.childNodes); // 링크는 벗겨 낸다
+        // Mermaid 는 width="100%" 로 내는데, 상자는 내용 폭에 맞춰 줄어드는 칸이라 그림이 작게 눌린다.
+        // 그림 자체 크기(viewBox)로 두고, 너무 넓으면 MERMAID_MAX_W 에 맞춰 비율대로 줄인다
+        const g = box.querySelector("svg"), vb = g?.viewBox?.baseVal;
+        if (vb && vb.width > 0 && vb.height > 0) {
+          const k = Math.min(1, MERMAID_MAX_W / vb.width);
+          g.setAttribute("width", String(Math.round(vb.width * k)));
+          g.setAttribute("height", String(Math.round(vb.height * k)));
+          g.style.maxWidth = "none";
+        }
       }
       else box.append(el("div", "merr", `Mermaid 그리기 실패: ${out.error}`));
       e.append(box);
@@ -214,7 +280,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
 
   // 상태·표시처럼 크기를 바꾸지 않는 것
   function decorate(e, p) {
-    e.className = `part ${p.kind}` + (p.status ? ` st-${p.status}` : " nostatus") + (p.ref ? " has-ref" : "");
+    e.className = `part ${p.kind}` + (p.status ? ` st-${p.status}` : " nostatus") + (p.ref ? " has-ref" : "") + (shaped(p) ? ` shaped shape-${p.shape}` : "");
     const chip = e.querySelector(":scope > .stchip");
     if (chip) chip.textContent = p.status ? ST_ICO[p.status] : "";
     const badges = e.querySelector(":scope > .badges");
@@ -311,7 +377,14 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
       if (p.kind === "group") { groupMin.set(p.id, `(${groupMinWidth(e, p.label)}, 44)`); continue; }
       e.style.left = "0px"; e.style.top = "0px"; e.style.width = ""; e.style.height = "";
       // offset 크기는 화면 배율(transform)과 상관없는 레이아웃 크기다
-      size.set(p.id, { width: e.offsetWidth + 1, height: e.offsetHeight + 1 });
+      let w = e.offsetWidth, h = e.offsetHeight;
+      const fit = shaped(p) && SHAPE_FIT[p.shape];
+      if (fit) {
+        ({ w, h } = fit(w, h));
+        w = Math.ceil(w); h = Math.ceil(h);
+        e.style.width = `${w}px`; e.style.height = `${h}px`;
+      }
+      size.set(p.id, { width: w + 1, height: h + 1 });
     }
     const edges = [];
     const measure = el("span", "elabel");

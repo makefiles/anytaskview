@@ -1,6 +1,6 @@
 // MCP 도구 정의와 서버 안내문. 세션마다 LLM 맥락에 실리므로 짧은 영어로 쓴다(한국어보다 토큰이 덜 든다).
 // 화판에 보이는 이름표·글은 사용자 언어로 쓰라고 안내한다.
-import { STATUSES, NOTE_KINDS, DRAW_KINDS } from "../lib/scene.js";
+import { STATUSES, NOTE_KINDS, DRAW_KINDS, SHAPES, ICONS } from "../lib/scene.js";
 
 const str = { type: "string" };
 const strOrNull = { type: ["string", "null"] };
@@ -14,9 +14,9 @@ When to call (at these moments, not on every tool call):
 - Right before you answer the user, if the step changed since your last plan call.
 - Before launching subagents: plan or draw what they will do.
 - Right before you ask the user to approve something: note kind wait. When stuck: note kind blocked.
-- Draw the structure of the problem once early in every multi-step task, right after your first plan call (3-8 boxes: the parts, suspects or options you will work on). Then update statuses as you go and redraw when that structure changes. Add ref (path:line) to parts tied to a file; the board marks them when the file is edited.
+- Draw the structure of the problem once early in every multi-step task, right after your first plan call. Pick the form that fits the content and mix two or three forms in a view: boxes (shape, icon) and edges for the parts, suspects or options whose status you will update; a table for comparisons, options and results; mermaid for a flow the user reads as a whole (sequence, state, gantt, timeline, pie or xychart, mindmap, ER, class). Then update statuses as you go and redraw when that structure changes. Add ref (path:line) to parts tied to a file; the board marks them when the file is edited.
 Rules: ids are yours and stable; resending an id updates only the fields you send; null clears a field. Send only changes, never the whole scene. Do not look at screenshots of the board.
-Keep about 8 boxes per view. Draw problem-solving units (features, suspects, call paths), not folder layouts.
+Keep each view small (about 8 boxes, short tables and diagrams). Draw problem-solving units (features, suspects, call paths), not folder layouts. The anytaskview skill has examples of each form.
 plan = the steps of your work. draw list + item = structure of a deliverable (document outline, checklist).
 Write labels, titles and notes in the user's language (Korean for this user).
 If a result says the board is off, skip drawing this time and continue your work.
@@ -45,7 +45,7 @@ export const TOOLS = [
   },
   {
     name: "draw",
-    description: "Add, update or delete parts of the center diagram (auto-laid out). Kinds: box, group (holds parts via in), edge (id, from, to; ends fixed at creation), list + item (item in list or item), progress (value, max), text, mermaid (src). del:true removes a part with its children and edges. clear:true empties the diagram first.",
+    description: "Add, update or delete parts of the center diagram (auto-laid out). Kinds: box (shape, icon), group (holds parts via in), edge (id, from, to; ends fixed at creation), list + item (item in list or item), table (cols: header cells, rows: arrays of cells; resend rows whole), progress (value, max), text, mermaid (src: any Mermaid diagram, no live status inside). del:true removes a part with its children and edges. clear:true empties the diagram first.",
     inputSchema: {
       type: "object",
       properties: {
@@ -57,6 +57,8 @@ export const TOOLS = [
               id: str, kind: { type: "string", enum: DRAW_KINDS }, label: strOrNull, status, ref: strOrNull, note: strOrNull,
               in: strOrNull, from: str, to: str, value: { type: ["number", "null"] }, max: { type: ["number", "null"] },
               text: strOrNull, src: strOrNull, del: { type: "boolean" },
+              shape: { type: ["string", "null"], enum: [...SHAPES, null] }, icon: { type: ["string", "null"], enum: [...ICONS, null] },
+              cols: { type: ["array", "null"], items: str }, rows: { type: ["array", "null"], items: { type: "array", items: str } },
             },
             required: ["id"],
           },
