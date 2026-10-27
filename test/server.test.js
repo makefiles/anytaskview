@@ -675,9 +675,9 @@ test("지우기: 끝난 대화만 휴지통으로 옮기고 프로젝트 소속�
 
   assert.equal((await board(f, { op: "sess-delete", sids: ["D2"] })).status, 400, "진행 중인 대화는 지우지 않는다");
   assert.equal((await board(f, { op: "sess-delete", sids: ["D1", "NOPE"] })).status, 400, "모르는 세션이 섞이면 아무것도 지우지 않는다");
-  const many = await board(f, { op: "sess-delete", sids: Array.from({ length: 51 }, (_, i) => `Z${i}`) });
+  const many = await board(f, { op: "sess-delete", sids: Array.from({ length: 501 }, (_, i) => `Z${i}`) });
   assert.equal(many.status, 400);
-  assert.match(JSON.parse(many.text).msg, /50개까지/);
+  assert.match(JSON.parse(many.text).msg, /500개까지/);
   const held = f.board.sessions.get("D1");
   assert.ok([...f.board.pids.values()].some((e) => e.sid === "D1"), "끝난 뒤에도 짝짓기 표에 남아 있다(시험 전제)");
   const out = JSON.parse((await board(f, { op: "sess-delete", sids: ["D1", "D2"] })).text);
@@ -1248,4 +1248,51 @@ test("승인 대기: 이어받기 문구로 이 입력에서 막 들어간 프�
   // 승인 대기를 다시 보내면(같은 상태여도) 새 질문이다
   await f.mcp("plan", { steps: [{ id: "u1", status: "wait" }], project: pid }, { pid: P + 1, env: "H1" });
   assert.equal(f.board.pboards.get(pid).scene.items.u1.answered, undefined);
+});
+
+test("프로젝트와 끝난 대화 지우기(proj-purge): 받은 때의 소속으로 끝난 대화만 옮기고, 하나라도 못 옮기면 프로젝트를 남긴다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const P = (1 << 22) + 500;
+  for (const [i, id] of ["X1", "X2", "X3", "Y1"].entries()) await f.hook(id, { f: "start", cwd: "/w" }, { pid: P + i });
+  for (const id of ["X1", "X2", "Y1"]) await f.hook(id, { f: "end", reason: "other" }, { pid: P });
+  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
+  const B = JSON.parse((await board(f, { op: "proj-new", name: "나" })).text).pid;
+  await board(f, { op: "proj-set", sids: ["X1", "X2", "X3"], pid: A });
+  await board(f, { op: "proj-set", sids: ["Y1"], pid: B });
+  // 휴지통에 쓸 수 없으면 옮기지 못한 대화를 알리고 프로젝트는 남긴다
+  const trash = path.join(f.home, "trash");
+  fs.mkdirSync(trash, { recursive: true });
+  fs.chmodSync(trash, 0o500);
+  let out = JSON.parse((await board(f, { op: "proj-purge", pid: A })).text);
+  fs.chmodSync(trash, 0o700);
+  assert.equal(out.ok, false);
+  assert.match(out.msg, /옮기지 못해 프로젝트는 남겼습니다/);
+  assert.ok(f.board.projects.projects[A], "프로젝트가 남는다");
+  out = JSON.parse((await board(f, { op: "proj-purge", pid: A })).text);
+  assert.equal(out.ok, true, out.msg);
+  assert.deepEqual(out.gone.sort(), ["X1", "X2"]);
+  assert.ok(!f.board.projects.projects[A] && f.board.sessions.has("X3") && !f.board.projects.members.X3, "진행 중인 대화는 프로젝트 없음으로 남는다");
+  assert.ok(f.board.sessions.has("Y1") && f.board.projects.members.Y1.pid === B, "다른 프로젝트의 끝난 대화는 그대로");
+});
+
+test("프로젝트 지우기: 큰 그림 기록을 휴지통으로 옮기지 못하면 프로젝트를 남기고 실패로 알린다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const P = (1 << 22) + 600;
+  await f.hook("Q1", { f: "start", cwd: "/w" }, { pid: P });
+  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
+  await board(f, { op: "proj-set", sids: ["Q1"], pid: A });
+  await f.mcp("plan", { steps: [{ id: "u1", title: "단위" }], project: A }, { pid: P, env: "Q1" });
+  const trash = path.join(f.home, "trash");
+  fs.mkdirSync(trash, { recursive: true });
+  fs.chmodSync(trash, 0o500);
+  let out = JSON.parse((await board(f, { op: "proj-drop", pid: A })).text);
+  fs.chmodSync(trash, 0o700);
+  assert.equal(out.ok, false);
+  assert.match(out.msg, /큰 그림 기록을 휴지통으로 옮기지 못해/);
+  assert.ok(f.board.projects.projects[A] && f.board.pboards.has(A), "프로젝트와 큰 그림이 남는다");
+  out = JSON.parse((await board(f, { op: "proj-drop", pid: A })).text);
+  assert.equal(out.ok, true, out.msg);
+  assert.ok(!f.board.projects.projects[A] && fs.readdirSync(trash).some((n) => n.startsWith(`${A}.`)));
 });

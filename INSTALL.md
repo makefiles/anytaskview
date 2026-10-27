@@ -1,6 +1,6 @@
 # anytaskview 설치 안내
 
-**English summary.** Step-by-step install, verify, update and uninstall for the anytaskview Claude Code plugin, and the same for OpenAI Codex (CLI, desktop app, VS Code) in the last part. Each step has a command and a success check, so an LLM coding agent can follow it as written. Every command block runs on its own (agent shells do not keep variables between calls). Install and update commands need network access and write access to the home folder, and the board server opens a port on 127.0.0.1; if a sandbox blocks this, ask for approval to run outside it or ask the user to run the command. Rules for agents: do not print or paste the board URL (it carries a read token and a write key) into chat or logs; ask the user to open it in their own browser; ask before deleting anything or editing the user's Codex config.
+**English summary.** Step-by-step install, verify, update and uninstall for the anytaskview Claude Code plugin, and the same for OpenAI Codex (CLI, desktop app, VS Code) in the last part. Each step has a command and a success check, so an LLM coding agent can follow it as written. Every command block runs on its own (agent shells do not keep variables between calls). Install and update commands need network access and write access to the home folder, and the board server opens a port on 127.0.0.1; if a sandbox blocks this, ask for approval to run outside it or ask the user to run the command. Rules for agents: open the board with `scripts/atv board --open` (it opens the default browser without printing the URL); never run `--url` yourself or paste the board URL (it carries a read token and a write key) into chat or logs; if `--open` cannot open a browser, ask the user to run `--url` in their own terminal; ask before deleting anything or editing the user's Codex config.
 
 사람도 그대로 따라 할 수 있지만, Claude Code 같은 코딩 에이전트에 「이 문서를 읽고 그대로 설치하고 확인해 줘」 라고 맡기도록 썼습니다.
 
@@ -9,8 +9,8 @@
 - 단계마다 명령을 실행하고 「확인」 의 기준을 본 뒤 다음 단계로 갑니다. 기준이 맞지 않으면 멈추고 그 출력을 사용자에게 보여 줍니다.
 - 명령 묶음은 하나씩 따로 실행해도 되게 썼습니다. 에이전트 도구는 호출마다 셸이 새로 떠서 앞 단계에서 정한 변수가 남지 않습니다.
 - 마켓플레이스 추가·설치·갱신은 네트워크와 홈 폴더(`~/.claude`, `~/.codex`) 쓰기가, 화판 서버는 127.0.0.1 포트 열기가 필요합니다. 샌드박스(Codex 의 기본값 등)가 막으면 샌드박스 밖에서 실행하도록 승인을 받거나, 사용자에게 터미널에서 직접 실행해 달라고 합니다.
-- 화판 주소(`scripts/atv board --url` 의 출력)는 읽기 토큰과 쓰기 열쇠를 담고 있습니다. 대화창이나 로그, 이슈에 옮겨 적지 말고, 사용자에게 명령을 알려 주어 직접 열게 합니다.
-- 브라우저 창은 사용자가 원할 때만 엽니다.
+- 화판 주소(`scripts/atv board --url` 의 출력)는 읽기 토큰과 쓰기 열쇠를 담고 있습니다. 에이전트는 `--url` 을 실행하지 않고, 그 주소를 대화창이나 로그, 이슈에 옮겨 적지 않습니다. 브라우저로 열 때는 주소를 찍지 않는 `--open` 을 씁니다.
+- 브라우저 창은 사용자가 원할 때만 엽니다(설치를 맡긴 것은 화판을 열어 달라는 뜻으로 봅니다).
 - 상태 폴더(`~/.local/state/anytaskview/`)나 플러그인 폴더를 지우는 일은 사용자에게 먼저 묻습니다.
 - 전역 설정(`git config --global`, 셸 시작 파일 등)은 바꾸지 않습니다. `ANYTASKVIEW_NODE` 가 필요하면 사용자에게 어디에 둘지 묻습니다.
 
@@ -66,17 +66,21 @@ curl -s --retry 10 --retry-connrefused --retry-delay 1 -o /dev/null -w '%{http_c
 
 확인: `401` 이 찍힙니다(서버가 떠 있고, 토큰 없이는 잠긴 화면을 준다는 뜻). `000` 이면 `~/.local/state/anytaskview/board.log` 의 마지막 줄을 사용자에게 보여 줍니다. 그 밖의 숫자면 4871 포트를 다른 프로그램이 쓰고 있을 수 있습니다. `ss -ltnp | grep ':4871 '` 로 어떤 프로그램인지 사용자에게 보여 주고 멈춥니다.
 
-## 4. 브라우저로 열기(사용자가 직접)
+## 4. 브라우저로 열기
 
-사용자에게 아래 명령을 터미널에서 직접 실행하고, 찍힌 주소를 이 PC 의 브라우저로 한 번 열라고 안내합니다. 에이전트는 이 명령을 실행해 출력을 읽지 않습니다.
+아래 명령은 화판 서버가 없으면 띄우고, 이 PC 의 기본 브라우저로 화판을 엽니다. 열쇠가 든 주소는 화면에 찍지 않고(이 사용자만 읽는 넘김 파일을 엽니다) 에이전트가 실행해도 됩니다.
+
+```sh
+"$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)scripts/atv" board --open
+```
+
+확인: 「기본 브라우저로 화판을 열었습니다」 가 찍힙니다. 그 뒤로는 그 브라우저에서 `http://127.0.0.1:4871/` 만 열면 됩니다(읽기 쿠키는 1년, 쓰기 열쇠는 그 브라우저에 남습니다).
+
+「브라우저를 여는 명령이 없습니다」 가 나오면(원격 셸·화면 없는 서버 따위), 사용자에게 아래 명령을 이 PC 의 터미널에서 직접 실행하고 찍힌 주소를 브라우저로 한 번 열라고 안내합니다. 에이전트는 이 명령을 실행해 출력을 읽지 않습니다.
 
 ```sh
 "$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)scripts/atv" board --url
 ```
-
-그 뒤로는 그 브라우저에서 `http://127.0.0.1:4871/` 만 열면 됩니다(읽기 쿠키는 1년, 쓰기 열쇠는 그 브라우저에 남습니다).
-
-`--url` 은 이 사용자의 화판 서버가 떠 있을 때만 주소를 줍니다. 「떠 있지 않습니다」 나 「다른 사용자의 프로그램」 이 나오면 3단계로 돌아가 확인합니다.
 
 확인(사용자): 화판이 열리고 맨 위에 「쓰기 열쇠 없음」 이 보이지 않습니다.
 
@@ -175,10 +179,10 @@ curl -s --retry 10 --retry-connrefused --retry-delay 1 -o /dev/null -w '%{http_c
 
 확인: `401` 이 찍힙니다. 아니면 3단계의 「확인」 처럼 합니다.
 
-사용자에게 아래 명령을 터미널에서 직접 실행하고, 찍힌 주소를 이 PC 의 브라우저로 한 번 열라고 안내합니다. 에이전트는 이 명령을 실행해 출력을 읽지 않습니다.
+브라우저로 열기(4단계와 같음, 안 되면 사용자가 `--url` 로):
 
 ```sh
-"$HOME/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv" board --url
+"$HOME/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv" board --open
 ```
 
 확인(사용자): 화판이 열리고 맨 위에 「쓰기 열쇠 없음」 이 보이지 않습니다.

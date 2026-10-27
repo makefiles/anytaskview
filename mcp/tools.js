@@ -16,7 +16,7 @@ When to call (at these moments, not on every tool call):
 - Right before you ask the user to approve something: note kind wait. When stuck: note kind blocked.
 - Draw the structure of the problem once early in every multi-step task, right after your first plan call. Pick the form that fits the content and mix two or three forms in a view: boxes (shape, icon) and edges for the parts, suspects or options whose status you will update; a table for comparisons, options and results; mermaid for a flow the user reads as a whole (sequence, state, gantt, timeline, pie or xychart, mindmap, ER, class). Then update statuses as you go and redraw when that structure changes. Add ref (path:line) to parts tied to a file; the board marks them when the file is edited.
 Rules: ids are yours and stable; resending an id updates only the fields you send; null clears a field. Send only changes, never the whole scene. Do not look at screenshots of the board.
-Keep each view small (about 8 boxes, short tables and diagrams). Draw problem-solving units (features, suspects, call paths), not folder layouts. The anytaskview skill has examples of each form.
+Keep each view small (about 8 boxes, short tables and diagrams). Draw problem-solving units (features, suspects, call paths), not folder layouts. The anytaskview skill has examples of each form and the command that opens the board in the user's browser (use it when the user asks to open the board).
 plan = the steps of your work. draw list + item = structure of a deliverable (document outline, checklist).
 Write labels, titles and notes in the user's language (Korean for this user).
 If a result says the board is off, skip drawing this time and continue your work.

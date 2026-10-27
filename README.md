@@ -8,7 +8,7 @@
 **English summary.** anytaskview is a Claude Code plugin that shows what Claude is doing on a live board in your local browser: the plan and its current step, a diagram Claude draws while it works, notes and decisions, and facts collected automatically by hooks (file edits, commands, subagents). Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to Claude. The board UI and Claude-facing texts are in Korean, and so are the screenshots in this README.
 
 - Requirements: Claude Code with plugin support, Node.js 22.12 or later, Linux (macOS untested, Windows through WSL), a recent browser.
-- Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md). Agents given only this repository URL should follow INSTALL.md from the top; the two commands alone do not start or open the board.
+- Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md). Agents given only this repository URL should follow INSTALL.md from the top; the two commands alone do not start or open the board. To open the board later, ask the agent to open it, or run `scripts/atv board --open` from the plugin folder (it opens your default browser without printing the key).
 - OpenAI Codex (CLI, desktop app, VS Code) works too: `codex plugin marketplace add makefiles/anytaskview`, `codex plugin add anytaskview@anytaskview`, allow the five board tools in `~/.codex/config.toml`, and trust the hooks in `/hooks`. See the Codex part of [INSTALL.md](INSTALL.md).
 - Security: the board listens on 127.0.0.1 only and every request needs a token; nothing is sent off the machine. Details and limits: [SECURITY.md](SECURITY.md).
 - License: Apache-2.0. Bundled browser libraries and the font keep their own licenses (ELK: EPL-2.0, Mermaid: MIT, Pretendard: SIL OFL 1.1).
@@ -53,18 +53,19 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 
 > https://github.com/makefiles/anytaskview 의 INSTALL.md 를 읽고 그대로 설치하고 확인해 줘
 
-저장소 주소만 받은 에이전트도 위 두 명령에서 멈추지 말고 INSTALL.md 를 처음부터 따라야 합니다(두 명령만으로는 화판이 뜨거나 열리지 않습니다). INSTALL.md 는 에이전트가 그대로 따라 할 수 있도록 명령과 확인 기준을 단계마다 적었습니다. 화판 주소에는 비밀 값이 들어 있으므로 에이전트가 그 주소를 대화창에 옮겨 적지 않고, 사용자에게 브라우저로 직접 열도록 안내하게 했습니다.
+저장소 주소만 받은 에이전트도 위 두 명령에서 멈추지 말고 INSTALL.md 를 처음부터 따라야 합니다(두 명령만으로는 화판이 뜨거나 열리지 않습니다). INSTALL.md 는 에이전트가 그대로 따라 할 수 있도록 명령과 확인 기준을 단계마다 적었습니다. 화판 주소에는 비밀 값이 들어 있으므로, 에이전트는 주소를 찍지 않는 `--open` 으로 브라우저를 열고 주소를 대화창에 옮겨 적지 않게 했습니다.
 
 ## 처음 열기
 
-1. Claude Code 세션 하나를 엽니다. 플러그인의 MCP 서버가 뜰 때 화판 서버(127.0.0.1:4871)도 뜹니다(이미 떠 있으면 그것을 씁니다).
-2. 터미널에서 아래 명령이 찍는 주소를 이 PC 의 브라우저로 한 번 엽니다.
+가장 쉬운 방법은 Claude Code(또는 Codex) 세션에서 「화판 열어 줘」 라고 하는 것입니다. 에이전트가 아래 명령을 실행해 화판 서버를 띄우고(없으면) 이 PC 의 기본 브라우저로 엽니다. 열쇠가 든 주소는 화면이나 대화에 찍히지 않습니다. 터미널에서 직접 실행해도 됩니다.
 
-   ```sh
-   "$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)scripts/atv" board --url
-   ```
+```sh
+"$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)scripts/atv" board --open
+```
 
-3. 그 뒤로는 그 브라우저에서 `http://127.0.0.1:4871/` 만 열면 됩니다.
+한 번 연 뒤로는 그 브라우저에서 `http://127.0.0.1:4871/` 만 열면 됩니다. PC 를 다시 켜도 기록은 상태 폴더에 남아 있어, 세션을 열고 화판을 다시 열면 그대로 보입니다.
+
+브라우저를 여는 명령이 없는 환경(원격 셸 따위)에서는 같은 명령을 `--url` 로 바꿔 실행하고, 찍힌 주소를 이 PC 의 브라우저로 한 번 엽니다.
 
 주소에는 읽기 토큰(`?t=`)과 화판 쓰기 열쇠(`#w=`)가 들어 있습니다. 다른 사람에게 보내거나 이슈·대화에 붙이지 마세요. `--url` 은 이 사용자의 화판 서버가 떠 있을 때만 주소를 줍니다.
 
@@ -123,7 +124,7 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 ## 문제 해결
 
 - 화판이 안 뜸: Claude Code 세션을 새로 열거나, 위의 `scripts/atv board` 로 직접 띄웁니다. 로그는 `~/.local/state/anytaskview/board.log` 입니다.
-- 「쓰기 열쇠 없음」 이 보임: `scripts/atv board --url` 의 주소로 다시 엽니다(다른 브라우저·시크릿 창·쿠키를 지운 경우).
+- 「쓰기 열쇠 없음」 이 보임: `scripts/atv board --open` 으로 다시 엽니다(다른 브라우저·시크릿 창·쿠키를 지운 경우).
 - 플러그인을 갱신한 뒤 「화판 서버가 다른 판」 이라고 나옴: 옛 판 서버를 내립니다(INSTALL.md 「갱신」).
 - node 를 찾지 못함: `ANYTASKVIEW_NODE=/path/to/node` 를 Claude Code 를 띄우는 환경에 넣습니다.
 

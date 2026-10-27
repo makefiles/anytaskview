@@ -20,7 +20,8 @@ function runHook(ev, env, args = []) {
     let out = "", err = "";
     p.stdout.on("data", (c) => (out += c));
     p.stderr.on("data", (c) => (err += c));
-    p.on("exit", (code) => ok({ code, out, err, ms: Date.now() - t0 }));
+    // exit 는 출력이 다 오기 전에 올 수 있다. 출력까지 닫힌 close 를 기다린다(바쁠 때 출력을 놓쳐 시험이 가끔 틀렸다)
+    p.on("close", (code) => ok({ code, out, err, ms: Date.now() - t0 }));
     p.stdin.end(typeof ev === "string" ? ev : JSON.stringify(ev)); // 글을 주면 그대로 보낸다(깨진 JSON 시험)
   });
 }
@@ -186,7 +187,7 @@ test("그리기 알림: 입력 뒤 도구를 8번 넘게 쓰면 대화마다 한
     const p = spawn(NUDGE, ["tool"], { env: env("105") });
     let o = "";
     p.stdout.on("data", (c) => (o += c));
-    p.on("exit", () => ok(o));
+    p.on("close", () => ok(o)); // exit 는 출력보다 먼저 올 수 있다
     p.stdin.end(ev("Grep"));
   })));
   assert.equal(runs.filter(Boolean).length, 1);

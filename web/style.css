@@ -282,11 +282,10 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #tl-body li.sub { padding-left: 14px; color: var(--muted); }
 #tl-body li .when { color: var(--muted); font-size: 13px; margin-right: 6px; font-variant-numeric: tabular-nums; }
 /* 타임라인: 시각 | 종류 표지 | 글 세 칸. 표지 칸 폭을 고정해 글 머리가 줄마다 맞고, 넘어간 줄도 글 머리 아래에서 잇는다.
-   하위 에이전트 줄(.sub)은 글 칸만 들여 쓴다 */
+   하위 에이전트 줄(.sub)은 들여 쓰지 않고 흐린 글자로만 가른다(들여 쓰면 글 머리가 어긋난다) */
 #tl-body.hang li:not(.new-mark) { display: grid; grid-template-columns: 58px 64px minmax(0, 1fr); column-gap: 6px; align-items: baseline; }
 #tl-body.hang li .when { font-weight: 400; margin: 0; } /* 굵은 줄(사용자·화판 글)에서도 칸 폭을 넘지 않게 */
 #tl-body.hang li .tl-k { justify-self: start; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font-weight: 400; }
-#tl-body.hang li.sub .tl-t { padding-left: 14px; }
 #tl-body.hang li.sub { padding-left: 0; }
 #tl-body .tl-k.fact { color: var(--muted); }
 #tl-body .tl-k.fact.notify { color: var(--s-wait); } #tl-body .tl-k.fact.edit-fail { color: var(--s-fail); }
@@ -324,10 +323,13 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 /* 묶음 아래의 접힌 「지난 세션 · N」 */
 .pastfold { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 2px 4px; margin: 2px 0; font-size: 13px; line-height: 18px; color: var(--muted); }
 .pastfold:hover { color: var(--fg); text-decoration: underline dotted; }
+.ghead.pasthead { margin: 2px 0; }
+.ghead.pasthead .pastfold { flex: 1; width: auto; margin: 0; }
 .ghead .gtog { flex: none; border: 0; background: transparent; padding: 0 2px; font-size: 12px; line-height: 20px; color: var(--muted); }
 .ghead .gfold { flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; padding: 0 2px; font-size: 12px; line-height: 20px; font-weight: 600; color: var(--key); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ghead button.gfold:hover { color: var(--fg); text-decoration: underline dotted; }
 .ghead .gfold.sel { color: var(--accent); }
+.ghead .gfold.none { color: var(--muted); font-weight: 400; } /* 「프로젝트 없음」: 프로젝트 이름(자주)과 가른다 */
 .ghead .pmenu { flex: none; opacity: 0; }
 .ghead:hover > .pmenu, .ghead:focus-within > .pmenu, .pmenu[aria-expanded="true"] { opacity: 1; }
 #tl-body .hist { border: 0; background: transparent; padding: 0; font-weight: 600; text-align: left; color: var(--fg); }

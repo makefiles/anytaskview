@@ -24,7 +24,7 @@ function runHook(ev, env, args = []) {
     const p = spawn(process.execPath, [HOOK, ...args], { env: { ...process.env, ...env } });
     let out = "";
     p.stdout.on("data", (c) => (out += c));
-    p.on("exit", (code) => ok({ code, out }));
+    p.on("close", (code) => ok({ code, out })); // exit 는 출력보다 먼저 올 수 있다
     p.stdin.end(JSON.stringify(ev));
   });
 }

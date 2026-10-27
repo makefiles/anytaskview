@@ -644,7 +644,7 @@ function dropZone(sec, pid) {
     if (sid && state.sessions.has(sid)) moveThread(sid, pid || null);
   });
 }
-// 프로젝트 머리: 접기, 이름(누르면 큰 그림 화판), ⋯ 메뉴(이름·끝·풀기). pid "" 은 「프로젝트 없음」
+// 프로젝트 머리: 접기, 이름(누르면 큰 그림 화판), ⋯ 메뉴(이름·끝·지우기). pid "" 은 「프로젝트 없음」(프로젝트와 다른 흐린 색)
 function projHead(p, count) {
   const head = el("div", "ghead"), folded = gfold.has(p);
   const fold = el("button", "gtog", folded ? "▸" : "▾");
@@ -659,7 +659,7 @@ function projHead(p, count) {
   });
   head.append(fold);
   if (!p) {
-    head.append(el("span", "gfold", `프로젝트 없음 · ${count}`));
+    head.append(el("span", "gfold none", `프로젝트 없음 · ${count}`));
     return head;
   }
   const pr = state.projects.projects[p];
@@ -675,7 +675,7 @@ function projHead(p, count) {
     menu.type = "button";
     menu.dataset.pid = p;
     menu.setAttribute("aria-haspopup", "menu");
-    menu.setAttribute("aria-label", `${pr.name}: 이름·끝·풀기`);
+    menu.setAttribute("aria-label", `${pr.name}: 이름·끝·지우기`);
     menu.addEventListener("click", () => openProjectMenu(p, menu));
     head.append(menu);
   }
@@ -710,7 +710,19 @@ function sectionRows(key, list, now) {
     store.set("atv.pastOpen", JSON.stringify([...open]));
     queueRender();
   });
-  out.push(b);
+  // 머리줄: 접기 단추와 ⋯(마우스를 올리면 보임) 「지난 세션 모두 지우기」
+  const head = el("div", "ghead pasthead");
+  head.append(b);
+  if (canWrite()) {
+    const menu = el("button", "mini pmenu", "⋯");
+    menu.type = "button";
+    menu.dataset.past = key;
+    menu.setAttribute("aria-haspopup", "menu");
+    menu.setAttribute("aria-label", "지난 세션: 모두 지우기");
+    menu.addEventListener("click", () => openPastMenu(key, past, menu));
+    head.append(menu);
+  }
+  out.push(head);
   // 접혀 있어도 지금 보는 줄은 단추 아래에 보인다(자리를 옮기지 않고 어느 줄을 보는지 알 수 있게)
   const shown = on ? past : past.filter((t) => t.some((x) => x.id === state.sid));
   out.push(...shown.map((t) => sessRow(t, now)));
@@ -1151,7 +1163,10 @@ function renderTimeline(scene, now) {
   if (proj) return renderHistory(scene, now);
   const ol = $("tl-body"), box = $("timeline");
   const items = [];
-  const entries = scene.timeline.slice(-400).reverse().filter((e) => !tlHide.has(tlKind(e)) && !(e.agent && tlHide.has("agent")));
+  // 시작 없이 끝만 온 하위 에이전트(종류도 없음)는 Claude Code 안쪽 보조 에이전트(다음 입력 제안 따위)로 보여 숨긴다
+  const started = new Set(scene.timeline.filter((e) => e.f === "agent-start" && e.agent).map((e) => e.agent));
+  const helper = (e) => e.f === "agent-stop" && !e.agentType && !started.has(e.agent);
+  const entries = scene.timeline.slice(-400).reverse().filter((e) => !tlHide.has(tlKind(e)) && !(e.agent && tlHide.has("agent")) && !helper(e));
   let marked = false, prevEdit = null;
   for (const e of entries) {
     if (!marked && state.markerSeq && !state.replay && e.seq <= state.markerSeq && entries[0].seq > state.markerSeq) {
@@ -1461,7 +1476,7 @@ function openGroupMenu(sid, anchor) {
   showMenu(anchor, back, [messageItem(sid), el("hr", "gm-sep"), el("div", "gm-title", "프로젝트로 옮기기"), ...items, make, el("hr", "gm-sep"), deleteItem(sid)]);
   (gmenu.querySelector('[aria-checked="true"]') || items[0]).focus();
 }
-// 프로젝트 머리의 ⋯: 이름 바꾸기, 끝으로 표시·다시 진행, 풀기(두 번 눌러야 푼다)
+// 프로젝트 머리의 ⋯: 이름 바꾸기, 끝으로 표시·다시 진행, 지우기(대화는 남김), 끝난 대화까지 지우기(둘 다 두 번 눌러야 한다)
 function openProjectMenu(pid, anchor) {
   const pr = state.projects.projects[pid];
   const item = (label, run, cls = "") => {
@@ -1473,14 +1488,46 @@ function openProjectMenu(pid, anchor) {
   };
   const rename = item("이름 바꾸기…", () => inlineEdit(rename, pr.name, (name) => { closeGroupMenu(); boardOp({ op: "proj-rename", pid, name }); }));
   const done = item(pr.done ? "다시 진행으로 두기" : "끝으로 표시", () => { closeGroupMenu(); boardOp({ op: "proj-done", pid, done: !pr.done }); });
-  const drop = item("풀기", () => {
-    if (!drop.classList.contains("armed")) { drop.classList.add("armed"); drop.textContent = "한 번 더 누르면 풉니다(대화는 남습니다)"; return; }
+  const drop = item("지우기", () => {
+    if (!drop.classList.contains("armed")) { drop.classList.add("armed"); drop.textContent = "한 번 더 누르면 지웁니다(대화는 남습니다)"; return; }
     closeGroupMenu();
     boardOp({ op: "proj-drop", pid });
   }, "gm-del");
-  drop.title = "프로젝트를 풉니다. 대화는 「프로젝트 없음」 으로 가고, 큰 그림 기록은 상태 폴더의 trash 에 30일 동안 남습니다";
-  showMenu(anchor, () => $("sess-body").querySelector(`.pmenu[data-pid="${CSS.escape(pid)}"]`), [el("div", "gm-title", pr.name), rename, done, el("hr", "gm-sep"), drop]);
+  drop.title = "프로젝트를 지웁니다. 대화는 「프로젝트 없음」 으로 가고, 큰 그림 기록은 상태 폴더의 trash 에 30일 동안 남습니다";
+  // 끝난 대화까지: 서버가 받은 때의 소속으로 끝난 대화를 휴지통으로 옮기고 프로젝트를 지운다(한 번에, 일부만 되면 프로젝트는 남는다).
+  // 진행 중인 대화는 「프로젝트 없음」 으로 남는다. 여기 수는 안내일 뿐이다
+  const ended = () => [...state.sessions.values()].filter((s) => projOf(s.id) === pid && s.status === "ended").length;
+  const purge = item(`끝난 대화까지 지우기(${ended()}개)`, async () => {
+    if (!purge.classList.contains("armed")) { purge.classList.add("armed"); purge.textContent = `한 번 더 누르면 프로젝트와 끝난 대화 ${ended()}개를 지웁니다`; return; }
+    closeGroupMenu();
+    const out = await boardOp({ op: "proj-purge", pid });
+    if (out.ok) toast(out.msg);
+  }, "gm-del");
+  purge.title = "프로젝트와 그 안의 끝난 대화를 지웁니다. 진행 중인 대화는 「프로젝트 없음」 으로 가고, 지운 기록은 상태 폴더의 trash 에 30일 동안 남습니다";
+  showMenu(anchor, () => $("sess-body").querySelector(`.pmenu[data-pid="${CSS.escape(pid)}"]`), [el("div", "gm-title", pr.name), rename, done, el("hr", "gm-sep"), drop, purge]);
   rename.focus();
+}
+// 지난 세션 머리의 ⋯: 그 묶음의 지난 세션(이어진 대화 포함, 끝난 것만)을 모두 휴지통으로. 두 번 눌러야 지운다
+function openPastMenu(key, past, anchor) {
+  const ids = () => [...new Set(past.flatMap((t) => threadOf(t[0].id, true)).filter((s) => s.status === "ended" && state.sessions.has(s.id)).map((s) => s.id))];
+  const b = el("button", "gm-item gm-del", `지난 세션 모두 지우기(${past.length}줄)`);
+  b.type = "button";
+  b.setAttribute("role", "menuitem");
+  b.title = "이 묶음의 지난 세션을 목록과 화판에서 지웁니다. 기록은 상태 폴더의 trash 에 30일 동안 남습니다";
+  b.addEventListener("click", async () => {
+    if (!b.classList.contains("armed")) { b.classList.add("armed"); b.textContent = `한 번 더 누르면 지난 세션 ${past.length}줄을 지웁니다`; return; }
+    closeGroupMenu();
+    const all = ids();
+    let n = 0;
+    for (let i = 0; i < all.length; i += 500) {
+      const out = await boardOp({ op: "sess-delete", sids: all.slice(i, i + 500) });
+      if (!out.ok) return;
+      n += out.gone.length;
+    }
+    toast(`지난 세션의 대화 ${n}개를 지웠습니다`);
+  });
+  showMenu(anchor, () => $("sess-body").querySelector(`.pmenu[data-past="${CSS.escape(key)}"]`), [el("div", "gm-title", "지난 세션"), b], "지난 세션");
+  b.focus();
 }
 // 「메시지 보내기…」: 보던 화면을 바꾸지 않고 그 줄의 대화(대표 = 진행 중인 것 먼저)에 보내기 창을 줄 아래에 연다
 function messageItem(sid) {

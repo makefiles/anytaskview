@@ -1412,9 +1412,14 @@ async function main() {
     await open(sid);
     await mcp("note", { kind: "decision", text: "아주 긴 결정 메모입니다. ".repeat(12) });
     await post("/api/hook", { sid, fact: { f: "prompt", text: "아주 긴 사용자 입력입니다. ".repeat(40) } });
-    await waitFor(`document.body.textContent.includes('아주 긴 결정 메모') && document.body.textContent.includes('아주 긴 사용자 입력')`);
+    // 하위 에이전트: 시작·끝이 짝인 것은 보이고(들여 쓰지 않음), 시작 없이 끝만 온 보조 에이전트는 숨긴다
+    await post("/api/hook", { sid, fact: { f: "agent-start", agent: "real1", agentType: "Explore" } });
+    await post("/api/hook", { sid, fact: { f: "agent-stop", agent: "real1", agentType: "Explore", last: "찾은 곳 셋" } });
+    await post("/api/hook", { sid, fact: { f: "agent-stop", agent: "helper1", last: "보조 에이전트가 낸 글" } });
+    await waitFor(`document.body.textContent.includes('아주 긴 결정 메모') && document.body.textContent.includes('아주 긴 사용자 입력') && document.body.textContent.includes('찾은 곳 셋')`);
+    expect(!(await evaluate(`document.getElementById('tl-body').textContent.includes('보조 에이전트가 낸 글')`)), "시작 없는 보조 에이전트 끝 줄이 보입니다");
     const r = await evaluate(`(() => {
-      const rows = [...document.querySelectorAll('#tl-body li:not(.new-mark):not(.sub)')].slice(0, 12);
+      const rows = [...document.querySelectorAll('#tl-body li:not(.new-mark)')].slice(0, 14); // 하위 에이전트 줄(.sub)도 같은 글 머리
       const lefts = rows.map((li) => Math.round(li.querySelector('.tl-t').getBoundingClientRect().left));
       // 줄마다의 자리는 글 칸 안의 글자 범위(Range)로 잰다(격자 칸의 getClientRects 는 칸 하나만 준다)
       const lines = (cell) => { const g = document.createRange(); g.selectNodeContents(cell); return [...g.getClientRects()].filter((x) => x.width > 0); };
@@ -1428,6 +1433,48 @@ async function main() {
     expect(r.noteLines >= 2 && r.wrapLeft === r.textLeft, `넘어간 줄 ${r.noteLines}줄, ${r.wrapLeft} ≠ 글 머리 ${r.textLeft}`);
     expect(r.clamp === "3" && r.promptH <= r.lineH * 3 + 1, `사용자 입력이 3줄로 접히지 않음: ${r.clamp} ${r.promptH}px`);
     return `글 머리 ${r.lefts[0]}px, 메모 ${r.noteLines}줄`;
+  });
+  await check("프로젝트 지우기: 「프로젝트 없음」 머리는 흐린 색, ⋯ 의 「지우기」 는 대화를 남기고 「끝난 대화까지 지우기」 는 끝난 대화도 휴지통으로", async () => {
+    const live = `pj-live-${process.pid}`, done = `pj-done-${process.pid}`;
+    for (const [i, id] of [live, done].entries()) {
+      await post("/api/hook", { sid: id, pid: process.pid + 90 + i, fact: { f: "start", cwd: "/tmp/지우기", source: "startup" } });
+      await post("/api/hook", { sid: id, pid: process.pid + 90 + i, fact: { f: "prompt", text: `지우기 시험 ${i}` } });
+    }
+    await post("/api/hook", { sid: done, pid: process.pid + 91, fact: { f: "end", reason: "other" } });
+    const r0 = await fetch(`http://127.0.0.1:${board.port}/api/board`, { method: "POST", headers: { "content-type": "application/json", origin: `http://127.0.0.1:${board.port}`, Host: `127.0.0.1:${board.port}`, cookie: `atv_r=${keys.read}`, "x-atv-board": keys.board }, body: JSON.stringify({ op: "proj-new", name: "지울 프로젝트" }) });
+    const made = await r0.json();
+    await fetch(`http://127.0.0.1:${board.port}/api/board`, { method: "POST", headers: { "content-type": "application/json", origin: `http://127.0.0.1:${board.port}`, Host: `127.0.0.1:${board.port}`, cookie: `atv_r=${keys.read}`, "x-atv-board": keys.board }, body: JSON.stringify({ op: "proj-set", sids: [live, done], pid: made.pid }) });
+    await open(sid);
+    await waitFor(`document.querySelector('#sess-body .pmenu[data-pid="${made.pid}"]') !== null`);
+    const muted = await evaluate(`(() => { const i = document.createElement('i'); i.style.color = 'var(--muted)'; document.body.append(i); const c = getComputedStyle(i).color; i.remove(); const n = document.querySelector('#sess-body .gfold.none'); return n && getComputedStyle(n).color === c; })()`);
+    expect(muted, "「프로젝트 없음」 머리가 흐린 색이 아님");
+    await evaluate(`document.querySelector('#sess-body .pmenu[data-pid="${made.pid}"]').click()`);
+    await waitFor(`!document.getElementById('group-menu').hidden`);
+    const items = await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].map((b) => b.textContent)`);
+    expect(items.includes("지우기") && items.includes("끝난 대화까지 지우기(1개)") && !items.includes("풀기"), JSON.stringify(items));
+    for (let k = 0; k < 2; k++) await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((b) => b.textContent.startsWith(${k ? "'한 번 더'" : "'끝난 대화까지'"})).click()`);
+    await waitFor(`!window.__atv.sessions.has(${JSON.stringify(done)}) && document.querySelector('#sess-body .pmenu[data-pid="${made.pid}"]') === null`);
+    expect(board.sessions.has(live) && !board.sessions.has(done) && !board.projects.projects[made.pid], "지운 결과가 다름");
+    expect(!board.projects.members[live] || board.projects.members[live].pid !== made.pid, "진행 중인 대화가 지운 프로젝트에 남음");
+  });
+  await check("지난 세션 모두 지우기: 지난 세션 머리의 ⋯ 에서 두 번 누르면 그 묶음의 지난 세션이 모두 지워지고 다른 줄은 남음", async () => {
+    const olds = [`past-a-${process.pid}`, `past-b-${process.pid}`];
+    for (const [i, id] of olds.entries()) {
+      await post("/api/hook", { sid: id, pid: process.pid + 95 + i, fact: { f: "start", cwd: "/tmp/지난", source: "startup" } });
+      await post("/api/hook", { sid: id, pid: process.pid + 95 + i, fact: { f: "prompt", text: `지난 일 ${i}` } });
+      await post("/api/hook", { sid: id, pid: process.pid + 95 + i, fact: { f: "end", reason: "other" } });
+      board.sessions.get(id).scene.sess.lastT = Date.now() - 3 * 86_400_000;
+    }
+    await open(sid);
+    await waitFor(`document.querySelector('#sess-body .pmenu[data-past=""]') !== null`);
+    const before = await evaluate(`window.__atv.sessions.size`);
+    await evaluate(`document.querySelector('#sess-body .pmenu[data-past=""]').click()`);
+    await waitFor(`!document.getElementById('group-menu').hidden && document.querySelector('#group-menu .gm-del')?.textContent.startsWith('지난 세션 모두 지우기')`);
+    for (let k = 0; k < 2; k++) await evaluate(`document.querySelector('#group-menu .gm-del').click()`);
+    await waitFor(`${JSON.stringify(olds)}.every((id) => !window.__atv.sessions.has(id))`);
+    expect(board.sessions.has(sid), "지금 세션이 지워짐");
+    expect(!(await evaluate(`document.querySelector('#sess-body .pmenu[data-past=""]')`)), "지난 세션 머리가 남음");
+    return `세션 ${before} → ${await evaluate(`window.__atv.sessions.size`)}`;
   });
   await check("작업 중 표시: 작업 중·입력 필요 줄은 왼쪽 띠와 바탕, 상태 글자와 계획 「지금」 줄에 빛이 지나가고(움직임 줄이기면 멈춤), 맨 위 표지는 움직이지 않음", async () => {
     const wait = `wait-${process.pid}`;
