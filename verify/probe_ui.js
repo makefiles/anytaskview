@@ -1818,6 +1818,26 @@ async function main() {
   });
   await open(sid);
 
+  // ---- 26: 끝난 단계의 id 를 새 제목으로 다시 쓰기 ----
+  await check("끝난 단계의 id 를 새 제목으로 다시 쓰면 할 일로 보이고, 진행하면 옛 파일 수 없이 새로 셈", async () => {
+    const mvPlan = (steps) => post("/api/mcp", { env: mv, cwd, tool: "plan", input: { steps } });
+    const li = `document.querySelector('#plan-body li[data-id="r1"]')`;
+    await open(mv);
+    await mvPlan([{ id: "r1", title: "옛 단계", status: "doing" }]);
+    await mvHook({ f: "edit", tool: "Edit", path: "/tmp/옮기기/c.js" });
+    await waitFor(`!!${li}?.querySelector(':scope > .stats')?.textContent.includes('파일 1')`);
+    await mvPlan([{ id: "r1", status: "done" }]);
+    await mvPlan([{ id: "r1", title: "새 단계" }]);
+    await waitFor(`!!${li}?.querySelector(':scope > .head.st-todo')`);
+    expect(await evaluate(`!${li}.querySelector(':scope > .stats')`), "할 일인데 옛 걸린 시간·파일 수가 보임");
+    await mvPlan([{ id: "r1", status: "doing" }]);
+    await waitFor(`!!${li}?.querySelector(':scope > .stats')`);
+    const text = await evaluate(`${li}.querySelector(':scope > .stats').textContent`);
+    expect(text.startsWith("1분 미만") && text.includes("파일 0"), `옛 기록을 이음: ${text}`);
+    return text;
+  });
+  await open(sid);
+
   for (const theme of ["light", "dark"]) {
     await check(`${theme} 테마의 모든 버튼·범위 입력 대비가 4.5 이상임`, async () => {
       await evaluate(`(() => {

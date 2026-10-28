@@ -191,6 +191,27 @@ test("옛 그림: 새 작업은 새 단계 둘 이상으로 지금 단계가 옮
   assert.equal(h.scene.view.taskT, 1_000_000);
 });
 
+test("끝난 단계의 id 를 새 제목으로 다시 쓰면 같은 자리의 새 단계다(상태·시각·메모를 새로, 열린 단계의 제목 다듬기는 그대로)", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "s1", title: "읽기", status: "doing" }, { id: "s2", title: "고치기", note: "옛 메모" }] }, 1000);
+  h.plan({ steps: [{ id: "s1", status: "done" }, { id: "s2", status: "doing" }] }, 2000);
+  h.plan({ steps: [{ id: "s2", status: "done" }] }, 3000);
+  const ord = h.scene.items.s2.ord;
+  // phase2 10-27: 상태 없이 새 제목만 주면 올리자마자 끝으로 보였다
+  h.plan({ steps: [{ id: "s1", title: "다른 작업 읽기", status: "doing" }, { id: "s2", title: "다른 작업 고치기" }] }, 600_000);
+  const { s1, s2 } = h.scene.items;
+  assert.equal(s2.status, "todo");
+  assert.equal(s2.note, undefined);
+  assert.equal(s2.endT, undefined);
+  assert.equal(s2.ord, ord);
+  assert.equal(s1.startT, 600_000); // 걸린 시간을 옛 시작부터 재지 않는다
+  assert.equal(s2.bornT, 600_000); // 화면은 이 뒤의 파일·명령·메모만 이 단계의 것으로 센다
+  // 끝나지 않은 단계의 제목 다듬기는 상태·시각을 그대로 둔다
+  h.plan({ steps: [{ id: "s1", title: "다른 작업 읽기(파서)" }] }, 700_000);
+  assert.equal(h.scene.items.s1.status, "doing");
+  assert.equal(h.scene.items.s1.startT, 600_000);
+});
+
 test("옛 그림: 하위 에이전트가 도는 동안, 작업을 끝내는 호출, 그림이 없거나 비웠을 때, 큰 그림 화판에는 알리지 않는다", () => {
   // 하위 에이전트(같은 세션 화판에 쓴다)
   const h = harness();

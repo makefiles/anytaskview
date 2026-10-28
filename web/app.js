@@ -103,7 +103,7 @@ function theme() {
 
 const canvas = createCanvas($("canvas"), {
   onCopy: copyRef,
-  notesFor: (id) => viewScene().timeline.filter((e) => e.type === "note" && e.on === id),
+  notesFor: (id) => { const scene = viewScene(), from = bornT(scene, id); return scene.timeline.filter((e) => e.type === "note" && e.on === id && !(e.t < from)); },
   mailFor: (id) => { const ms = msgsTo(viewScene(), id); return ms.length ? mailBadge(ms) : null; },
   onMail: (id) => { const e = canvas.elementOf(id); if (e) askAbout(e); },
   getTheme: theme,
@@ -120,7 +120,10 @@ const canvas = createCanvas($("canvas"), {
 
 const viewScene = () => (state.replay ? state.replay.scene : state.scene);
 // 그 상자·단계에 보낸 글(대기·보냄·만료 모두)
+// 끝난 단계의 id 를 다시 써도 거르지 않는다. 아직 대기 중인 글은 그대로 전해지므로 보여야 한다
 const msgsTo = (scene, id) => Object.values(scene.msgs || {}).filter((m) => m.target?.id === id);
+// 끝난 단계의 id 를 새 제목으로 다시 쓴 시각(lib/scene.js planOp). 그 전에 이 id 에 붙은 파일·명령·메모는 옛 단계의 것이다
+const bornT = (scene, id) => own(scene.items, id)?.bornT || 0;
 // 보낸 글 수 표시의 글과 툴팁
 function mailBadge(msgs) {
   const q = msgs.filter((m) => m.state === "queued").length;
@@ -560,8 +563,9 @@ function queueRender(what = "all") {
 function stepStats(scene, id, now) {
   const st = own(scene.items, id);
   let files = 0, cmds = 0, fails = 0;
-  for (const e of scene.timeline) if (e.type === "fact" && e.f === "edit" && e.step === id) files++;
-  for (const r of Object.values(scene.runs)) if (r.step === id) { cmds++; if (r.state === "fail") fails++; }
+  const from = st?.bornT || 0;
+  for (const e of scene.timeline) if (e.type === "fact" && e.f === "edit" && e.step === id && !(e.t < from)) files++;
+  for (const r of Object.values(scene.runs)) if (r.step === id && !(r.start < from)) { cmds++; if (r.state === "fail") fails++; }
   const elapsed = st && st.startT ? (st.endT || now) - st.startT : null;
   return { files, cmds, fails, elapsed };
 }
@@ -1089,7 +1093,7 @@ function renderPlan(scene, now) {
   toggle.hidden = !doneCount;
   toggle.textContent = hideDone ? `끝난 단계 ${doneCount}개 보기` : "끝난 단계 숨기기";
   // 1초마다 불리므로 구조가 같으면 걸린 시간 글자만 고친다(다시 만들면 「보기」 강조와 대상 표시가 지워진다)
-  const noteCount = (id) => scene.timeline.reduce((n, e) => n + (e.type === "note" && e.on === id ? 1 : 0), 0);
+  const noteCount = (id) => { const from = bornT(scene, id); return scene.timeline.reduce((n, e) => n + (e.type === "note" && e.on === id && !(e.t < from) ? 1 : 0), 0); };
   const mailKey = (id) => { const ms = msgsTo(scene, id); return ms.length ? mailBadge(ms).title : ""; };
   const key = JSON.stringify([cur, hideDone, state.planReveal, steps.map((x) => [x.id, x.title, x.status, x.parent, x.note, !!x.answered, !!x.startT, noteCount(x.id), mailKey(x.id)])]);
   if (key === renderPlan.key && body.isConnected) {
@@ -1123,7 +1127,7 @@ function renderPlan(scene, now) {
       li.append(head);
       if (s.startT) li.append(el("div", "stats", statsText(stepStats(scene, s.id, now))));
       if (s.note) li.append(el("div", "snote", s.note));
-      const notes = scene.timeline.filter((e) => e.type === "note" && e.on === s.id);
+      const notes = scene.timeline.filter((e) => e.type === "note" && e.on === s.id && !(e.t < (s.bornT || 0)));
       if (notes.length) li.title = notes.map((n) => n.text).join("\n");
       const sub = build(s.id);
       if (sub.childElementCount) li.append(sub);
