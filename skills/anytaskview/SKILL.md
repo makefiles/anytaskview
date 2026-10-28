@@ -56,6 +56,8 @@ Pick the form that fits each part of the problem and mix two or three in a view.
 
 Keep each view small: about 8 boxes, short tables and diagrams. When a structure is finished, `del` it or `clear` before the next problem instead of growing one huge diagram.
 
+In a long conversation each new task (a new set of plan steps) gets its own drawing, sent with that plan; routine steps such as commit and push need none. Give a finished task's parts their final status in the message with your last tool calls for that task, not in a board-only message. If the drawing is still from before the task's steps, the board marks it as an earlier task's drawing and the next plan result says so once.
+
 ## Example
 
 One message: plan, draw and the first Read of the work.

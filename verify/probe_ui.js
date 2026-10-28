@@ -1699,6 +1699,46 @@ async function main() {
     await waitFor(`document.getElementById('search').hidden`);
     return `묶음 ${heads.join(" / ")}`;
   });
+
+  // ---- 21: 옛 그림 표시 ----
+  await check("옛 그림: 새 작업을 올린 뒤 그림이 그대로면 10초 뒤 그림 위에 「지난 작업 때 그린 그림」 이 보이고, 그 작업의 다음 plan 결과에 한 번 알리며, 그리면 사라짐", async () => {
+    const mvMcp = async (tool, input) => (await fetch(base + "/api/mcp", {
+      method: "POST", headers: { "content-type": "application/json", "x-atv-key": keys.write, Host: host },
+      body: JSON.stringify({ env: mv, cwd, tool, input }), signal: AbortSignal.timeout(5000),
+    })).text();
+    await open(mv);
+    await waitFor(`!!document.querySelector('#canvas .part[data-id="c"]')`);
+    expect(await evaluate(`document.getElementById('stale').hidden`), "새 작업 전에 옛 그림 표시가 보임");
+    // 마지막 그림이 10초(DRAW_SLACK) 안이면 같은 작업의 그림으로 친다. 그보다 오래된 그림으로 시험한다
+    const drawT = board.sessions.get(mv).scene.view.drawT;
+    expect(drawT > 0, `그림 시각이 없음 ${JSON.stringify(board.sessions.get(mv).scene.view)}`);
+    await sleep(Math.max(0, drawT + 10_500 - Date.now()));
+    await mvMcp("plan", { steps: [{ id: "n1", title: "새 작업", status: "doing" }, { id: "n2", title: "검증" }] });
+    await sleep(1000);
+    expect(await evaluate(`document.getElementById('stale').hidden`), "같은 메시지의 draw 를 기다리지 않고 바로 보임");
+    // 기다리는 사이 다른 세션으로 바꾸면 그 세션에는 보이지 않는다(걸어 둔 타이머가 남아도)
+    await open(sid);
+    await sleep(Math.max(0, board.sessions.get(mv).scene.view.taskT + 10_500 - Date.now()));
+    expect(await evaluate(`document.getElementById('stale').hidden`), "다른 세션 화면에 옛 그림 표시가 보임");
+    await open(mv);
+    await waitFor(`!document.getElementById('stale').hidden && document.getElementById('stale').textContent.startsWith('지난 작업 때 그린 그림 · ')`, 3000);
+    // 표시가 그림 칸을 넓히지 않는다(넓은 창·창 반쪽 폭·좁은 화면)
+    for (const width of [1440, 950, 700]) {
+      await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
+      try {
+        await sleep(150);
+        const box = await evaluate(`(() => { const r = (id) => document.getElementById(id).getBoundingClientRect(); const z = document.getElementById('zoombar');
+          return { wrap: r('canvas-wrap').right, bar: r('zoombar').right, scroll: r('canvas-scroll').right, over: z.scrollWidth - z.clientWidth, page: document.documentElement.scrollWidth - innerWidth, chip: r('stale').width }; })()`);
+        expect(box.bar <= box.wrap + 1 && box.scroll <= box.wrap + 1 && box.over <= 1 && box.page <= 0 && box.chip > 20, `${width}px 에서 넘침 ${JSON.stringify(box)}`);
+      } finally { await cdp.send("Emulation.clearDeviceMetricsOverride"); }
+    }
+    const text = await mvMcp("plan", { steps: [{ id: "n1", status: "done" }, { id: "n2", status: "doing" }] });
+    expect(text.includes("from before this task's steps"), `plan 결과에 알림 없음: ${text}`);
+    expect(!(await mvMcp("plan", { steps: [{ id: "n2", status: "done" }] })).includes("from before"), "같은 작업에서 두 번 알림");
+    await mvDraw({ ops: [{ id: "c", status: "done" }] });
+    await waitFor(`document.getElementById('stale').hidden`);
+    return await evaluate(`document.getElementById('stale').textContent`);
+  });
   await open(sid);
 
   for (const theme of ["light", "dark"]) {

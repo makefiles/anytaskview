@@ -173,9 +173,15 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 
 /* 그림: 바깥 칸이 스크롤하고, 안쪽 크기 상자(#zoom-sizer)가 배율을 곱한 크기를 차지한다 */
 #canvas-wrap { position: relative; display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0; }
-#zoombar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+#zoombar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); min-width: 0; } /* 막대 안 글이 길어도 그림 칸을 넓히지 않게 */
 #zoom-label { min-width: 40px; text-align: right; }
 #follow { margin-left: 8px; }
+/* 지금 작업보다 먼저 그린 그림이라는 표시. 막대 오른쪽 끝에 두고, 좁으면 글을 줄인다 */
+.chip.stale { color: var(--muted); border-style: dashed; }
+#stale { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#stale[hidden] { display: none; }
+#stale > span { overflow: hidden; text-overflow: ellipsis; }
+#stale .i { flex: none; width: 12px; height: 12px; }
 #canvas-scroll { position: relative; overflow: auto; min-height: 0; }
 #canvas-scroll { grid-row: 2; grid-column: 1; }
 #zoom-sizer { position: relative; }

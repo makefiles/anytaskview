@@ -1,7 +1,7 @@
 // 장면 규칙 시험: 명령 검사, 지금 단계, 훅 사실의 순서 처리, 재생이 실시간과 같은지
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs } from "../lib/scene.js";
+import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs, drawingStale, DRAW_SLACK } from "../lib/scene.js";
 
 // 서버처럼: 검사 → 기록(JSON) → 기록을 되읽어 적용
 function harness(resume) {
@@ -107,6 +107,141 @@ test("draw: 다른 id 로 같은 label 을 만들면 알린다", () => {
   const h = harness();
   h.draw({ ops: [{ id: "a", kind: "box", label: "parser.c" }] });
   assert.match(h.draw({ ops: [{ id: "p", kind: "box", label: "parser.c" }] }), /label 겹침: p\(=a\)/);
+});
+
+test("옛 그림: 새 작업 뒤 그림이 그대로면 그 작업의 다음 plan 결과에 한 번 알린다", () => {
+  const h = harness(), MIN = 60_000;
+  h.plan({ steps: [{ id: "a1", title: "첫 작업", status: "doing" }, { id: "a2", title: "마무리" }] }, 1000);
+  h.draw({ ops: [{ id: "x", kind: "box", label: "옛 상자", status: "doing" }, { id: "y", kind: "box", label: "끝난 상자", status: "done" }, { id: "xy", kind: "edge", from: "x", to: "y", status: "doing" }] }, 2000);
+  assert.equal(h.scene.view.drawT, 2000);
+  assert.equal(h.scene.view.shapeT, 2000);
+  assert.doesNotMatch(h.plan({ steps: [{ id: "a1", status: "done" }, { id: "a2", status: "doing" }] }, 3000), /drawing/);
+  // 새 작업을 올린 호출 자체는 알리지 않는다(같은 메시지에 draw 가 뒤따를 수 있다)
+  const t2 = 2000 + 60 * MIN;
+  assert.equal(h.plan({ steps: [{ id: "a2", status: "done" }, { id: "b1", title: "둘째 작업", status: "doing" }, { id: "b2", title: "검증" }] }, t2), "계획 4단계 · 지금 b1");
+  assert.equal(h.scene.view.taskT, t2);
+  assert.ok(drawingStale(h.scene.view));
+  const msg = h.plan({ steps: [{ id: "b1", status: "done" }, { id: "b2", status: "doing" }] }, t2 + MIN);
+  assert.match(msg, /^계획 4단계 · 지금 b2 · The drawing on the board is from before this task's steps \(last redrawn 60 min before the task began\)/);
+  assert.match(msg, /still marked doing, blocked or wait there: x\./); // 끝난 상자·선은 싣지 않는다
+  assert.match(msg, /this message does not already draw it, draw it with your next tool calls/);
+  assert.match(msg, /routine steps such as commit and push need none/);
+  assert.equal(h.scene.view.hintT, t2);
+  assert.doesNotMatch(h.plan({ steps: [{ id: "b2", status: "doing", note: "다시" }] }, t2 + 2 * MIN), /drawing/); // 작업마다 한 번
+  // 그 작업에서 그림을 쓰면(10초 뒤의 상태 갱신이라도) 옛 그림이 아니다. 다음 새 작업에서는 다시 알린다
+  h.draw({ ops: [{ id: "x", status: "done" }] }, t2 + 3 * MIN);
+  assert.ok(!drawingStale(h.scene.view));
+  h.plan({ steps: [{ id: "b2", status: "done" }] }, t2 + 4 * MIN);
+  h.plan({ steps: [{ id: "c1", title: "셋째", status: "doing" }, { id: "c2", title: "끝" }] }, t2 + 200 * MIN);
+  assert.match(h.plan({ steps: [{ id: "c1", status: "done" }, { id: "c2", status: "doing" }] }, t2 + 201 * MIN), /last redrawn 4 h before the task began\)\. If this task/); // 상자를 모두 닫아 진행 중인 부품 목록은 없다
+  assert.deepEqual(h.replay().view, h.scene.view);
+});
+
+test("옛 그림: 새 작업 앞뒤 10초 안에 내용을 바꾼 draw 는 그 작업의 그림이고, 옛 부품의 상태만 닫은 것은 아니다", () => {
+  const h = harness(), t = 10 * 60_000;
+  h.draw({ ops: [{ id: "x", kind: "box", label: "상자", status: "doing" }] }, 1000);
+  // 같은 메시지에서 plan 뒤에 새 부품
+  h.plan({ steps: [{ id: "a", title: "작업", status: "doing" }, { id: "b", title: "검증" }] }, t);
+  h.draw({ ops: [{ id: "y", kind: "box", label: "새 상자" }] }, t + 5);
+  assert.ok(!drawingStale(h.scene.view));
+  assert.doesNotMatch(h.plan({ steps: [{ id: "a", status: "done" }, { id: "b", status: "doing" }] }, t + 1000), /drawing/);
+  // plan 보다 먼저 온 새 부품(10초 안)
+  h.plan({ steps: [{ id: "b", status: "done" }] }, 2 * t - 5000);
+  h.draw({ ops: [{ id: "z", kind: "box", label: "다음 상자" }] }, 2 * t - 3000);
+  h.plan({ steps: [{ id: "c", title: "다음 작업", status: "doing" }, { id: "d", title: "검증" }] }, 2 * t);
+  assert.ok(!drawingStale(h.scene.view));
+  // 새 작업과 같은 메시지에서 옛 부품의 상태만 닫으면(plan 앞뒤 모두) 옛 그림이다
+  h.plan({ steps: [{ id: "c", status: "done" }, { id: "d", status: "done" }] }, 3 * t - 5000);
+  h.draw({ ops: [{ id: "x", status: "done" }] }, 3 * t - 2000);
+  h.plan({ steps: [{ id: "e", title: "또 다음", status: "doing" }, { id: "f", title: "검증" }] }, 3 * t);
+  h.draw({ ops: [{ id: "y", status: "done", note: "끝" }] }, 3 * t + 500);
+  assert.ok(drawingStale(h.scene.view));
+  assert.match(h.plan({ steps: [{ id: "e", status: "done" }, { id: "f", status: "doing" }] }, 3 * t + 60_000), /from before this task's steps \(last redrawn 10 min before/);
+  // 10초 넘게 앞에서 내용을 바꾼 것도 옛 그림이다
+  h.plan({ steps: [{ id: "f", status: "done" }] }, 4 * t - 30_000);
+  h.draw({ ops: [{ id: "w", kind: "box", label: "앞 작업 마지막 상자" }] }, 4 * t - DRAW_SLACK - 1);
+  h.plan({ steps: [{ id: "g", title: "넷째", status: "doing" }, { id: "k", title: "검증" }] }, 4 * t);
+  assert.ok(drawingStale(h.scene.view));
+});
+
+test("옛 그림: 새 작업은 새 단계 둘 이상으로 지금 단계가 옮겨 간 것(끝난 id 재사용은 됨, 덧붙이기·하위 단계·제목 다듬기·같은 id 두 번·거부는 아님)", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "s1", title: "읽기", status: "doing" }, { id: "s2", title: "고치기" }] }, 1000);
+  h.draw({ ops: [{ id: "x", kind: "box", label: "상자", status: "doing" }] }, 2000);
+  assert.equal(h.scene.view.taskT, 1000);
+  h.plan({ steps: [{ id: "s1", status: "done" }, { id: "s2", status: "doing" }, { id: "s3", title: "시험 추가" }, { id: "s4", title: "문서" }] }, 300_000); // 진행 중에 덧붙임
+  h.plan({ steps: [{ id: "s2a", title: "A-1", parent: "s2", status: "doing" }, { id: "s2b", title: "A-2", parent: "s2" }] }, 400_000); // 지금 단계를 나눔
+  h.plan({ steps: [{ id: "s3", title: "시험 추가(파서)", status: "doing" }, { id: "s5", title: "하나 더" }] }, 500_000); // 열린 단계 제목 다듬기
+  h.plan({ steps: [{ id: "n1", title: "새것", status: "doing" }, { id: "n1", title: "새것 다시" }] }, 600_000); // 같은 id 두 번
+  h.plan({ steps: [{ id: "n2", title: "새것2", status: "doing" }, { id: "n3", title: "잘못된 부모", parent: "없음" }] }, 650_000); // 거부된 단계
+  assert.equal(h.scene.view.taskT, 1000);
+  // 끝난 단계의 id 를 새 제목으로 다시 쓰고 지금 단계를 옮기면 새 작업
+  h.plan({ steps: ["s1", "s2", "s2a", "s2b", "s3", "s4", "s5", "n1", "n2"].map((id) => ({ id, status: "done" })) }, 700_000);
+  h.plan({ steps: [{ id: "s1", title: "다른 작업 읽기", status: "doing" }, { id: "s2", title: "다른 작업 고치기" }] }, 800_000);
+  assert.equal(h.scene.view.taskT, 800_000);
+  // 한계: 앞 작업 단계를 진행 중으로 버려 둔 채 새 단계를 todo 로만 올리면 놓친다
+  h.plan({ steps: [{ id: "m1", title: "버려 둔 뒤 새 작업" }, { id: "m2", title: "검증" }] }, 900_000);
+  assert.equal(h.scene.view.taskT, 800_000);
+  // 버려 둔 단계가 있어도 새 단계를 진행으로 두면 새 작업이다
+  h.plan({ steps: [{ id: "k1", title: "새 작업", status: "doing" }, { id: "k2", title: "검증" }] }, 1_000_000);
+  assert.equal(h.scene.view.taskT, 1_000_000);
+});
+
+test("옛 그림: 하위 에이전트가 도는 동안, 작업을 끝내는 호출, 그림이 없거나 비웠을 때, 큰 그림 화판에는 알리지 않는다", () => {
+  // 하위 에이전트(같은 세션 화판에 쓴다)
+  const h = harness();
+  h.plan({ steps: [{ id: "m1", title: "원인 찾기", status: "doing" }, { id: "m2", title: "수정" }] }, 1000);
+  h.draw({ ops: [{ id: "sus", kind: "box", label: "의심", status: "doing" }] }, 2000);
+  h.fact({ f: "agent-start", agent: "sub1", agentType: "Explore" }, 3000);
+  h.plan({ steps: [{ id: "r1", title: "파일 읽기", status: "doing" }, { id: "r2", title: "보고" }] }, 40_000);
+  assert.equal(h.scene.view.taskT, 1000);
+  assert.ok(!drawingStale(h.scene.view));
+  h.fact({ f: "agent-stop", agent: "sub1", agentType: "Explore" }, 70_000);
+  h.plan({ steps: ["m1", "m2", "r1", "r2"].map((id) => ({ id, status: "done" })) }, 3_000_000);
+  h.plan({ steps: [{ id: "k1", title: "다음 작업", status: "doing" }, { id: "k2", title: "검증" }] }, 3_600_000);
+  assert.equal(h.scene.view.taskT, 3_600_000); // 끝난 뒤에는 다시 따진다
+  // 작업을 끝내는 호출(지금 단계가 없어짐)에는 알리지 않는다
+  assert.doesNotMatch(h.plan({ steps: [{ id: "k1", status: "done" }, { id: "k2", status: "done" }] }, 3_700_000), /drawing/);
+  assert.equal(h.scene.view.hintT, undefined);
+  // 그림이 없으면(그리기 알림 nudge 몫), 비웠으면 알리지 않는다
+  const e = harness();
+  e.plan({ steps: [{ id: "a", title: "작업", status: "doing" }, { id: "b", title: "검증" }] }, 1000);
+  assert.doesNotMatch(e.plan({ steps: [{ id: "a", status: "done" }, { id: "b", status: "doing" }] }, 600_000), /drawing/);
+  e.draw({ ops: [{ id: "x", kind: "box", label: "상자" }] }, 700_000);
+  e.draw({ clear: true }, 800_000);
+  assert.equal(e.scene.view.shapeT, 800_000);
+  e.plan({ steps: [{ id: "b", status: "done" }, { id: "c", title: "다음", status: "doing" }, { id: "d", title: "검증" }] }, 900_000);
+  assert.doesNotMatch(e.plan({ steps: [{ id: "c", status: "done" }, { id: "d", status: "doing" }] }, 1_000_000), /drawing/);
+  // 큰 그림 화판: 시각을 남기지 않고 알리지도 않는다
+  const sc = newScene(), ctx = (t) => ({ t, seq: t, project: true });
+  applyRes(sc, evalDraw(sc, { ops: [{ id: "u", kind: "box", label: "단위" }] }, ctx(1)).res);
+  applyRes(sc, evalPlan(sc, { steps: [{ id: "u1", title: "01", status: "doing" }, { id: "u2", title: "02" }] }, ctx(2)).res);
+  assert.deepEqual(sc.view, { dir: "RIGHT" });
+  assert.doesNotMatch(evalPlan(sc, { steps: [{ id: "u1", status: "done" }, { id: "u2", status: "doing" }] }, ctx(3)).msg, /drawing/);
+  // 옛 기록(시각 없음)은 옛 그림으로 보지 않는다
+  assert.ok(!drawingStale({ dir: "RIGHT" }));
+  assert.ok(drawingStale({ taskT: 50_000 }));
+});
+
+test("옛 그림: 대기로 시작한 작업도 열린 작업이고, 무시한 필드·같은 값은 내용 변경이 아니며, 늦게 온 하위 에이전트 시작은 끝과 짝짓는다", () => {
+  const h = harness(), H = 3600_000;
+  h.draw({ ops: [{ id: "x", kind: "box", label: "상자", status: "doing" }] }, 1000);
+  // 승인부터 묻는 새 작업: 대기 단계는 지금 단계가 되지 않지만 작업은 열려 있다
+  h.plan({ steps: [{ id: "w1", title: "적용 승인 받기", status: "wait" }, { id: "w2", title: "적용" }] }, H);
+  assert.equal(h.scene.view.taskT, H);
+  h.fact({ f: "prompt", text: "승인" }, H + 60_000);
+  assert.match(h.plan({ steps: [{ id: "w1", note: "답 받음" }] }, H + 70_000), /from before this task's steps/);
+  // 무시한 필드·같은 값을 다시 보낸 것은 내용 변경이 아니다(shapeT 그대로)
+  h.draw({ ops: [{ id: "x", label: "상자" }, { id: "x", status: "done" }] }, H + 80_000);
+  assert.equal(h.scene.view.shapeT, 1000);
+  h.draw({ ops: [{ id: "x", label: "상자 이름 바꿈" }] }, H + 90_000);
+  assert.equal(h.scene.view.shapeT, H + 90_000);
+  // 하위 에이전트의 끝이 시작보다 먼저 도착해도 끝난 것으로 본다
+  h.plan({ steps: [{ id: "w1", status: "done" }, { id: "w2", status: "done" }] }, 2 * H);
+  h.fact({ f: "agent-stop", agent: "sub2", agentType: "Explore" }, 2 * H + 1000, 2 * H + 900);
+  h.fact({ f: "agent-start", agent: "sub2", agentType: "Explore" }, 2 * H + 2000, 2 * H + 100);
+  h.plan({ steps: [{ id: "v1", title: "다음 작업", status: "doing" }, { id: "v2", title: "검증" }] }, 3 * H);
+  assert.equal(h.scene.view.taskT, 3 * H);
 });
 
 test("note: 막힘·승인 대기는 단계 상태를 바꾸고, 지금 단계는 그대로 남는다", () => {

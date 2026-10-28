@@ -1,7 +1,7 @@
 // 화면: 세션 목록, 맨 위 한 줄, 주의 띠, 가운데 그림, 계획 나무, 타임라인, 재생 막대.
 // 서버가 SSE 로 보내는 결과(res)를 lib/scene.js 의 applyRes 로 적용한다. 재생도 같은 함수로 처음부터 다시 적용한다.
 // 패널 폭·접힘·배율·거르기처럼 이 브라우저에만 남는 값은 localStorage 에 두고, 읽을 때 범위로 자른다.
-import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet } from "/lib/scene.js";
+import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK } from "/lib/scene.js";
 import { createCanvas, safeRef } from "/canvas.js";
 
 const ST_KO = { todo: "할 일", doing: "진행", done: "끝", fail: "실패", blocked: "막힘", wait: "승인 대기" };
@@ -602,6 +602,7 @@ function render({ list = true, view = true } = {}) {
   renderBasket();
   const hasParts = Object.values(scene.items).some((it) => it.kind !== "step");
   $("empty").hidden = hasParts;
+  renderStale(scene, hasParts, now);
   $("empty").textContent = isProj(state.sid) ? "아직 큰 그림이 없습니다. 이 프로젝트에 든 대화의 Claude·Codex 가 작업 단위를 시작·끝낼 때 그립니다." : `아직 그림이 없습니다. ${agentName(state.sessions.get(state.sid))} 가 draw 로 그리면 여기에 나타납니다.`;
   applyFocus(false);
   if (!ONLY_TL) canvas.render(scene).then(() => {
@@ -610,6 +611,24 @@ function render({ list = true, view = true } = {}) {
     placeComposer();
   }).catch((e) => console.error("그림 실패", e));
   markSeen();
+}
+
+// 그림이 지금 작업(새 단계 묶음)보다 먼저 그린 것이면 그림 위 막대에 알린다(큰 그림 화판은 빼고).
+// 같은 메시지의 draw 가 올 틈(DRAW_SLACK)은 기다렸다가 보인다. 그사이 다른 사건이 없어도 보이게 그때 한 번 다시 본다
+let staleTimer = 0;
+function renderStale(scene, hasParts, now) {
+  const v = scene.view, el = $("stale");
+  clearTimeout(staleTimer);
+  const on = hasParts && !isProj(state.sid) && drawingStale(v);
+  const wait = on ? v.taskT + DRAW_SLACK - now : 0;
+  el.hidden = !on || wait > 0;
+  if (on && wait > 0 && !state.replay) {
+    staleTimer = setTimeout(() => { const sc = viewScene(); renderStale(sc, Object.values(sc.items).some((it) => it.kind !== "step"), viewNow()); }, wait + 50);
+  }
+  if (el.hidden) return;
+  const at = v.shapeT ?? v.drawT; // 그림의 내용을 마지막으로 바꾼 때
+  const d = new Date(at), day = at && d.toDateString() !== new Date(now).toDateString() ? `${d.getMonth() + 1}/${d.getDate()} ` : "";
+  el.lastElementChild.textContent = "지난 작업 때 그린 그림" + (at ? ` · ${day}${pad2(d.getHours())}:${pad2(d.getMinutes())}` : "");
 }
 
 // 세션 목록: 프로젝트가 있으면 프로젝트별로(최근에 움직인 프로젝트 먼저, 빈 프로젝트도 보인다), 프로젝트 없는 세션은
