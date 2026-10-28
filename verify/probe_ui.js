@@ -491,6 +491,13 @@ async function main() {
       await sleep(30);
     }
   };
+  // 줄 목록을 서버에서 새로 받으며 연다. 서버 메모리를 직접 고친 값(옛 시각 따위)은 알림 없이 바뀌어 새 연결이라야 보인다.
+  // 탭들이 나눠 쓰는 SharedWorker(hub.js)가 목록을 들고 있는데, Chrome 156 은 페이지를 다시 열어도 그 worker 를 이어 쓴다(151 은 새로 띄웠다)
+  const reopen = async (s) => {
+    await cdp.send("Page.navigate", { url: "about:blank" });
+    for (const t of (await cdp.send("Target.getTargets")).targetInfos) if (t.type === "shared_worker") await cdp.send("Target.closeTarget", { targetId: t.targetId });
+    await open(s);
+  };
   const key = async (k, code, vk, text) => {
     await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, ...(text && { text }) });
     await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk });
@@ -1354,6 +1361,8 @@ async function main() {
       await sleep(20); // 시작 시각이 갈리게
     }
     await open(sortSid("a"));
+    // 이어 쓰는 SharedWorker(Chrome 156)는 들고 있던 목록을 먼저 주고, 방금 만든 세션 줄은 뒤이어 온 변경으로 붙는다
+    await waitFor(`${JSON.stringify([sortSid("a"), sortSid("b")])}.every((id) => document.querySelector('#sess-body .sess[data-sid="' + id + '"]'))`);
     expect(await evaluate(`document.getElementById('sess-sort').textContent.startsWith('시작순')`), "기본 정렬이 시작순이 아닙니다");
     const before = await rowsOf();
     expect(before.indexOf(sortSid("b")) < before.indexOf(sortSid("a")), `시작순에서 늦게 시작한 줄이 위가 아님: ${before}`);
@@ -1376,7 +1385,7 @@ async function main() {
     await post("/api/hook", { sid: old, pid: process.pid + 60, fact: { f: "prompt", text: "다 지난 일" } });
     await post("/api/hook", { sid: old, pid: process.pid + 60, fact: { f: "end", reason: "other" } });
     board.sessions.get(old).scene.sess.lastT = Date.now() - 2 * 86_400_000;
-    await open(sortSid("a")); // 새 연결의 요약에서 옛 시각을 받는다
+    await reopen(sortSid("a")); // 새 연결의 요약에서 옛 시각을 받는다
     await waitFor(`[...document.querySelectorAll('#sess-body .pastfold')].some((b) => b.dataset.past === '' && b.getAttribute('aria-expanded') === 'false')`);
     expect(!(await rowsOf()).includes(old), "접힌 지난 세션 줄이 보입니다");
     await evaluate(`document.querySelector('#sess-body .pastfold[data-past=""]').click()`);
@@ -1466,7 +1475,7 @@ async function main() {
     await waitFor(`document.getElementById('settings').open`);
     const r = await evaluate(`({ lead: !!document.querySelector('#settings .lead'), fields: document.querySelectorAll('#settings dl.fields dt').length, details: document.querySelectorAll('#settings details').length, w: document.getElementById('settings').getBoundingClientRect().width })`);
     await evaluate(`document.getElementById('settings-close').click()`);
-    expect(r.lead && r.fields === 3 && r.details === 2 && r.w > 600, JSON.stringify(r));
+    expect(r.lead && r.fields === 4 && r.details === 3 && r.w > 600, JSON.stringify(r)); // 이어받기 문구 2 · 휴지통 날수 · diff 보관 크기
   });
   await check("그림 끌어 옮기기: 칸보다 크면 손 모양이 되고, 끌면 스크롤이 옮겨지며 끌기 뒤 클릭은 경로를 복사하지 않음", async () => {
     await open(`rich-${process.pid}`);
@@ -1543,6 +1552,49 @@ async function main() {
     await waitFor(`!document.getElementById('tl-full').open`);
     expect(await evaluate(`[...document.querySelectorAll('#tl-body li.prompt')].every((li) => li.classList.contains('full') && li.title.length < 20)`), "사용자 입력 줄이 전체 보기가 아니거나 긴 말풍선을 붙임");
     return `${answer.length}자`;
+  });
+  await check("바뀐 줄(diff) 보기: 수정 줄에 +·− 줄 수가 붙고, 누르거나 Enter 로 창에 색칠한 diff 가 열리며, 잇달아 고친 것은 옛것부터, 경로 복사는 창의 단추로, 보관 크기는 설정 슬라이더로", async () => {
+    await post("/api/hook", { sid, fact: { f: "edit", tool: "Edit", path: "/tmp/작업/diff.js", lines: "3", add: 1, del: 1, diff: "@@ -3,1 +3,1 @@\n-const a = 1;\n+const a = 2;" } });
+    await post("/api/hook", { sid, fact: { f: "edit", tool: "Edit", path: "/tmp/작업/diff.js", lines: "9-10", add: 2, del: 0, cut: true, diff: "@@ -9,0 +9,2 @@\n+둘째 수정\n+<img src=x onerror=alert(1)>" } });
+    const row = `document.querySelector('#tl-body li.diff')`;
+    await waitFor(`${row}?.textContent.includes('×2') && ${row}.querySelector('.dadd').textContent === '+3' && ${row}.querySelector('.ddel').textContent === '−1' && !${row}.dataset.ref`);
+    const shown = `document.getElementById('tl-full').open && document.querySelectorAll('#tl-full pre.diff').length === 2`;
+    const key = async (k, code) => { for (const type of ["keyDown", "keyUp"]) await cdp.send("Input.dispatchKeyEvent", { type, key: k, code: k, windowsVirtualKeyCode: code }); };
+    await evaluate(`${row}.click()`);
+    await waitFor(shown);
+    const r = await evaluate(`(() => {
+      const pres = [...document.querySelectorAll('#tl-full pre.diff')];
+      const bg = (s) => getComputedStyle(document.querySelector('#tl-full .dl.' + s)).backgroundColor;
+      return { title: document.getElementById('tl-full-title').textContent, first: pres[0].textContent, kinds: [...pres[0].children].map((c) => c.className),
+        img: !!document.querySelector('#tl-full img'), copy: !document.getElementById('tl-full-copy').hidden, cut: document.getElementById('tl-full-body').textContent.includes('앞부분만 남겼습니다'), add: bg('add'), del: bg('del') };
+    })()`);
+    expect(r.title === "수정 · diff.js" && r.first.includes("const a = 1;") && r.first.includes("const a = 2;"), JSON.stringify(r)); // 옛것부터
+    expect(r.kinds.join(" ") === "dl hunk dl del dl add", `줄 종류 ${r.kinds}`);
+    expect(!r.img && r.copy && r.cut && r.add !== r.del, JSON.stringify(r));
+    await key("Escape", 27);
+    await waitFor(`!document.getElementById('tl-full').open`);
+    await evaluate(`${row}.focus()`);
+    await key("Enter", 13);
+    await waitFor(shown);
+    await key("Escape", 27);
+    await waitFor(`!document.getElementById('tl-full').open`);
+    // 다른 긴 글을 열면 경로 복사 단추가 숨는다
+    await evaluate(`document.querySelector('#tl-body li.full').click()`);
+    await waitFor(`document.getElementById('tl-full').open && document.getElementById('tl-full-copy').hidden && !document.querySelector('#tl-full pre.diff')`);
+    await key("Escape", 27);
+    await waitFor(`!document.getElementById('tl-full').open`);
+    // 설정: 기본 16KB, 「끔」 으로 바꾸면 서버에 저장되고 다시 열면 그대로
+    await evaluate(`document.getElementById('settings-open').click()`);
+    await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-diff').value === '1' && document.getElementById('cfg-diff-val').textContent === '16KB(기본)'`);
+    await evaluate(`(() => { const s = document.getElementById('cfg-diff'); s.value = '0'; s.dispatchEvent(new Event('input')); document.getElementById('settings-form').requestSubmit(); })()`);
+    await waitFor(`!document.getElementById('settings').open`);
+    expect(board.config.diffKB === 0, `저장된 크기 ${board.config.diffKB}`);
+    await evaluate(`document.getElementById('settings-open').click()`);
+    await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-diff').value === '0' && document.getElementById('cfg-diff-val').textContent === '끔'`);
+    await evaluate(`(() => { const s = document.getElementById('cfg-diff'); s.value = '1'; s.dispatchEvent(new Event('input')); document.getElementById('settings-form').requestSubmit(); })()`);
+    await waitFor(`!document.getElementById('settings').open`);
+    expect(board.config.diffKB === 16, `되돌린 크기 ${board.config.diffKB}`);
+    return r.kinds.length + "줄";
   });
   await check("그림 글자 복사: 칸보다 큰 그림에서 글자 위를 끌면 화면을 옮기지 않고 글자를 고르며, 그 끝의 클릭은 경로를 복사하지 않음", async () => {
     const pick = `pick-${process.pid}`;
@@ -1690,7 +1742,7 @@ async function main() {
       await post("/api/hook", { sid: id, pid: process.pid + 95 + i, fact: { f: "end", reason: "other" } });
       board.sessions.get(id).scene.sess.lastT = Date.now() - 3 * 86_400_000;
     }
-    await open(sid);
+    await reopen(sid);
     await waitFor(`document.querySelector('#sess-body .pmenu[data-past=""]') !== null`);
     const before = await evaluate(`window.__atv.sessions.size`);
     await evaluate(`document.querySelector('#sess-body .pmenu[data-past=""]').click()`);

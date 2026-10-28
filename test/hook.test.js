@@ -87,6 +87,45 @@ test("사건 → 사실: 명령은 설명과 함께, 수정은 경로와 줄, �
   const edit = toFact({ hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "/w/a.js", old_string: "x", new_string: "y" }, tool_response: { structuredPatch: [{ newStart: 10, newLines: 3 }, { newStart: 40, newLines: 1 }] } });
   assert.deepEqual(edit, { f: "edit", tool: "Edit", path: "/w/a.js", lines: "10-12 외 1곳" });
   assert.equal(toFact({ hook_event_name: "PreToolUse", tool_name: "Read" }), null);
+});
+
+test("수정 diff: 바뀐 줄과 더하기·빼기 수를 싣고, 비밀 모양·개인 키는 가리며, 128KB·한 줄 2,000자·시간 상한에서 자른다", () => {
+  const post = (tool, resp) => toFact({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { file_path: "/w/a.js" }, tool_response: resp });
+  const edit = post("Edit", { structuredPatch: [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 2, lines: [" a", "-b", "+c"] }, { oldStart: 9, oldLines: 1, newStart: 9, newLines: 2, lines: ["+d"] }] });
+  assert.equal(edit.diff, "@@ -3,2 +3,2 @@\n a\n-b\n+c\n@@ -9,1 +9,2 @@\n+d");
+  assert.deepEqual([edit.add, edit.del, edit.cut], [2, 1, undefined]);
+  // 새 파일은 덩어리 없이 내용이 온다
+  assert.equal(post("Write", { type: "create", content: "x\ny\n", structuredPatch: [] }).diff, "@@ -0,0 +1,2 @@\n+x\n+y");
+  const secret = post("Edit", { structuredPatch: [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 5, lines: [
+    "+API_TOKEN=abcd1234efgh5678", "+-----BEGIN RSA PRIVATE KEY-----", "+MIIEowIBAAKCAQEA7", "+-----END RSA PRIVATE KEY-----", "+ok",
+  ] }] });
+  assert.equal(secret.diff, "@@ -1,0 +1,5 @@\n+API_TOKEN=***\n+***\n+***\n+***\n+ok");
+  // PGP 개인 키(「PRIVATE KEY BLOCK」)도 BEGIN~END 를 모두 가리고, 제어 문자는 JSON 에서 늘지 않게 바꾼다
+  const pgp = post("Write", { type: "create", content: "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF\n-----END PGP PRIVATE KEY BLOCK-----\nok\u0001\tx" });
+  assert.equal(pgp.diff, "@@ -0,0 +1,4 @@\n+***\n+***\n+***\n+ok\ufffd\tx");
+  // 덩어리가 키 가운데서 시작해 END 만 보이면 앞줄을 거슬러 가리고, BEGIN 만 있는 덩어리는 다음 덩어리를 가리지 않는다
+  const tailKey = post("Edit", { structuredPatch: [
+    { oldStart: 10, oldLines: 4, newStart: 10, newLines: 4, lines: [" kV3nQ", " Yb8Hq", " -----END RSA PRIVATE KEY-----", "-port: 1", "+port: 2"] },
+    { oldStart: 40, oldLines: 1, newStart: 40, newLines: 2, lines: [' if (s.startsWith("-----BEGIN RSA PRIVATE KEY-----")) {', "+  n++;"] },
+    { oldStart: 90, oldLines: 0, newStart: 91, newLines: 1, lines: ["+const answer = 42;"] },
+  ] });
+  assert.equal(tailKey.diff, "@@ -10,4 +10,4 @@\n ***\n ***\n ***\n-port: 1\n+port: 2\n@@ -40,1 +40,2 @@\n ***\n+***\n@@ -90,0 +91,1 @@\n+const answer = 42;");
+  // 개인 키 파일은 바뀐 줄을 싣지 않고 수만 싣는다
+  const pem = toFact({ hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "/w/certs/server.pem" }, tool_response: { structuredPatch: [{ oldStart: 5, oldLines: 1, newStart: 5, newLines: 1, lines: ["-MIIEold", "+MIIEnew"] }] } });
+  assert.deepEqual([pem.add, pem.del, pem.diff], [1, 1, undefined]);
+  const ctrl = post("Write", { type: "create", content: Array.from({ length: 70 }, () => "\u0000".repeat(2000)).join("\n") });
+  assert.ok(Buffer.byteLength(JSON.stringify(ctrl)) < 200 * 1024 && ctrl.cut === true, `${Buffer.byteLength(JSON.stringify(ctrl))}`);
+  const long = post("Write", { type: "create", content: "q".repeat(5000) });
+  assert.equal(long.diff.split("\n")[1].length, 2000);
+  assert.ok(long.diff.endsWith("…"));
+  const big = post("Write", { type: "create", content: Array.from({ length: 3000 }, (_, i) => `line ${i} ${"z".repeat(50)}`).join("\n") });
+  assert.ok(Buffer.byteLength(big.diff) <= 128 * 1024 && big.cut === true && big.add === 3000, `${Buffer.byteLength(big.diff)} ${big.cut} ${big.add}`);
+  // 가리기가 오래 걸리는 줄(「key-key-…」)이 128KB 넘게 와도 훅 시간 안에 끝난다
+  const t0 = performance.now();
+  const slow = post("Write", { type: "create", content: Array.from({ length: 70 }, () => "key-".repeat(500)).join("\n") });
+  assert.ok(performance.now() - t0 < 500 && slow.cut === true, `${Math.round(performance.now() - t0)}ms`);
+  // structuredPatch 에 줄이 없으면(옛 응답 모양) diff 를 싣지 않는다
+  assert.equal(post("Edit", { structuredPatch: [{ newStart: 1, newLines: 1 }] }).diff, undefined);
   const sub = toFact({ hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "t2", agent_id: "ag", agent_type: "Explore", tool_input: { command: "ls" } });
   assert.equal(sub.agent, "ag");
   assert.equal(toFact({ hook_event_name: "PostToolUse", tool_name: "TaskCreate", tool_input: { subject: "로그인 고치기" } }).text, "로그인 고치기");

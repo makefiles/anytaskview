@@ -334,6 +334,10 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #tl-body .k.wait { color: var(--s-wait); } #tl-body .k.running { color: var(--s-doing); } #tl-body .k.done { color: var(--s-done); }
 #tl-body .k.unknown, #tl-body .k.background { color: var(--muted); }
 #tl-body .times { color: var(--muted); font-size: 12px; margin-left: 4px; }
+#tl-body li.diff { cursor: pointer; }
+#tl-body .dadd, #tl-body .ddel { font-size: 12px; font-variant-numeric: tabular-nums; }
+#tl-body .dadd { color: var(--s-done); }
+#tl-body .ddel { color: var(--s-fail); }
 #tl-body .copy { cursor: copy; text-decoration: underline dotted; }
 
 #replay { display: flex; align-items: center; gap: 10px; padding: 6px 14px; background: var(--panel); border-top: 1px solid var(--line); }
@@ -427,6 +431,8 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 #settings dl.fields dd { margin: 0; }
 #settings dd.unit { display: flex; align-items: center; gap: 8px; }
 #settings dd.unit input { width: 8em; }
+#settings dd.unit input[type="range"] { width: 12em; }
+#settings dd.unit output { min-width: 6em; }
 #settings dd.unit span { color: var(--muted); }
 #settings .crow { display: flex; margin-top: 10px; }
 /* 도움말: 자주 하는 일·표시의 뜻·단축키는 왼쪽 이름, 오른쪽 설명의 두 칸. 자세한 규칙은 접어 둔다 */
@@ -438,6 +444,17 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 #help [hidden] { display: none !important; } /* 찾기로 숨긴 항목(dt 의 display: flex 보다 앞선다) */
 ::highlight(help-hit) { background-color: var(--flash); }
 #tl-full-body { white-space: pre-wrap; font-size: 14px; line-height: 22px; } /* 답의 줄 바꿈을 그대로 둔다 */
+/* 바뀐 줄(diff): 더한 줄 초록·뺀 줄 빨강 바탕(글자는 본문 색), 위치 줄(@@) 흐리게. 긴 줄은 접어 가로 스크롤 없이 */
+#tl-full-body.diffs { white-space: normal; }
+#tl-full .dhead { margin: 12px 0 4px; color: var(--muted); font-size: 12px; }
+#tl-full .dhead:first-child { margin-top: 0; }
+#tl-full pre.diff { margin: 0; padding: 4px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); font: 12px/18px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+#tl-full .dl { display: block; padding: 0 8px; min-height: 18px; }
+#tl-full .dl.add { background: color-mix(in srgb, var(--s-done) 12%, transparent); }
+#tl-full .dl.del { background: color-mix(in srgb, var(--s-fail) 12%, transparent); }
+#tl-full .dl.hunk { color: var(--muted); }
+#tl-full .dnote { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+#tl-full .phead .mini + .mini { margin-left: 6px; }
 #help dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; }
 #help dd { margin: 0; }
 #help dl.tasks dt { font-weight: 600; }

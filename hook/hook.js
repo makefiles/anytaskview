@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Claude Code·Codex 훅: stdin 의 사건을 짧은 사실로 줄여 화판에 보낸다.
 // 세션을 막지 않도록 언제나 0 으로 끝나고 800ms 를 넘기지 않는다. 화판이 꺼져 있으면 아무것도 하지 않는다.
-// 도구 출력과 파일 내용은 보내지 않는다. 명령·경로·짧은 앞부분과 사용자 입력·답(4,000자까지)만 보내고, 비밀 모양은 가린다.
-// 답에는 에이전트가 옮겨 적은 파일 내용·명령 출력이 들어갈 수 있다.
+// 도구 출력은 보내지 않는다. 명령·경로·짧은 앞부분, 사용자 입력·답(4,000자까지), 파일 수정의 바뀐 줄(diff, 128KB 까지)만 보내고,
+// 비밀 모양은 가린다. 답에는 에이전트가 옮겨 적은 파일 내용·명령 출력이 들어갈 수 있다.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -62,6 +62,74 @@ function editLines(resp) {
   return hunks.length > 1 ? `${range} 외 ${hunks.length - 1}곳` : range;
 }
 
+// 수정의 바뀐 줄(diff). 화판 서버가 설정한 크기(기본 16KB)로 다시 잘라 남긴다
+const DIFF_MAX = 128 * 1024;
+const DIFF_LINE = 2_000; // 한 줄 상한(압축한 코드 따위)
+const DIFF_MS = 200;     // 가리기에 쓰는 시간 상한. 「key-key-…」 처럼 생긴 긴 줄은 128KB 에 수 초가 걸린다
+const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+const KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/, KEY_END = /-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/;
+// 개인 키 파일은 바뀐 줄을 싣지 않는다(키 가운데만 고치면 diff 에 BEGIN·END 가 들어오지 않아 가릴 길이 없다)
+const KEY_FILE = /(\.(?:pem|key|p12|pfx|jks|keystore|gpg|asc)|(?:^|\/)id_(?:rsa|dsa|ecdsa|ed25519)[^/]*)$/i;
+const masked = (s) => `${/^[+ -]/.test(s) ? s[0] : ""}***`;
+
+// Edit·Write 응답의 diff 줄: structuredPatch 덩어리마다 「@@ -a,b +c,d @@」 머리와 줄. 새 파일(Write)은 덩어리 없이 내용이 온다
+function patchLines(resp) {
+  const hunks = resp && Array.isArray(resp.structuredPatch) ? resp.structuredPatch.filter((h) => Array.isArray(h?.lines)) : [];
+  if (hunks.length) return hunks.flatMap((h) => [`@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`, ...h.lines.map(String)]);
+  if (resp?.type !== "create" || typeof resp.content !== "string" || !resp.content) return [];
+  const lines = resp.content.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return [`@@ -0,0 +1,${lines.length} @@`, ...lines.map((l) => "+" + l)];
+}
+
+// diff 줄 → 사실 필드: 전체 더하기·빼기 줄 수(add·del)와 가린 글(diff). 줄마다 가리고, 개인 키는 덩어리(@@) 안에서
+// BEGIN~END 줄을 모두 가린다. 덩어리가 키 가운데서 시작해 END 만 보이면 그 덩어리의 앞줄을 거슬러 가린다.
+// 128KB 나 시간 상한(until)에 닿으면 거기서 자르고 cut 을 붙인다
+function diffFields(lines, until, file = "") {
+  if (!lines.length) return {};
+  let add = 0, del = 0;
+  for (const l of lines) if (l[0] === "+") add++; else if (l[0] === "-") del++;
+  if (KEY_FILE.test(file)) return { add, del };
+  const out = [];
+  let bytes = 0, cut = false, key = false, hunk = 0;
+  for (const raw of lines) {
+    if (performance.now() > until) { cut = true; break; }
+    if (raw.startsWith("@@")) { key = false; hunk = out.length + 1; }
+    const begin = KEY_BEGIN.test(raw), end = KEY_END.test(raw);
+    if (begin) key = true;
+    else if (end && !key) for (let i = hunk; i < out.length; i++) out[i] = masked(out[i]);
+    // 제어 문자는 JSON 에서 6바이트(\u0000)로 늘어 본문 상한에 걸릴 수 있고 화면에도 쓸모없다. 탭·CR 은 둔다
+    const line = key || end ? masked(raw) : clip(raw.replace(CTRL, "\ufffd"), DIFF_LINE);
+    if (end) key = false;
+    const n = Buffer.byteLength(line) + 1;
+    if (bytes + n > DIFF_MAX) { cut = true; break; }
+    out.push(line);
+    bytes += n;
+  }
+  return { add, del, ...(out.length && { diff: out.join("\n") }), ...(cut && { cut: true }) };
+}
+
+// Codex 패치 글을 파일마다 나눈 몸통 줄(머리 「*** Add/Update/Delete File:」 아래부터 다음 머리 전까지)
+function patchBodies(command) {
+  const files = new Map();
+  let cur = null;
+  for (const l of String(command || "").split("\n")) {
+    const m = l.match(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/);
+    if (m) files.set(m[1].trim(), (cur = []));
+    else if (/^\*\*\* (?:Begin Patch|End Patch|End of File)\s*$/.test(l)) continue;
+    else if (cur) cur.push(l);
+  }
+  return files;
+}
+// 결과 글의 경로와 패치 머리의 경로는 한쪽만 절대 경로일 수 있다. 작업 폴더 기준으로 맞춰 보고, 그래도 없으면
+// 뒤끝이 맞는 후보가 하나뿐일 때만 쓴다(이름이 같은 다른 폴더의 파일에 엉뚱한 diff 를 붙이지 않게)
+function bodyOf(files, p, cwd) {
+  const abs = (x) => path.resolve(cwd || "/", x);
+  for (const [k, body] of files) if (k === p || abs(k) === abs(p)) return body;
+  const tail = [...files].filter(([k]) => p.endsWith("/" + k) || k.endsWith("/" + p));
+  return tail.length === 1 ? tail[0][1] : [];
+}
+
 function todoText(tool, input) {
   if (tool === "TaskCreate") return clip(input.subject || "", 120);
   if (tool === "TaskUpdate") return clip(`${input.taskId || ""} ${input.status || ""} ${input.subject || ""}`.trim(), 120);
@@ -79,12 +147,13 @@ const title = (ev) => (typeof ev.session_title === "string" && ev.session_title 
 // Codex 의 apply_patch: 고친 파일마다 사실 하나. 결과 글의 「Success. Updated the following files:」 아래
 // 「A|M|D 경로」 줄이 실제로 바뀐 파일이다. 그 줄이 없으면 실패로 보고 패치 머리(*** Add File: 따위)의 경로를 쓴다
 const PATCH_MAX = 5;
-function patchFacts(input, resp, who) {
+function patchFacts(input, resp, who, until, cwd) {
   const out = typeof resp === "string" ? resp : JSON.stringify(resp ?? "");
   const done = out.split("Success. Updated the following files:")[1];
   if (done !== undefined) {
     const paths = [...done.matchAll(/^[AMD] (.+)$/gm)].map((m) => m[1].trim()).slice(0, PATCH_MAX);
-    return paths.map((p) => ({ f: "edit", tool: "apply_patch", path: p, ...who }));
+    const files = patchBodies(input.command);
+    return paths.map((p) => ({ f: "edit", tool: "apply_patch", path: p, ...diffFields(bodyOf(files, p, cwd), until, p), ...who }));
   }
   const heads = [...String(input.command || "").matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => m[1].trim()).slice(0, PATCH_MAX);
   return heads.map((p) => ({ f: "edit-fail", tool: "apply_patch", path: p, error: clip(out, 200), ...who }));
@@ -94,6 +163,7 @@ function patchFacts(input, resp, who) {
 export function toFact(ev, { codex = false } = {}) {
   const tool = ev.tool_name, input = ev.tool_input || {}, resp = ev.tool_response;
   const who = ev.agent_id ? { agent: String(ev.agent_id), agentType: String(ev.agent_type || "") } : {};
+  const until = performance.now() + DIFF_MS;
   switch (ev.hook_event_name) {
     case "SessionStart":
       // via: 어느 에이전트의 세션인지. Codex 는 큐로 보낼 때 그 세션의 CODEX_HOME 을 쓴다
@@ -115,9 +185,9 @@ export function toFact(ev, { codex = false } = {}) {
         const bg = !!(input.run_in_background || (resp && resp.backgroundTaskId));
         return { f: "run-end", id: ev.tool_use_id, cmd: clip(input.command || "", 200), desc: clip(input.description || "", 120), bg, ...(typeof ev.duration_ms === "number" && { dur: ev.duration_ms }), ...who };
       }
-      if (EDIT_TOOLS.has(tool)) return { f: "edit", tool, path: input.file_path || input.notebook_path || "", lines: editLines(resp), ...who };
+      if (EDIT_TOOLS.has(tool)) return { f: "edit", tool, path: input.file_path || input.notebook_path || "", lines: editLines(resp), ...diffFields(patchLines(resp), until, input.file_path || input.notebook_path || ""), ...who };
       if (TODO_TOOLS.has(tool)) return { f: "todo", tool, text: todoText(tool, input), ...who };
-      if (tool === "apply_patch") return patchFacts(input, resp, who);
+      if (tool === "apply_patch") return patchFacts(input, resp, who, until, ev.cwd);
       return null;
     case "PermissionRequest":
       // Codex: 승인 창이 뜨기 직전이다. Claude 의 Notification(permission_prompt)처럼 「입력 필요」로 둔다

@@ -150,6 +150,7 @@
     <dt>그림 화면 옮기기</dt><dd>그림이 칸보다 크면 빈 곳을 마우스로 잡고 끌어 상하좌우로 봅니다. 「맞춤」 을 누르면 그림 전체가 칸에 들어갑니다.</dd>
     <dt>그림 글자 복사</dt><dd>상자·표·선 이름·Mermaid 의 글자 위에서 끌어 고른 뒤 <kbd>Ctrl</kbd> + <kbd>C</kbd> 로 복사합니다. 글자를 고른 끝에는 경로를 복사하지 않습니다.</dd>
     <dt>긴 글 전체 보기</dt><dd>타임라인에서 3줄로 접힌 사용자 입력·차례 끝 답·화판 글을 누르면(<kbd>Enter</kbd> 도) 전체가 창으로 열립니다.</dd>
+    <dt>바뀐 줄(diff) 보기</dt><dd>타임라인의 「수정」 줄에 <code>+3 −1</code> 처럼 줄 수가 붙어 있으면, 누르면(<kbd>Enter</kbd> 도) 그 수정의 바뀐 줄이 창으로 열립니다. 같은 파일을 잇달아 고쳐 한 줄로 묶인 것은 옛것부터 차례로 보입니다. 경로는 창 위의 「경로 복사」 로 복사합니다. 남기는 크기는 「설정」 에서 바꿉니다.</dd>
     <dt>묶음 접기</dt><dd>에이전트는 같은 일의 뒤 작업을 그림에 새 묶음으로 이어 그립니다. 끝난 묶음은 상자 하나로 접혀 보이고, 누르면 펼쳐집니다. 묶음 제목 앞 ▸ · ▾ 로도 접고 폅니다.</dd>
   </dl>
 
@@ -319,11 +320,26 @@
         <li>휴지통은 상태 폴더의 <code>trash</code> 이고, 30일 뒤 비웁니다.</li>
       </ul>
     </details>
+
+    <h3>수정 내용(diff) 보관</h3>
+    <p>타임라인의 「수정」 줄을 누르면 바뀐 줄을 봅니다. 수정 한 번에 남길 크기를 정합니다. 바꾸면 다음 수정부터 적용됩니다.</p>
+    <dl class="fields">
+      <dt><label for="cfg-diff">수정 한 번에</label></dt>
+      <dd class="unit"><input id="cfg-diff" type="range" min="0" max="4" step="1"><output id="cfg-diff-val" for="cfg-diff"></output></dd>
+    </dl>
+    <details>
+      <summary>자세히</summary>
+      <ul>
+        <li>바뀐 줄은 이 PC 의 기록(상태 폴더)에 남습니다. 파일 내용을 남기고 싶지 않으면 「끔」 으로 둡니다. 끄면 더하기·빼기 줄 수만 남습니다.</li>
+        <li>비밀처럼 보이는 값(토큰, 비밀번호, 개인 키 따위)은 가려서 남기고, 개인 키 파일(.pem·.key 따위)은 바뀐 줄을 남기지 않습니다. 모든 모양을 잡지는 못하고, 반대로 이름에 key·token 이 든 변수에 값을 넣는 코드 줄은 값 자리가 *** 로 보일 수 있습니다.</li>
+        <li>대부분의 수정은 16KB 안에 듭니다. 그보다 큰 것은 대개 파일 전체를 다시 쓴 것입니다. 넘는 부분은 잘리고, 크기를 나중에 늘려도 되살아나지 않습니다.</li>
+      </ul>
+    </details>
     <div class="crow"><span class="grow"></span><button type="submit" class="primary">저장</button></div>
   </form>
 </dialog>
 <dialog id="tl-full" aria-labelledby="tl-full-title">
-  <div class="phead"><h2 id="tl-full-title"></h2><span class="grow"></span><button type="button" id="tl-full-close" class="mini">닫기</button></div>
+  <div class="phead"><h2 id="tl-full-title"></h2><span class="grow"></span><button type="button" id="tl-full-copy" class="mini" hidden>경로 복사</button><button type="button" id="tl-full-close" class="mini">닫기</button></div>
   <div id="tl-full-body"></div>
 </dialog>
 <div id="group-menu" role="menu" aria-label="메시지·프로젝트·지우기" hidden></div>

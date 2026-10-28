@@ -91,7 +91,7 @@ const state = {
   tlTopSeq: 0,           // 타임라인을 맨 위(최신)에서 마지막으로 본 사건 번호
   followed: null,        // 따라가기로 마지막에 옮겨 간 부품 id
   projects: { projects: {}, members: {} }, // 프로젝트 정의·소속과 큰 그림 요약(서버의 projects.json)
-  config: { resume: null, trashDays: 30 }, // 서버 설정(이어받기 문구, 지난 대화를 휴지통으로 옮기기까지 날수·null 이면 끔)
+  config: { resume: null, trashDays: 30, diffKB: 16 }, // 서버 설정(이어받기 문구, 지난 대화를 휴지통으로 옮기기까지 날수·null 이면 끔, 수정 diff 보관 KB·0 이면 끔)
   dragging: null,        // 목록에서 끌고 있는 세션 id
 };
 
@@ -1302,7 +1302,7 @@ function rowKey(scene, row, now) {
   return `${e.type}${e.seq}:${row.n}`;
 }
 const runDur = (r, now) => { const d = r.state === "running" || r.state === "wait" ? now - r.start : r.dur ?? (r.end && r.start ? r.end - r.start : null); return d == null ? null : fmtDur(d); };
-function tlRow(scene, { mark, e, n }, now) {
+function tlRow(scene, { mark, e, n, edits }, now) {
   if (mark) return el("li", "new-mark", "▲ 여기부터 새것");
   const li = el("li");
   li.dataset.seq = e.seq; // 찾기가 이 줄로 온다
@@ -1338,8 +1338,18 @@ function tlRow(scene, { mark, e, n }, now) {
     if (e.f === "prompt" && !isSysPrompt(e)) { kind("user", "사용자"); body(e.text); }
     else { const [label, text] = factParts(e); kind(`fact ${e.f}`, label); body(text); }
     if (e.f === "edit") {
-      li.querySelector(".tl-t").append(el("span", "times", n > 1 ? `×${n}` : ""));
-      if (safeRef(e.path)) {
+      const t = li.querySelector(".tl-t");
+      t.append(el("span", "times", n > 1 ? `×${n}` : ""));
+      // 바뀐 줄이 남은 수정은 더하기·빼기 수를 붙이고, 누르면(Enter 도) diff 창을 연다. 경로 복사는 그 창의 단추로
+      const sum = (k) => edits.reduce((s, x) => s + (x[k] || 0), 0);
+      if (edits.some((x) => x.diff)) {
+        t.append(" ", el("span", "dadd", `+${sum("add")}`), " ", el("span", "ddel", `−${sum("del")}`));
+        li.classList.add("diff");
+        li.tabIndex = 0;
+        li.dataset.seqs = edits.map((x) => x.seq).reverse().join(",");
+        li.dataset.path = e.path || "";
+        li.title = `${e.path}\n누르면 바뀐 줄을 봅니다`;
+      } else if (safeRef(e.path)) {
         const line = String(e.lines || "").match(/^\d+/);
         li.classList.add("copy");
         li.dataset.ref = e.path + (line ? ":" + line[0] : "");
@@ -1387,10 +1397,10 @@ function renderTimeline(scene, now) {
       marked = true;
       prevEdit = null;
     }
-    if (e.type === "fact" && e.f === "edit" && e.seq !== focus && prevEdit && prevEdit.e.seq !== focus && prevEdit.e.path === e.path && prevEdit.e.agent === e.agent) { prevEdit.n++; continue; }
+    if (e.type === "fact" && e.f === "edit" && e.seq !== focus && prevEdit && prevEdit.e.seq !== focus && prevEdit.e.path === e.path && prevEdit.e.agent === e.agent) { prevEdit.n++; prevEdit.edits.push(e); continue; }
     prevEdit = null;
     if ((e.type === "msg" && !own(scene.msgs || {}, e.mid)) || (e.type === "run" && !own(scene.runs, e.id))) continue;
-    const row = { e, n: 1 };
+    const row = { e, n: 1, edits: [e] }; // edits: 한 줄로 묶인 수정(최근 것부터)
     rows.push(row);
     if (e.type === "fact" && e.f === "edit") prevEdit = row;
   }
@@ -1598,35 +1608,86 @@ helpQ.addEventListener("input", filterHelp);
 // ---- 타임라인 전체 보기: 3줄로 접힌 줄(.full)을 누르거나 Enter 로 연다. Esc·「닫기」·바깥 누르기로 닫는다 ----
 const tlFull = $("tl-full");
 function openFull(li) {
+  diffAsk++; // 받는 중인 diff 가 늦게 와도 이 글을 덮지 않게
   $("tl-full-title").textContent = `${li.querySelector(".tl-k")?.textContent || ""} · ${li.querySelector(".when")?.textContent || ""}`;
   $("tl-full-body").textContent = li.querySelector(".tl-t")?.textContent || "";
+  $("tl-full-body").classList.remove("diffs");
+  $("tl-full-copy").hidden = true;
   tlFull.showModal();
   tlFull.scrollTop = 0;
+}
+// 수정 줄(li.diff)의 바뀐 줄: 한 줄로 묶인 수정을 옛것부터 차례로(최근 50번까지). 글은 서버에서 그때 받는다
+let diffAsk = 0;
+const DIFF_SEQS = 50; // 서버가 한 번에 주는 수
+async function openDiff(li) {
+  const all = li.dataset.seqs.split(",").map(Number), seqs = all.slice(-DIFF_SEQS);
+  const sid = state.sid, path = li.dataset.path, ask = ++diffAsk;
+  const body = $("tl-full-body"), copy = $("tl-full-copy");
+  $("tl-full-title").textContent = `수정 · ${base(path)}`;
+  body.classList.add("diffs");
+  body.replaceChildren(el("p", "dnote", "불러오는 중…"));
+  copy.hidden = !safeRef(path);
+  copy.dataset.path = path;
+  tlFull.showModal();
+  tlFull.scrollTop = 0;
+  let got = null;
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/diff?seq=${seqs.join(",")}`);
+    if (r.ok) got = (await r.json()).diffs;
+  } catch { /* 아래에서 알린다 */ }
+  // 그사이 창을 닫았거나 다른 줄·긴 글을 열었다. 닫힘 사건으로 번호를 올리지 않는다: 닫고 바로 다시 열면 늦게 온 닫힘이 새 요청을 버린다
+  if (ask !== diffAsk || !tlFull.open) return;
+  if (!got) return body.replaceChildren(el("p", "dnote", "바뀐 줄을 받지 못했습니다. 화판 서버가 떠 있는지 확인하세요."));
+  const byseq = new Map(viewScene().timeline.filter((x) => x.type === "fact" && x.f === "edit").map((x) => [x.seq, x]));
+  const parts = all.length > seqs.length ? [el("p", "dnote", `잇달아 고친 ${all.length}번 가운데 최근 ${seqs.length}번만 보입니다.`)] : [];
+  for (const q of seqs) {
+    const e = byseq.get(q) || {}, text = got[q];
+    parts.push(el("div", "dhead", `${e.t ? fmtClock(e.t) : ""}${e.lines ? " · " + e.lines : ""} · +${e.add || 0} −${e.del || 0}`));
+    if (typeof text !== "string") { parts.push(el("p", "dnote", "이 수정의 바뀐 줄은 남아 있지 않습니다.")); continue; }
+    const pre = el("pre", "diff");
+    for (const line of text.split("\n")) pre.append(el("span", line.startsWith("@@") ? "dl hunk" : line[0] === "+" ? "dl add" : line[0] === "-" ? "dl del" : "dl", line));
+    parts.push(pre);
+    if (e.cut) parts.push(el("p", "dnote", "앞부분만 남겼습니다. 남기는 크기는 설정의 「수정 내용(diff) 보관」 에서 바꿉니다."));
+  }
+  body.replaceChildren(...parts);
 }
 // 글자를 끌어 고른 끝의 클릭은 열지 않는다. 이미 골라 둔 글자를 누른 클릭은 연다(누를 때 선택이 있었는지로 가른다)
 let tlSelDown = true;
 $("tl-body").addEventListener("pointerdown", () => { tlSelDown = getSelection().isCollapsed; }, true);
 $("tl-body").addEventListener("click", (ev) => {
-  const li = ev.target.closest("li.full");
-  if (li && (getSelection().isCollapsed || !tlSelDown)) openFull(li);
+  const li = ev.target.closest("li.full, li.diff");
+  if (!li || !(getSelection().isCollapsed || !tlSelDown)) return;
+  if (li.classList.contains("diff")) openDiff(li); else openFull(li);
 });
 $("tl-body").addEventListener("keydown", (ev) => {
-  if (ev.key === "Enter" && ev.target.matches("li.full")) { ev.preventDefault(); openFull(ev.target); }
+  if (ev.key !== "Enter" || !ev.target.matches("li.full, li.diff")) return;
+  ev.preventDefault();
+  if (ev.target.classList.contains("diff")) openDiff(ev.target); else openFull(ev.target);
 });
 $("tl-full-close").addEventListener("click", () => tlFull.close());
+$("tl-full-copy").addEventListener("click", (ev) => copyRef(ev.currentTarget.dataset.path));
 tlFull.addEventListener("click", (ev) => {
   if (ev.target !== tlFull) return; // 창 안의 글·단추
   const r = tlFull.getBoundingClientRect();
   if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) tlFull.close();
 });
 
-// ---- 설정: 이어받기 문구, 지난 세션 정리 ----
+// ---- 설정: 이어받기 문구, 지난 세션 정리, 수정 diff 보관 크기 ----
 const settings = $("settings");
+const DIFF_STEPS = [0, 16, 32, 64, 128]; // 슬라이더 칸 → KB(서버 DIFF_KB 와 같음)
+const diffLabel = () => {
+  const kb = DIFF_STEPS[Number($("cfg-diff").value)], text = kb ? `${kb}KB${kb === 16 ? "(기본)" : ""}` : "끔";
+  $("cfg-diff-val").textContent = text;
+  $("cfg-diff").setAttribute("aria-valuetext", text);
+};
+$("cfg-diff").addEventListener("input", diffLabel);
 $("settings-open").addEventListener("click", () => {
   const r = state.config.resume;
   $("cfg-phrase").value = r?.phrase || "";
   $("cfg-doc").value = r?.doc || "";
   $("cfg-trash").value = state.config.trashDays ?? "";
+  $("cfg-diff").value = Math.max(0, DIFF_STEPS.indexOf(state.config.diffKB ?? 16));
+  diffLabel();
   settings.showModal();
   $("cfg-phrase").focus();
 });
@@ -1634,7 +1695,7 @@ $("settings-close").addEventListener("click", () => settings.close());
 $("settings-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const phrase = $("cfg-phrase").value.trim(), doc = $("cfg-doc").value.trim(), days = $("cfg-trash").value.trim();
-  const out = await boardOp({ op: "config-set", resume: phrase ? { phrase, doc } : null, trashDays: days ? Number(days) : null });
+  const out = await boardOp({ op: "config-set", resume: phrase ? { phrase, doc } : null, trashDays: days ? Number(days) : null, diffKB: DIFF_STEPS[Number($("cfg-diff").value)] });
   if (!out.ok) return;
   settings.close();
   toast(out.msg);

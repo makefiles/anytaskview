@@ -1437,3 +1437,41 @@ test("코드 표지: 코드 파일이 바뀌면 달라지고, 판 폴더의 .orp
   fs.writeFileSync(path.join(root, ".orphaned_at"), "1");
   assert.equal(orphaned(root), true);
 });
+
+test("수정 diff: 설정한 크기(기본 16KB)로 잘라 결과에만 남기고, 스냅샷·재생 기록에서는 빼며, /diff 로 따로 준다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const line = "+" + "가".repeat(30); // 한 줄 91바이트(줄 바꿈 포함 92)
+  const big = Array.from({ length: 400 }, () => line).join("\n"); // 약 36KB
+  await f.hook("D1", { f: "start", cwd: "/w" });
+  assert.equal((await f.hook("D1", { f: "edit", tool: "Edit", path: "/w/a.js", lines: "3", add: 1, del: 1, diff: "@@ -3,1 +3,1 @@\n-a\n+b" })).status, 200);
+  assert.equal((await f.hook("D1", { f: "edit", tool: "Write", path: "/w/b.js", add: 400, del: 0, diff: big })).status, 200);
+  const snap = (await f.read("/api/sessions/D1/snapshot")).json;
+  assert.equal(snap.scene.diffs, undefined, "스냅샷에 diff 글이 없다");
+  const edits = snap.scene.timeline.filter((e) => e.f === "edit");
+  assert.deepEqual(edits.map((e) => [e.path, e.add, e.del, e.diff, e.cut]), [["/w/a.js", 1, 1, true, undefined], ["/w/b.js", 400, 0, true, true]]);
+  const got = (await f.read(`/api/sessions/D1/diff?seq=${edits.map((e) => e.seq).join(",")},999`)).json.diffs;
+  assert.equal(got[edits[0].seq], "@@ -3,1 +3,1 @@\n-a\n+b");
+  assert.ok(Buffer.byteLength(got[edits[1].seq]) <= 16 * 1024 && got[edits[1].seq].endsWith(line), "16KB 안에서 줄 경계로 자름");
+  assert.equal(Object.keys(got).length, 2, "없는 번호는 빠진다");
+  // 기록: 원문 칸(op)에는 diff 글이 없고 결과에만 한 번. 재생 기록(/log)에서는 뺀다
+  const recs = fs.readFileSync(path.join(f.home, "sessions", "D1.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((r) => r.op?.f === "edit");
+  assert.ok(recs.every((r) => r.op.diff === undefined && r.res.filter((x) => x.k === "diff").length === 1));
+  const log = (await f.read("/api/sessions/D1/log")).json;
+  assert.ok(log.every((r) => r.res.every((x) => x.k !== "diff")));
+  // 다시 띄워도 기록의 결과에서 되살린다
+  await f.restart();
+  assert.equal((await f.read(`/api/sessions/D1/diff?seq=${edits[0].seq}`)).json.diffs[edits[0].seq], "@@ -3,1 +3,1 @@\n-a\n+b");
+  // 설정: 틀린 값은 거절, 128KB 로 늘리면 다음 수정부터 잘리지 않고, 끄면 더하기·빼기 수만 남는다
+  assert.equal((await board(f, { op: "config-set", resume: null, diffKB: 100 })).status, 400);
+  assert.equal((await board(f, { op: "config-set", resume: null, diffKB: 128 })).status, 200);
+  assert.equal(f.board.config.diffKB, 128);
+  await f.hook("D1", { f: "edit", tool: "Write", path: "/w/c.js", add: 400, del: 0, diff: big });
+  assert.equal((await board(f, { op: "config-set", resume: null, diffKB: 0 })).status, 200);
+  await f.hook("D1", { f: "edit", tool: "Edit", path: "/w/d.js", add: 2, del: 0, diff: "+x\n+y" });
+  const tl = (await f.read("/api/sessions/D1/snapshot")).json.scene.timeline.filter((e) => e.f === "edit").slice(-2);
+  assert.deepEqual(tl.map((e) => [e.path, e.diff, e.cut, e.add]), [["/w/c.js", true, undefined, 400], ["/w/d.js", undefined, undefined, 2]]);
+  assert.equal((await f.read(`/api/sessions/D1/diff?seq=${tl[0].seq}`)).json.diffs[tl[0].seq], big);
+  // 큰 diff(JSON 으로 늘어나는 따옴표·역빗금)도 훅 본문 상한에 걸리지 않는다
+  assert.equal((await f.hook("D1", { f: "edit", tool: "Edit", path: "/w/e.js", diff: '+"\\'.repeat(43_000) })).status, 200);
+});

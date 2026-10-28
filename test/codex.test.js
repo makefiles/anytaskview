@@ -41,7 +41,23 @@ test("Codex 사건 → 사실: apply_patch 는 고친 파일마다, 실패는 �
     hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Add File: /w/a.txt\n+x\n*** Update File: /w/b.js\n@@\n-y\n+z\n*** End Patch" },
     tool_response: "Exit code: 0\nWall time: 0.4 seconds\nOutput:\nSuccess. Updated the following files:\nA /w/a.txt\nM /w/b.js\n",
   }, { codex: true });
-  assert.deepEqual(ok, [{ f: "edit", tool: "apply_patch", path: "/w/a.txt" }, { f: "edit", tool: "apply_patch", path: "/w/b.js" }]);
+  assert.deepEqual(ok, [
+    { f: "edit", tool: "apply_patch", path: "/w/a.txt", add: 1, del: 0, diff: "+x" },
+    { f: "edit", tool: "apply_patch", path: "/w/b.js", add: 1, del: 1, diff: "@@\n-y\n+z" },
+  ]);
+  // 결과 글의 경로가 상대 경로여도 패치 머리의 절대 경로와 짝짓는다
+  const rel = toFact({
+    hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Update File: /w/src/c.js\n@@ f()\n-a\n+b\n*** End of File\n*** End Patch" },
+    tool_response: "Success. Updated the following files:\nM src/c.js\n",
+  }, { codex: true });
+  assert.deepEqual(rel, [{ f: "edit", tool: "apply_patch", path: "src/c.js", add: 1, del: 1, diff: "@@ f()\n-a\n+b" }]);
+  // 이름이 같은 두 파일: 작업 폴더 기준으로 맞춰 각자의 diff 를 붙인다
+  const twin = toFact({
+    hook_event_name: "PostToolUse", tool_name: "apply_patch", cwd: "/w",
+    tool_input: { command: "*** Begin Patch\n*** Update File: package.json\n@@\n-a\n+b\n*** Update File: packages/x/package.json\n@@\n-c\n+d\n+e\n*** End Patch" },
+    tool_response: "Success. Updated the following files:\nM /w/packages/x/package.json\nM /w/package.json\n",
+  }, { codex: true });
+  assert.deepEqual(twin.map((x) => [x.path, x.diff]), [["/w/packages/x/package.json", "@@\n-c\n+d\n+e"], ["/w/package.json", "@@\n-a\n+b"]]);
   const bad = toFact({ hook_event_name: "PostToolUse", tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n*** Update File: /w/c.js\n@@\n*** End Patch" }, tool_response: "Exit code: 1\nOutput:\nverification failed: context not found" });
   assert.equal(bad.length, 1);
   assert.equal(bad[0].f, "edit-fail");
