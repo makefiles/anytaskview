@@ -24,6 +24,9 @@
     "capabilities": [
       "Read",
       "Write"
-    ]
+    ],
+    "brandColor": "#1F5FD1",
+    "composerIcon": "./web/icon.svg",
+    "logo": "./web/icon.svg"
   }
 }

@@ -1,3 +1,5 @@
+<img src="web/icon.svg" alt="AnyTaskView logo" width="88">
+
 # AnyTaskView
 
 <picture>
