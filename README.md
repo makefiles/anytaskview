@@ -5,9 +5,10 @@
   <img src="docs/images/hero-light.png" alt="AnyTaskView board. Left: session list grouped by project, with Claude and Codex logos and a 'past sessions' group (expanded here). Middle: a diagram the agent drew, with a rounded screen box, a decision diamond, a server box and a database cylinder joined by labelled arrows, a results table, a document box and a hexagon waiting for approval. Right: the plan with the current step pinned on top, and a timeline of commands, file edits, notes and the user's prompt. Top: the session name, the current step and a one-line approval banner with 'show more' and 'close' buttons.">
 </picture>
 
-**English summary.** anytaskview is a Claude Code plugin that shows what Claude is doing on a live board in your local browser: the plan and its current step, a diagram Claude draws while it works, notes and decisions, and facts collected automatically by hooks (file edits, commands, subagents). Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to Claude, search the board and past records, and drag shapes with Ctrl held to rearrange them. The board UI and Claude-facing texts are in Korean, and so are the screenshots in this README.
+**English summary.** anytaskview is a Linux plugin for coding agents (Claude Code and OpenAI Codex) that shows what the agent is doing on a live board in your local browser: the plan and its current step, a diagram the agent draws while it works, notes and decisions, and facts collected automatically by hooks (file edits, commands, subagents). Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to the agent, search the board and past records, and drag shapes with Ctrl held to rearrange them. The board UI and agent-facing texts are in Korean, and so are the screenshots in this README.
 
-- Requirements: Claude Code with plugin support, Node.js 22.12 or later, Linux (macOS untested, Windows through WSL), a recent browser.
+- Supported agents: Claude Code (tested in the terminal `claude`) and OpenAI Codex (terminal `codex`, ChatGPT desktop app, VS Code). Other agents are not supported yet.
+- Requirements: Linux (macOS untested, Windows through WSL), Node.js 22.12 or later, a recent browser, and Claude Code or Codex with plugin support.
 - Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md). Agents given only this repository URL should follow INSTALL.md from the top; the two commands alone do not start or open the board. To open the board later, ask the agent to open it, or run `scripts/atv board --open` from the plugin folder (it opens your default browser without printing the key).
 - OpenAI Codex (CLI, desktop app, VS Code) works too: `codex plugin marketplace add makefiles/anytaskview`, `codex plugin add anytaskview@anytaskview`, allow the five board tools in `~/.codex/config.toml`, and trust the hooks in `/hooks`. See the Codex part of [INSTALL.md](INSTALL.md).
 - Security: the board listens on 127.0.0.1 only and every request needs a token; nothing is sent off the machine. Details and limits: [SECURITY.md](SECURITY.md).
@@ -16,23 +17,35 @@
 
 ---
 
-Claude Code 가 일하는 동안 지금 하는 일을 이 PC 의 브라우저 화판에 실시간으로 보여 주는 플러그인입니다.
+코딩 에이전트(Claude Code, OpenAI Codex)가 일하는 동안 지금 하는 일을 이 PC 의 브라우저 화판에 실시간으로 보여 주는 Linux 용 플러그인입니다.
 
-- Claude 가 계획(단계)과 문제 구조 그림, 이유·결정 메모를 짧은 도구 호출로 올립니다.
-- 파일 수정, 명령, 하위 에이전트, 입력 필요 같은 사실은 Claude Code 훅이 자동으로 올립니다. 사실은 그때의 단계에 붙고, 그림 속 상자의 파일이 수정되면 그 상자에 「수정됨」 이 붙습니다.
+- 에이전트가 계획(단계)과 문제 구조 그림, 이유·결정 메모를 짧은 도구 호출로 올립니다.
+- 파일 수정, 명령, 하위 에이전트, 입력 필요 같은 사실은 에이전트의 훅이 자동으로 올립니다. 사실은 그때의 단계에 붙고, 그림 속 상자의 파일이 수정되면 그 상자에 「수정됨」 이 붙습니다.
 - 여러 대화에 걸친 일은 프로젝트로 묶이고, 프로젝트마다 끝날 때까지 이어지는 큰 그림 화판이 있습니다.
-- 화판의 상자나 단계를 가리켜 그 자리에서 Claude 에 의견·지시를 보낼 수 있습니다.
+- 화판의 상자나 단계를 가리켜 그 자리에서 에이전트에 의견·지시를 보낼 수 있습니다.
+
+## 지원하는 에이전트
+
+| 에이전트 | 쓰는 곳 | 비고 |
+|---|---|---|
+| Claude Code | 터미널 `claude` | 모든 기능을 씁니다. 데스크톱 앱·IDE 확장은 시험하지 않았습니다. |
+| OpenAI Codex | 터미널 `codex`, ChatGPT 데스크톱 앱, VS Code | 모든 기능을 씁니다(`codex-cli` 0.163·0.164 에서 시험). 설치 뒤 그리기 도구를 허용하고 훅을 믿어 줘야 하며, 화판에서 보낸 글은 일하는 중이면 그 차례가 끝난 뒤 받습니다. |
+| 그 밖의 에이전트 | | 아직 지원하지 않습니다. |
+
+세션 목록에는 Claude·Codex 로고가 붙어 어느 에이전트의 세션인지 보입니다. 화면 글과 에이전트에 주는 안내는 한국어입니다.
 
 ## 필요한 것
 
-- Claude Code(플러그인을 쓰는 판)
+- Linux. macOS 는 시험하지 않았고, Windows 는 WSL 에서 씁니다.
+- Claude Code 또는 OpenAI Codex(플러그인을 쓰는 판)
 - Node.js 22.12 이상. `PATH` 의 node 가 오래됐으면 nvm 으로 깐 node 를 찾아 쓰고, 그래도 없으면 `ANYTASKVIEW_NODE` 에 node 경로를 넣습니다.
-- Linux 에서 만들고 시험했습니다. macOS 는 시험하지 않았고, Windows 는 WSL 에서 씁니다.
 - Chrome·Edge·Firefox 같은 최근 브라우저
 
 실행에 필요한 npm 패키지는 없습니다(브라우저 라이브러리와 글꼴은 `web/vendor/` 에 들어 있습니다).
 
 ## 설치
+
+### Claude Code
 
 터미널에서:
 
@@ -45,11 +58,13 @@ Claude Code 안에서는 `/plugin marketplace add makefiles/anytaskview` 와 `/p
 
 자세한 순서와 확인 방법, 갱신·삭제는 [INSTALL.md](INSTALL.md) 에 있습니다.
 
-OpenAI Codex(터미널 `codex`, ChatGPT 데스크톱 앱, VS Code)에서도 씁니다. `codex plugin marketplace add makefiles/anytaskview` 와 `codex plugin add anytaskview@anytaskview` 로 설치하고, 그리기 도구 다섯을 사용자 Codex 설정에서 늘 허용한 뒤 `/hooks` 에서 훅을 믿어 줍니다. 순서는 [INSTALL.md](INSTALL.md) 의 「Codex 에 설치」 에 있습니다. Codex 세션은 목록 줄에 파란 OpenAI 로고가 붙고, 화판에서 보낸 글은 쉬는 세션이면 바로, 일하는 중이면 그 차례가 끝난 뒤 받습니다.
+### OpenAI Codex
+
+터미널 `codex`, ChatGPT 데스크톱 앱, VS Code 의 Codex 에서 씁니다. `codex plugin marketplace add makefiles/anytaskview` 와 `codex plugin add anytaskview@anytaskview` 로 설치하고, 그리기 도구 다섯을 사용자 Codex 설정에서 늘 허용한 뒤 `/hooks` 에서 훅을 믿어 줍니다. 순서는 [INSTALL.md](INSTALL.md) 의 「Codex 에 설치」 에 있습니다. Codex 세션은 목록 줄에 파란 OpenAI 로고가 붙고, 화판에서 보낸 글은 쉬는 세션이면 바로, 일하는 중이면 그 차례가 끝난 뒤 받습니다.
 
 ### LLM 에게 설치를 맡기려면
 
-Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
+Claude Code·Codex 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 
 > https://github.com/makefiles/anytaskview 의 INSTALL.md 를 읽고 그대로 설치하고 확인해 줘
 
@@ -62,6 +77,8 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 ```sh
 "$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)scripts/atv" board --open
 ```
+
+Codex 로만 설치했다면 플러그인 폴더가 `~/.codex/plugins/cache/anytaskview/anytaskview/local/` 이므로 `~/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv board --open` 을 실행합니다.
 
 한 번 연 뒤로는 그 브라우저에서 `http://127.0.0.1:4871/` 만 열면 됩니다. PC 를 다시 켜도 기록은 상태 폴더에 남아 있어, 세션을 열고 화판을 다시 열면 그대로 보입니다.
 
@@ -105,7 +122,7 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 ### 화면 구성
 
 - 왼쪽: 세션 목록. 프로젝트별로 묶이고, 목록 위 정렬 단추(처음에는 「시작순 ▾」)에서 시작순·활동순·이름순을 고르거나 끝난 세션을 숨깁니다. 끝난 지 하루가 지난 대화는 「지난 세션」 에 접혀 들어갑니다. 프로젝트 이름을 누르면 큰 그림이 열립니다.
-- 가운데: Claude 가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 상자를 누르면 파일 경로를 복사합니다. `Ctrl` 을 누른 채 도형을 끌면 원하는 자리로 옮기고, 놓은 자리는 기록에 남습니다(그림 위 「자동 배치로」 로 모두 되돌림).
+- 가운데: 에이전트가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 상자를 누르면 파일 경로를 복사합니다. `Ctrl` 을 누른 채 도형을 끌면 원하는 자리로 옮기고, 놓은 자리는 기록에 남습니다(그림 위 「자동 배치로」 로 모두 되돌림).
 - 오른쪽: 계획(지금 단계는 위에 고정)과 타임라인(사실·메모·보낸 글). 타임라인은 「새 창」 으로 떼어 볼 수 있습니다.
 - 아래: 재생 막대. 지난 상태를 처음부터 다시 봅니다.
 - 맨 위 주의 띠(입력 필요·승인 대기·막힘·실패)는 한 줄로 접혀 「외 N개」 로 펴고, 「닫기」 로 숨깁니다(새 알림이 오면 다시 보임). 그림이 칸보다 크면 마우스로 잡아 끌어 옮깁니다.
@@ -124,10 +141,10 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 
 ## 문제 해결
 
-- 화판이 안 뜸: Claude Code 세션을 새로 열거나, 위의 `scripts/atv board` 로 직접 띄웁니다. 로그는 `~/.local/state/anytaskview/board.log` 입니다.
+- 화판이 안 뜸: 에이전트 세션을 새로 열거나, 위의 `scripts/atv board` 로 직접 띄웁니다. 로그는 `~/.local/state/anytaskview/board.log` 입니다.
 - 「쓰기 열쇠 없음」 이 보임: `scripts/atv board --open` 으로 다시 엽니다(다른 브라우저·시크릿 창·쿠키를 지운 경우).
 - 플러그인을 갱신한 뒤 「화판 서버가 다른 판」 이라고 나옴: 옛 판 서버를 내립니다(INSTALL.md 「갱신」).
-- node 를 찾지 못함: `ANYTASKVIEW_NODE=/path/to/node` 를 Claude Code 를 띄우는 환경에 넣습니다.
+- node 를 찾지 못함: `ANYTASKVIEW_NODE=/path/to/node` 를 Claude Code·Codex 를 띄우는 환경에 넣습니다.
 
 ## 개발
 
