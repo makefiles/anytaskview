@@ -244,6 +244,46 @@ test("옛 그림: 대기로 시작한 작업도 열린 작업이고, 무시한 �
   assert.equal(h.scene.view.taskT, 3 * H);
 });
 
+test("남은 단계: 새 작업을 올린 호출 결과에 앞 작업에서 열린 채 남은 단계를 한 번 알린다", () => {
+  const h = harness();
+  // phase2 처럼 앞 작업의 마지막 단계를 닫지 않고 끝냄
+  h.plan({ steps: [{ id: "s1", title: "읽기", status: "doing" }, { id: "s2", title: "고치기" }, { id: "s3", title: "README 갱신" }] }, 1000);
+  h.plan({ steps: [{ id: "s1", status: "done" }, { id: "s2", status: "done" }] }, 2000);
+  const msg = h.plan({ steps: [{ id: "l1", title: "다음 작업", status: "doing" }, { id: "l2", title: "검증" }] }, 3000);
+  assert.equal(h.scene.view.taskT, 3000);
+  assert.equal(msg, '계획 5단계 · 지금 l1 · Steps still open from earlier work: s3 todo "README 갱신". ' +
+    "Mark the finished ones done and remove the dropped ones (del:true); keep the ones still to do.");
+  // 같은 작업의 다음 호출에는 다시 알리지 않는다
+  assert.doesNotMatch(h.plan({ steps: [{ id: "l1", status: "done" }, { id: "l2", status: "doing" }] }, 4000), /still open/);
+  // 지운 단계는 남지 않는다. 진행 단계도 싣고, 새 작업의 단계, 그 호출에서 닫은 단계, 일부러 열어 둔 대기·막힘은 싣지 않는다
+  h.plan({ steps: [{ id: "s3", del: true }, { id: "l2", status: "done" }] }, 5000);
+  h.plan({ steps: [{ id: "a1", title: "셋째", status: "doing" }, { id: "a2", title: "승인 받기" }, { id: "a3", title: "적용" }, { id: "a4", title: "막힌 일" }] }, 6000);
+  h.plan({ steps: [{ id: "a2", status: "wait" }, { id: "a4", status: "blocked" }] }, 7000);
+  const next = h.plan({ steps: [{ id: "a3", status: "done" }, { id: "b1", title: "넷째", status: "doing" }, { id: "b2", title: "검증" }] }, 8000);
+  assert.match(next, /Steps still open from earlier work: a1 doing "셋째"\. /);
+  assert.doesNotMatch(next.split("Steps still open")[1], /\b(a2|a3|a4|b1|b2|s3)\b/);
+  // 남은 단계가 없으면 붙이지 않는다
+  h.plan({ steps: ["a1", "a2", "a4", "b1", "b2"].map((id) => ({ id, status: "done" })) }, 9000);
+  assert.equal(h.plan({ steps: [{ id: "c1", title: "다섯째", status: "doing" }, { id: "c2", title: "검증" }] }, 10_000), "계획 12단계 · 지금 c1");
+});
+
+test("남은 단계: 여섯 개까지 싣고, 하위 에이전트가 도는 동안과 큰 그림 화판에는 알리지 않는다", () => {
+  const h = harness();
+  h.plan({ steps: Array.from({ length: 8 }, (_, i) => ({ id: `o${i}`, title: `옛 단계 ${i} 제목이 아주 길어서\n잘리는 경우`, status: i ? "todo" : "doing" })) }, 1000);
+  const msg = h.plan({ steps: [{ id: "n1", title: "새 작업", status: "doing" }, { id: "n2", title: "검증" }] }, 2000);
+  assert.doesNotMatch(msg, /\n/); // 결과 글은 한 줄
+  assert.match(msg, /o0 doing "옛 단계 0 제목이 아주 길어서 잘리"/);
+  assert.match(msg, /o5 todo "[^"]*" … \(8\)\. Mark/);
+  assert.doesNotMatch(msg, /o6/);
+  // 하위 에이전트가 도는 동안은 새 작업으로 보지 않으므로 알리지도 않는다
+  h.fact({ f: "agent-start", agent: "sub1", agentType: "Explore" }, 3000);
+  assert.doesNotMatch(h.plan({ steps: [{ id: "r1", title: "파일 읽기", status: "doing" }, { id: "r2", title: "보고" }] }, 4000), /still open/);
+  // 큰 그림 화판: 단위가 여럿 열려 있는 것이 보통이다
+  const sc = newScene(), ctx = (t) => ({ t, seq: t, project: true });
+  applyRes(sc, evalPlan(sc, { steps: [{ id: "u1", title: "01", status: "doing" }, { id: "u2", title: "02" }] }, ctx(1)).res);
+  assert.doesNotMatch(evalPlan(sc, { steps: [{ id: "u3", title: "03", status: "doing" }, { id: "u4", title: "04" }] }, ctx(2)).msg, /still open/);
+});
+
 test("note: 막힘·승인 대기는 단계 상태를 바꾸고, 지금 단계는 그대로 남는다", () => {
   const h = harness();
   h.plan({ steps: [{ id: "s", title: "고치기", status: "doing" }] });
