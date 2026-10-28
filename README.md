@@ -5,7 +5,7 @@
   <img src="docs/images/hero-light.png" alt="AnyTaskView board. Left: session list grouped by project, with Claude and Codex logos and a 'past sessions' group (expanded here). Middle: a diagram the agent drew, with a rounded screen box, a decision diamond, a server box and a database cylinder joined by labelled arrows, a results table, a document box and a hexagon waiting for approval. Right: the plan with the current step pinned on top, and a timeline of commands, file edits, notes and the user's prompt. Top: the session name, the current step and a one-line approval banner with 'show more' and 'close' buttons.">
 </picture>
 
-**English summary.** anytaskview is a Claude Code plugin that shows what Claude is doing on a live board in your local browser: the plan and its current step, a diagram Claude draws while it works, notes and decisions, and facts collected automatically by hooks (file edits, commands, subagents). Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to Claude. The board UI and Claude-facing texts are in Korean, and so are the screenshots in this README.
+**English summary.** anytaskview is a Claude Code plugin that shows what Claude is doing on a live board in your local browser: the plan and its current step, a diagram Claude draws while it works, notes and decisions, and facts collected automatically by hooks (file edits, commands, subagents). Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to Claude, search the board and past records, and drag shapes with Ctrl held to rearrange them. The board UI and Claude-facing texts are in Korean, and so are the screenshots in this README.
 
 - Requirements: Claude Code with plugin support, Node.js 22.12 or later, Linux (macOS untested, Windows through WSL), a recent browser.
 - Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md). Agents given only this repository URL should follow INSTALL.md from the top; the two commands alone do not start or open the board. To open the board later, ask the agent to open it, or run `scripts/atv board --open` from the plugin folder (it opens your default browser without printing the key).
@@ -105,10 +105,11 @@ Claude Code 같은 코딩 에이전트에 이렇게 말하면 됩니다.
 ### 화면 구성
 
 - 왼쪽: 세션 목록. 프로젝트별로 묶이고, 목록 위 정렬 단추(처음에는 「시작순 ▾」)에서 시작순·활동순·이름순을 고르거나 끝난 세션을 숨깁니다. 끝난 지 하루가 지난 대화는 「지난 세션」 에 접혀 들어갑니다. 프로젝트 이름을 누르면 큰 그림이 열립니다.
-- 가운데: Claude 가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 상자를 누르면 파일 경로를 복사합니다.
+- 가운데: Claude 가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 상자를 누르면 파일 경로를 복사합니다. `Ctrl` 을 누른 채 도형을 끌면 원하는 자리로 옮기고, 놓은 자리는 기록에 남습니다(그림 위 「자동 배치로」 로 모두 되돌림).
 - 오른쪽: 계획(지금 단계는 위에 고정)과 타임라인(사실·메모·보낸 글). 타임라인은 「새 창」 으로 떼어 볼 수 있습니다.
 - 아래: 재생 막대. 지난 상태를 처음부터 다시 봅니다.
 - 맨 위 주의 띠(입력 필요·승인 대기·막힘·실패)는 한 줄로 접혀 「외 N개」 로 펴고, 「닫기」 로 숨깁니다(새 알림이 오면 다시 보임). 그림이 칸보다 크면 마우스로 잡아 끌어 옮깁니다.
+- 맨 위 「찾기」(`/` 또는 `Ctrl+K`)는 이 화판의 그림·계획, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트, 다른 세션의 기록에서 찾고, 고르면 그 자리로 갑니다.
 - 상자나 단계에 마우스를 올리거나 초점을 두면 「보내기」 가 뜹니다. 여러 글을 「모아 두기」 로 모았다가 한꺼번에 보낼 수도 있습니다. 쓰다 둔 글과 모은 글은 브라우저를 닫아도 남습니다.
 - 맨 위 「설정」 에서 이어받기 문구(예: `이어서 <키>`)를 정하면, 그 문구로 시작한 대화를 같은 키의 앞 대화와 프로젝트에 잇습니다. 기본은 꺼져 있습니다.
 - 끝난 뒤 30일이 지난 대화는 휴지통(`~/.local/state/anytaskview/trash/`, 30일 뒤 비움)으로 옮깁니다. 진행 중인 프로젝트에 든 대화는 남깁니다. 날수는 「설정」 에서 바꾸거나 끕니다.

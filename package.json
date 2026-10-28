@@ -1,6 +1,6 @@
 {
   "name": "anytaskview",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "description": "LLM 이 일하는 동안 지금 하는 일을 로컬 브라우저 화판에 그려 올리는 도구",
   "type": "module",
