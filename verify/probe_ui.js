@@ -1510,6 +1510,115 @@ async function main() {
     expect(r.clamp === "3" && r.promptH <= r.lineH * 3 + 1, `사용자 입력이 3줄로 접히지 않음: ${r.clamp} ${r.promptH}px`);
     return `글 머리 ${r.lefts[0]}px, 메모 ${r.noteLines}줄`;
   });
+  await check("한국어 줄바꿈: 넘어간 줄은 낱말 중간이 아니라 띄어쓰기 자리에서 바뀜", async () => {
+    const r = await evaluate(`(() => {
+      const note = [...document.querySelectorAll('#tl-body li')].find((li) => li.textContent.includes('아주 긴 결정 메모')).querySelector('.tl-t');
+      const g = document.createRange(); g.selectNodeContents(note);
+      const tops = [...new Map([...g.getClientRects()].filter((x) => x.width > 0).map((x) => [Math.round(x.top), x])).values()];
+      // 둘째 줄부터 줄 첫 글자 바로 앞이 띄어쓰기인지 본다
+      const bad = tops.slice(1).map((x) => document.caretRangeFromPoint(x.left + 1, x.top + x.height / 2)).filter((c) => c && c.startOffset > 0 && !/\\s/.test(c.startContainer.data[c.startOffset - 1]));
+      return { lines: tops.length, bad: bad.length, wb: getComputedStyle(note).wordBreak };
+    })()`);
+    expect(r.lines >= 2 && r.bad === 0 && r.wb === "keep-all", JSON.stringify(r));
+    return `${r.lines}줄`;
+  });
+  await check("타임라인 전체 보기: 긴 차례 끝 답은 3줄로 접히고, 누르거나 Enter 로 전체가 창에 열리며 Esc·바깥 누르기로 닫힘", async () => {
+    const answer = "끝까지 보여야 하는 답입니다. ".repeat(150) + "마지막 문장";
+    await post("/api/hook", { sid, fact: { f: "stop", last: answer } });
+    const row = `[...document.querySelectorAll('#tl-body li.full')].find((li) => li.textContent.includes('마지막 문장'))`;
+    await waitFor(`${row} !== undefined`);
+    const folded = await evaluate(`(() => { const t = ${row}.querySelector('.tl-t'), cs = getComputedStyle(t); return { h: t.getBoundingClientRect().height, line: parseFloat(cs.lineHeight), title: ${row}.title }; })()`);
+    expect(folded.h <= folded.line * 3 + 1 && folded.title === "누르면 전체를 봅니다", JSON.stringify(folded));
+    const shown = `document.getElementById('tl-full').open && document.getElementById('tl-full-body').textContent === ${JSON.stringify(answer)} && document.getElementById('tl-full-title').textContent.startsWith('차례 끝')`;
+    await evaluate(`${row}.click()`);
+    await waitFor(shown);
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await waitFor(`!document.getElementById('tl-full').open`);
+    await evaluate(`${row}.focus()`);
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await waitFor(shown);
+    for (const type of ["mousePressed", "mouseReleased"]) await cdp.send("Input.dispatchMouseEvent", { type, x: 3, y: 3, button: "left", clickCount: 1 });
+    await waitFor(`!document.getElementById('tl-full').open`);
+    expect(await evaluate(`[...document.querySelectorAll('#tl-body li.prompt')].every((li) => li.classList.contains('full') && li.title.length < 20)`), "사용자 입력 줄이 전체 보기가 아니거나 긴 말풍선을 붙임");
+    return `${answer.length}자`;
+  });
+  await check("그림 글자 복사: 칸보다 큰 그림에서 글자 위를 끌면 화면을 옮기지 않고 글자를 고르며, 그 끝의 클릭은 경로를 복사하지 않음", async () => {
+    const pick = `pick-${process.pid}`;
+    await post("/api/hook", { sid: pick, pid: process.pid + 41, fact: { f: "start", cwd: "/tmp/고르기", source: "startup" } });
+    // 확대하면 칸보다 커지도록 상자를 옆으로 길게 잇는다
+    const chain = Array.from({ length: 8 }, (_, i) => ({ id: `g${i}`, kind: "box", label: i ? `다음 상자 ${i}` : "복사할 수 있는 상자 이름", ...(i ? {} : { ref: "src/pick.js:7" }) }));
+    await post("/api/mcp", { env: pick, cwd, tool: "draw", input: { dir: "RIGHT", ops: [...chain, ...chain.slice(1).map((b, i) => ({ id: `ge${i}`, kind: "edge", from: `g${i}`, to: b.id }))] } });
+    await open(pick);
+    await settledPositions();
+    for (let i = 0; i < 4; i++) await evaluate(`document.getElementById('zoom-in').click()`);
+    await waitFor(`document.getElementById('canvas-scroll').classList.contains('pannable')`);
+    const at = await evaluate(`(() => {
+      const l = document.querySelector('[data-id="g0"] .lbl');
+      l.scrollIntoView({ block: 'center', inline: 'center' });
+      const g = document.createRange(); g.selectNodeContents(l); const r = g.getBoundingClientRect(), s = document.getElementById('canvas-scroll');
+      return { x0: r.left + 2, x1: r.right - 2, y: r.top + r.height / 2, left: s.scrollLeft, top: s.scrollTop, cursor: getComputedStyle(l).cursor };
+    })()`);
+    await evaluate(`getSelection().removeAllRanges(); window.__copied = 0; navigator.clipboard.writeText = async () => { window.__copied++; };`);
+    const mouse = (type, x, y) => cdp.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+    await mouse("mousePressed", at.x0, at.y);
+    for (let k = 1; k <= 6; k++) await mouse("mouseMoved", at.x0 + (at.x1 - at.x0) * k / 6, at.y);
+    await mouse("mouseReleased", at.x1, at.y);
+    await sleep(100);
+    const after = await evaluate(`({ sel: getSelection().toString(), left: document.getElementById('canvas-scroll').scrollLeft, top: document.getElementById('canvas-scroll').scrollTop, copied: window.__copied })`);
+    // 골라 둔 글자를 한 번 누르면 그 클릭은 경로를 복사한다(Chrome 은 선택을 클릭 뒤에야 푼다)
+    for (const type of ["mousePressed", "mouseReleased"]) await mouse(type, (at.x0 + at.x1) / 2, at.y);
+    await sleep(100);
+    const again = await evaluate(`window.__copied`);
+    await evaluate(`document.getElementById('zoom-100').click(); getSelection().removeAllRanges()`);
+    expect(at.cursor === "text", `글자 위 커서: ${at.cursor}`);
+    expect(after.sel.includes("상자 이름") && after.left === at.left && after.top === at.top && after.copied === 0, JSON.stringify({ at, after }));
+    expect(again === 1, `골라 둔 글자를 누른 첫 클릭의 경로 복사: ${again}`);
+    return `「${after.sel}」`;
+  });
+  await check("도움말 찾기: 쓰면 낱말이 모두 든 항목만 남기고 칠하며, 「자세히」 의 맞는 줄은 펼치고, 없으면 알리고, 비우거나 닫으면 처음대로", async () => {
+    await evaluate(`document.getElementById('help-open').click()`);
+    await waitFor(`document.getElementById('help').open`);
+    expect(await evaluate(`document.activeElement.id === 'help-q'`), "도움말을 열어도 찾기 칸에 초점이 없음");
+    // 빈 찾기 칸에 초점이 있어도 ? 로 닫히고, 다시 ? 로 열린다
+    const question = async () => {
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "?", code: "Slash", text: "?", modifiers: 8 });
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "?", code: "Slash", modifiers: 8 });
+    };
+    await question();
+    await waitFor(`!document.getElementById('help').open && document.getElementById('help-q').value === ''`);
+    await evaluate(`document.body.focus()`);
+    await question();
+    await waitFor(`document.getElementById('help').open && document.activeElement.id === 'help-q'`);
+    const type = (q) => evaluate(`(() => { const i = document.getElementById('help-q'); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event('input')); })()`);
+    const state = `(() => {
+      const h = document.getElementById('help'), vis = (e) => e.getClientRects().length > 0;
+      const items = [...h.querySelectorAll('dl > dt')].filter(vis).map((dt) => dt.textContent + ' ' + dt.nextElementSibling.textContent)
+        .concat([...h.querySelectorAll('details li')].filter(vis).map((li) => li.closest('details').querySelector('summary').textContent + ' ' + li.textContent));
+      return { items, open: [...h.querySelectorAll('details')].filter((d) => d.open).length, h3: [...h.querySelectorAll('h3')].filter(vis).length, lead: vis(h.querySelector('.lead')),
+        none: vis(document.getElementById('help-none')), marks: CSS.highlights.get('help-hit')?.size || 0 };
+    })()`;
+    const all = await evaluate(state);
+    await type("휴지통 지우");
+    const hit = await evaluate(state);
+    expect(hit.items.length > 0 && hit.items.length < all.items.length && hit.items.every((t) => t.includes("휴지통") && t.includes("지우")), JSON.stringify(hit.items));
+    expect(hit.open > 0 && hit.h3 < all.h3 && !hit.lead && !hit.none && hit.marks >= 2, JSON.stringify({ ...hit, items: hit.items.length }));
+    await type("없는낱말xyz");
+    const none = await evaluate(state);
+    expect(none.items.length === 0 && none.none && none.h3 === 0, JSON.stringify(none));
+    await type("");
+    const back = await evaluate(state);
+    expect(back.items.length === all.items.length && back.open === all.open && back.lead && !back.none && back.marks === 0, JSON.stringify({ ...back, items: back.items.length }));
+    await type("휴지통");
+    await evaluate(`document.getElementById('help-close').click()`);
+    await evaluate(`document.getElementById('help-open').click()`);
+    await waitFor(`document.getElementById('help').open`);
+    const again = await evaluate(state);
+    await evaluate(`document.getElementById('help-close').click()`);
+    expect(again.items.length === all.items.length && await evaluate(`document.getElementById('help-q').value === ''`), "닫았다 열어도 찾기가 남음");
+    return `「휴지통 지우」 ${hit.items.length} / ${all.items.length}개`;
+  });
   await check("프로젝트 지우기: 「프로젝트 없음」 머리는 흐린 색, ⋯ 의 「지우기」 는 대화를 남기고 「끝난 대화까지 지우기」 는 끝난 대화도 휴지통으로", async () => {
     const live = `pj-live-${process.pid}`, done = `pj-done-${process.pid}`;
     for (const [i, id] of [live, done].entries()) {

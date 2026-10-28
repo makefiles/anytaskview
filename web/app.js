@@ -290,11 +290,13 @@ scroller.addEventListener("wheel", (ev) => {
 }, { passive: false });
 scroller.addEventListener("pointerdown", () => { if (view.follow) setFollow(false); });
 // 끌어 옮기기: 그림이 칸보다 크면 왼쪽 단추로 잡고 끌어 상하좌우로 옮긴다. 4px 넘게 움직여야 끌기로 보고,
-// 끌기 뒤의 클릭은 막는다(상자를 누르면 경로를 복사하므로). 단추·입력 칸·말풍선 위에서는 끌지 않는다
+// 끌기 뒤의 클릭은 막는다(상자를 누르면 경로를 복사하므로). 단추·입력 칸·말풍선 위에서는 끌지 않는다.
+// 글자 위에서 끌면 옮기지 않고 글자를 고른다(복사하려고). 옮기려면 빈 곳을 끈다
 const pan = { id: null, x: 0, y: 0, left: 0, top: 0, moved: false };
+const PAN_SKIP = "button, input, textarea, a, .badge, .lbl, .pnote, .fsum, .ref, .body, .num, .row, .elabel, .tbl, .msvg text, .msvg foreignObject";
 const scrollable = () => scroller.scrollWidth > scroller.clientWidth + 1 || scroller.scrollHeight > scroller.clientHeight + 1;
 scroller.addEventListener("pointerdown", (ev) => {
-  if (ev.button !== 0 || ev.ctrlKey || ev.pointerType === "touch" || !scrollable() || ev.target.closest("button, input, textarea, a, .badge")) return; // Ctrl 이면 도형 옮기기
+  if (ev.button !== 0 || ev.ctrlKey || ev.pointerType === "touch" || !scrollable() || ev.target.closest(PAN_SKIP)) return; // Ctrl 이면 도형 옮기기
   Object.assign(pan, { id: ev.pointerId, x: ev.clientX, y: ev.clientY, left: scroller.scrollLeft, top: scroller.scrollTop, moved: false });
 });
 scroller.addEventListener("pointermove", (ev) => {
@@ -1256,12 +1258,14 @@ function tlRow(scene, { mark, e, n }, now) {
   // 한 줄 = 시각 | 종류 표지 | 글 세 칸(.tl-k·.tl-t). 표지 칸 폭이 같아 글 머리가 줄마다 맞고, 넘어간 줄도 글 머리 아래에서 잇는다
   const kind = (cls, label) => li.append(el("span", `tl-k${cls ? " k " + cls : ""}`, label));
   const body = (...parts) => { const t = el("span", "tl-t"); t.append(...parts); li.append(t); return t; };
+  // 긴 글(사용자 입력·작업 알림·화판 글·차례 끝 답)은 3줄로 접고, 누르거나 Enter 로 전체 보기 창을 연다
+  const full = () => { li.classList.add("full"); li.tabIndex = 0; li.title = "누르면 전체를 봅니다"; };
   if (e.type === "msg") {
     const m = own(scene.msgs || {}, e.mid);
     kind(m.state, MSG_STATE_KO[m.state] || m.state);
     body(`화판 → ${agentName(state.sessions.get(state.sid))} (${MSG_KIND_KO[m.kind]}${m.target ? " · " + m.target.id : ""}): ${m.text}`);
     li.classList.add("prompt");
-    li.title = m.text;
+    full();
   } else if (e.type === "note") {
     kind(e.kind || "note", NOTE_KO[e.kind] || "메모");
     body(e.text + (e.on ? ` (${e.on})` : ""));
@@ -1275,7 +1279,8 @@ function tlRow(scene, { mark, e, n }, now) {
     if (r.agent) li.classList.add("sub");
   } else {
     if (e.agent) li.classList.add("sub");
-    if (e.f === "prompt") { li.classList.add(isSysPrompt(e) ? "sys" : "prompt"); li.title = e.text; }
+    if (e.f === "prompt") { li.classList.add(isSysPrompt(e) ? "sys" : "prompt"); full(); }
+    if ((e.f === "stop" || e.f === "agent-stop") && e.last) full();
     // 사용자 입력은 「사용자」 표지를 붙여 화판에서 보낸 글·기계 기록과 가른다
     if (e.f === "prompt" && !isSysPrompt(e)) { kind("user", "사용자"); body(e.text); }
     else { const [label, text] = factParts(e); kind(`fact ${e.f}`, label); body(text); }
@@ -1465,15 +1470,101 @@ $("theme").addEventListener("click", () => {
 });
 // ---- 도움말: 단추와 ? 키로 여닫는다. Esc 는 dialog 가 스스로 닫는다 ----
 const help = $("help");
-const toggleHelp = () => (help.open ? help.close() : help.showModal());
+const toggleHelp = () => {
+  if (help.open) return help.close();
+  if (helpQ.value) { helpQ.value = ""; filterHelp(); } // 열 때마다 찾기를 비운다(닫을 때 비우면 곧바로 다시 연 창에 늦게 닿는다)
+  help.showModal();
+};
 $("help-open").addEventListener("click", toggleHelp);
 $("help-close").addEventListener("click", () => help.close());
 document.addEventListener("keydown", (ev) => {
   if (ev.key !== "?" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
   const t = ev.target;
-  if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return; // 글을 쓰는 중
+  // 글을 쓰는 중. 도움말을 열면 초점이 가는 빈 찾기 칸에서는 ? 로 닫는다
+  if (t instanceof HTMLElement && !(t.id === "help-q" && !t.value) && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
   ev.preventDefault();
   toggleHelp();
+});
+// 도움말 찾기: 쓰는 대로 낱말이 모두 든 항목(이름·설명 한 쌍, 「자세히」 의 한 줄)만 남기고 낱말을 칠한다.
+// 「자세히」 는 맞는 줄이 있으면 펼치고, 찾기를 비우면 찾기 전의 펼침으로 돌린다. 열 때마다 찾기를 비운다
+const helpQ = $("help-q");
+const helpWasOpen = new Map();
+function helpMarks(root, words) {
+  const out = [], walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n; (n = walk.nextNode());) {
+    const t = n.data.toLowerCase();
+    for (const w of words) for (let i = t.indexOf(w); i >= 0; i = t.indexOf(w, i + w.length)) {
+      const r = new Range();
+      r.setStart(n, i);
+      r.setEnd(n, i + w.length);
+      out.push(r);
+    }
+  }
+  return out;
+}
+function filterHelp() {
+  const words = helpQ.value.trim().toLowerCase().split(/\s+/).filter(Boolean), on = words.length > 0;
+  const has = (text) => words.every((w) => text.toLowerCase().includes(w));
+  const ranges = [];
+  const show = (els, text) => {
+    const ok = !on || has(text);
+    for (const e of els) { e.hidden = !ok; if (ok && on) ranges.push(...helpMarks(e, words)); }
+    return ok;
+  };
+  for (const dl of help.querySelectorAll("dl")) {
+    let n = 0;
+    for (const dt of dl.querySelectorAll(":scope > dt")) if (show([dt, dt.nextElementSibling], `${dt.textContent} ${dt.nextElementSibling.textContent}`)) n++;
+    dl.hidden = !n;
+  }
+  for (const d of help.querySelectorAll("details")) {
+    const head = d.querySelector("summary").textContent;
+    let n = 0;
+    for (const li of d.querySelectorAll("li")) if (show([li], `${head} ${li.textContent}`)) n++;
+    d.hidden = !n;
+    if (on && n) ranges.push(...helpMarks(d.querySelector("summary"), words)); // 제목에서 맞은 낱말도 칠한다
+    if (on) { if (!helpWasOpen.has(d)) helpWasOpen.set(d, d.open); d.open = n > 0; }
+    else if (helpWasOpen.has(d)) d.open = helpWasOpen.get(d);
+  }
+  if (!on) helpWasOpen.clear();
+  // 제목(h3)은 그 아래 묶음이 하나라도 보일 때만, 소개 글은 찾는 동안 숨긴다
+  let h3 = null, seen = false, any = false;
+  for (const c of help.children) {
+    if (c.tagName === "H3") { if (h3) h3.hidden = !seen; h3 = c; seen = false; }
+    else if (c.matches("dl, details") && !c.hidden) seen = any = true;
+  }
+  if (h3) h3.hidden = !seen;
+  help.querySelector(".lead").hidden = on;
+  $("help-none").hidden = !on || any;
+  if (window.CSS?.highlights) {
+    if (ranges.length) CSS.highlights.set("help-hit", new Highlight(...ranges));
+    else CSS.highlights.delete("help-hit");
+  }
+}
+helpQ.addEventListener("input", filterHelp);
+
+// ---- 타임라인 전체 보기: 3줄로 접힌 줄(.full)을 누르거나 Enter 로 연다. Esc·「닫기」·바깥 누르기로 닫는다 ----
+const tlFull = $("tl-full");
+function openFull(li) {
+  $("tl-full-title").textContent = `${li.querySelector(".tl-k")?.textContent || ""} · ${li.querySelector(".when")?.textContent || ""}`;
+  $("tl-full-body").textContent = li.querySelector(".tl-t")?.textContent || "";
+  tlFull.showModal();
+  tlFull.scrollTop = 0;
+}
+// 글자를 끌어 고른 끝의 클릭은 열지 않는다. 이미 골라 둔 글자를 누른 클릭은 연다(누를 때 선택이 있었는지로 가른다)
+let tlSelDown = true;
+$("tl-body").addEventListener("pointerdown", () => { tlSelDown = getSelection().isCollapsed; }, true);
+$("tl-body").addEventListener("click", (ev) => {
+  const li = ev.target.closest("li.full");
+  if (li && (getSelection().isCollapsed || !tlSelDown)) openFull(li);
+});
+$("tl-body").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && ev.target.matches("li.full")) { ev.preventDefault(); openFull(ev.target); }
+});
+$("tl-full-close").addEventListener("click", () => tlFull.close());
+tlFull.addEventListener("click", (ev) => {
+  if (ev.target !== tlFull) return; // 창 안의 글·단추
+  const r = tlFull.getBoundingClientRect();
+  if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) tlFull.close();
 });
 
 // ---- 설정: 이어받기 문구, 지난 세션 정리 ----
@@ -2414,7 +2505,7 @@ function applyFocus(afterCanvas) {
   const flashIt = (e) => { e.classList.remove("flash"); void e.offsetWidth; e.classList.add("flash"); };
   if (f.seq != null) {
     const li = $("tl-body").querySelector(f.key ? `li[data-key="${CSS.escape(f.key)}"]` : `li[data-seq="${f.seq}"]`);
-    if (li) { state.focus = null; state.tlJumpT = performance.now(); li.scrollIntoView({ block: "center" }); flashIt(li); li.tabIndex = -1; li.focus({ preventScroll: true }); }
+    if (li) { state.focus = null; state.tlJumpT = performance.now(); li.scrollIntoView({ block: "center" }); flashIt(li); if (!li.hasAttribute("tabindex")) li.tabIndex = -1; li.focus({ preventScroll: true }); } // 전체 보기 줄은 Tab 자리를 지킨다
     else if (afterCanvas) state.focus = null; // 그 줄이 없다(지워진 세션 따위)
   } else if (f.step) {
     const li = $("plan-body").querySelector(`li[data-id="${CSS.escape(f.step)}"]`);

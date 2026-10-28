@@ -134,7 +134,8 @@
   <ol id="b-list" hidden></ol>
 </section>
 <dialog id="help" aria-labelledby="help-title">
-  <div class="phead"><h2 id="help-title">도움말</h2><span class="grow"></span><button type="button" id="help-close" class="mini">닫기</button></div>
+  <div class="phead"><h2 id="help-title">도움말</h2><input id="help-q" type="search" autocomplete="off" spellcheck="false" placeholder="도움말에서 찾기" aria-label="도움말에서 찾기" aria-controls="help-none"><span class="grow"></span><button type="button" id="help-close" class="mini">닫기</button></div>
+  <p id="help-none" class="muted" role="status" hidden>맞는 항목이 없습니다.</p>
   <p class="lead">이 화판은 Claude·Codex 가 일하면서 올린 계획·그림·메모와, 훅이 자동으로 올린 명령·파일 수정·하위 에이전트를 한 화면에 보여 줍니다.</p>
 
   <h3>자주 하는 일</h3>
@@ -147,6 +148,8 @@
     <dt>찾기</dt><dd>맨 위 「찾기」(또는 <kbd>/</kbd> · <kbd>Ctrl</kbd> + <kbd>K</kbd>)에 낱말을 씁니다. 이 화판의 그림·계획, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트, 다른 세션의 기록에서 찾고, 고르면 그 자리로 갑니다.</dd>
     <dt>도형 옮기기</dt><dd><kbd>Ctrl</kbd> 을 누른 채 도형을 끌어 원하는 자리에 놓습니다. 놓은 자리는 다른 브라우저·다시 보기에서도 같고, 에이전트가 그림을 고쳐도 그대로입니다. 그림 위 「자동 배치로」 를 누르면 모두 처음 자리로 돌아갑니다.</dd>
     <dt>그림 화면 옮기기</dt><dd>그림이 칸보다 크면 빈 곳을 마우스로 잡고 끌어 상하좌우로 봅니다. 「맞춤」 을 누르면 그림 전체가 칸에 들어갑니다.</dd>
+    <dt>그림 글자 복사</dt><dd>상자·표·선 이름·Mermaid 의 글자 위에서 끌어 고른 뒤 <kbd>Ctrl</kbd> + <kbd>C</kbd> 로 복사합니다. 글자를 고른 끝에는 경로를 복사하지 않습니다.</dd>
+    <dt>긴 글 전체 보기</dt><dd>타임라인에서 3줄로 접힌 사용자 입력·차례 끝 답·화판 글을 누르면(<kbd>Enter</kbd> 도) 전체가 창으로 열립니다.</dd>
     <dt>묶음 접기</dt><dd>에이전트는 같은 일의 뒤 작업을 그림에 새 묶음으로 이어 그립니다. 끝난 묶음은 상자 하나로 접혀 보이고, 누르면 펼쳐집니다. 묶음 제목 앞 ▸ · ▾ 로도 접고 폅니다.</dd>
   </dl>
 
@@ -166,7 +169,7 @@
   <dl class="keys">
     <dt><kbd>?</kbd></dt><dd>도움말 열기·닫기</dd>
     <dt><kbd>/</kbd> · <kbd>Ctrl</kbd> + <kbd>K</kbd></dt><dd>찾기 열기. 찾기 창에서 <kbd>↑</kbd> <kbd>↓</kbd> 고르기, <kbd>Enter</kbd> 열기</dd>
-    <dt><kbd>Esc</kbd></dt><dd>도움말·찾기 창·보내기 창·이름 입력 닫기</dd>
+    <dt><kbd>Esc</kbd></dt><dd>도움말·찾기 창·보내기 창·전체 보기 창·이름 입력 닫기</dd>
     <dt><kbd>Enter</kbd></dt><dd>보내기 창에서 보내기, 이름 저장</dd>
     <dt><kbd>Shift</kbd> + <kbd>Enter</kbd></dt><dd>보내기 창에서 줄 바꾸기</dd>
     <dt>상자·단계에서 <kbd>Enter</kbd></dt><dd>그 상자·단계에 대해 보내기(<kbd>Tab</kbd> 으로 상자·단계에 갑니다)</dd>
@@ -318,6 +321,10 @@
     </details>
     <div class="crow"><span class="grow"></span><button type="submit" class="primary">저장</button></div>
   </form>
+</dialog>
+<dialog id="tl-full" aria-labelledby="tl-full-title">
+  <div class="phead"><h2 id="tl-full-title"></h2><span class="grow"></span><button type="button" id="tl-full-close" class="mini">닫기</button></div>
+  <div id="tl-full-body"></div>
 </dialog>
 <div id="group-menu" role="menu" aria-label="메시지·프로젝트·지우기" hidden></div>
 <button id="ask" type="button" hidden><svg class="logo" aria-hidden="true"><use href="#logo-claude"/></svg>보내기</button>

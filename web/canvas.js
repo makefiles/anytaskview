@@ -736,10 +736,16 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   });
 
   // 부품이나 항목을 누르면 ref 를 복사한다. Ctrl 을 누른 채면 도형 옮기기라 하지 않는다
+  let selDown = true; // 누를 때 고른 글자가 없었는지
+  root.addEventListener("pointerdown", () => { selDown = getSelection().isCollapsed; }, true);
   root.addEventListener("click", (ev) => {
     if (ev.ctrlKey || swallowClick) return;
     const mail = ev.target.closest(".badge.mail");
     if (mail) { onMail(mail.closest(".part")?.dataset.id); return; } // 보낸 글 수는 복사하지 않고 보내기 창을 연다(접힌 묶음에서도)
+    // 글자를 끌어 고른 끝에 오는 클릭: 그 글자를 복사하려는 것이므로 경로 복사·펼치기를 하지 않는다.
+    // 이미 골라 둔 글자를 누른 클릭은 막지 않는다(Chrome 은 그 선택을 클릭 뒤에야 푼다)
+    const sel = getSelection();
+    if (selDown && !sel.isCollapsed && sel.containsNode(ev.target, true)) return;
     // 묶음의 ▸·▾ 단추, 또는 접힌 묶음 아무 곳: 펼치고 접는다. 다시 그리면 단추가 새로 만들어지므로 초점을 새 단추로 옮긴다
     const shut = ev.target.closest("button.fold, .part.group.folded");
     if (shut && root.contains(shut)) {

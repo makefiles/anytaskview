@@ -53,7 +53,22 @@ test("아주 긴 입력도 가림이 빨리 끝난다(먼저 자르고 가린다
   const t0 = performance.now();
   const f = toFact({ hook_event_name: "UserPromptSubmit", prompt: "token".repeat(18000) });
   assert.ok(performance.now() - t0 < 100, `${(performance.now() - t0).toFixed(0)}ms`);
-  assert.ok(f.text.length <= 300);
+  assert.ok(f.text.length <= 4000);
+  // 하이픈으로 이은 낱말이 길게 이어져도(가림 규칙의 되짚기) 빨리 끝난다
+  for (const p of ["key-".repeat(1500), "monkey-".repeat(700), "pass-".repeat(1000)]) {
+    const t1 = performance.now();
+    toFact({ hook_event_name: "Stop", last_assistant_message: p });
+    assert.ok(performance.now() - t1 < 100, `${p.slice(0, 7)}…: ${(performance.now() - t1).toFixed(0)}ms`);
+  }
+  assert.equal(toFact({ hook_event_name: "Stop", last_assistant_message: "export MY_SECRET_TOKEN=abc123 --api-key=zz" }).last, "export MY_SECRET_TOKEN=*** --api-key=***");
+});
+
+test("사용자 입력·차례 끝 답·하위 에이전트 끝 답은 4,000자까지 보내고 넘으면 … 로 자른다", () => {
+  const long = "가".repeat(5000), mid = "나".repeat(3999);
+  assert.equal(toFact({ hook_event_name: "Stop", last_assistant_message: mid }).last, mid);
+  assert.equal(toFact({ hook_event_name: "Stop", last_assistant_message: long }).last, "가".repeat(3999) + "…");
+  assert.equal(toFact({ hook_event_name: "SubagentStop", agent_id: "a", last_assistant_message: long }).last.length, 4000);
+  assert.equal(toFact({ hook_event_name: "UserPromptSubmit", prompt: long }).text.length, 4000);
 });
 
 test("백그라운드 작업 알림은 sys 입력으로, 요약만 남긴다", () => {

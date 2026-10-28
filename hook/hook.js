@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Claude Code·Codex 훅: stdin 의 사건을 짧은 사실로 줄여 화판에 보낸다.
 // 세션을 막지 않도록 언제나 0 으로 끝나고 800ms 를 넘기지 않는다. 화판이 꺼져 있으면 아무것도 하지 않는다.
-// 도구 출력과 파일 내용은 보내지 않는다. 명령·경로·짧은 앞부분만 보내고, 비밀 모양은 가린다.
+// 도구 출력과 파일 내용은 보내지 않는다. 명령·경로·짧은 앞부분과 사용자 입력·답(4,000자까지)만 보내고, 비밀 모양은 가린다.
+// 답에는 에이전트가 옮겨 적은 파일 내용·명령 출력이 들어갈 수 있다.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,6 +23,7 @@ const POLL_WAIT = 240_000;   // 한 번 묻는 길이. Node fetch 는 응답 머
 const PORT = Number(process.env.ANYTASKVIEW_PORT || 4871);
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const TODO_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TodoWrite"]);
+const TEXT_MAX = 4_000; // 사용자 입력·차례 끝 답: 타임라인에서는 3줄로 접고, 누르면 이만큼 펼쳐 본다
 
 async function readStdin() {
   const chunks = [];
@@ -103,7 +105,7 @@ export function toFact(ev, { codex = false } = {}) {
         const summary = (p.match(/<summary>([\s\S]*?)<\/summary>/) || [])[1] || "";
         return { f: "prompt", sys: true, text: clip(summary || "백그라운드 작업 알림", 300) };
       }
-      return { f: "prompt", text: clip(p, 300), ...title(ev) };
+      return { f: "prompt", text: clip(p, TEXT_MAX), ...title(ev) };
     }
     case "PreToolUse":
       if (tool !== "Bash") return null;
@@ -127,11 +129,11 @@ export function toFact(ev, { codex = false } = {}) {
     case "SubagentStart":
       return { f: "agent-start", agent: String(ev.agent_id || ""), agentType: String(ev.agent_type || "") };
     case "SubagentStop":
-      return { f: "agent-stop", agent: String(ev.agent_id || ""), agentType: String(ev.agent_type || ""), last: clip(ev.last_assistant_message || "", 200) };
+      return { f: "agent-stop", agent: String(ev.agent_id || ""), agentType: String(ev.agent_type || ""), last: clip(ev.last_assistant_message || "", TEXT_MAX) };
     case "Notification":
       return { f: "notify", ntype: ev.notification_type || "", text: clip(ev.message || "", 200) };
     case "Stop":
-      return { f: "stop", last: clip(ev.last_assistant_message || "", 200) };
+      return { f: "stop", last: clip(ev.last_assistant_message || "", TEXT_MAX) };
     case "SessionEnd":
       return { f: "end", reason: ev.reason || "" };
     default:

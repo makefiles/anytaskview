@@ -48,6 +48,7 @@
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg); color: var(--fg); font: 14px/20px "Pretendard Variable", Pretendard, system-ui, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif;
+  word-break: keep-all; overflow-wrap: break-word; /* 한국어를 낱말 중간에서 끊지 않되, 칸보다 긴 낱말은 끊어 넘치지 않게 */
   display: grid; grid-template-rows: auto auto 1fr auto; grid-template-columns: minmax(0, 1fr); overflow: hidden; /* 맨 위 줄의 최소 폭이 화면 폭을 밀어내지 않게 */
 }
 button, input, select {
@@ -192,6 +193,7 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 /* 선 규칙은 선 층(svg.edges)에만 건다. Mermaid 그림과 상자 윤곽의 path 까지 칠하지 않게 */
 /* 그림이 칸보다 크면 잡아 끌 수 있다는 손 모양(상자의 「복사」 커서는 그대로) */
 #canvas-scroll.pannable { cursor: grab; }
+#canvas-scroll.pannable :is(.lbl, .pnote, .fsum, .ref, .body, .num, .row, .elabel, .tbl, .msvg text, .msvg foreignObject) { cursor: text; } /* 글자 위에서 끌면 글자를 고른다 */
 #canvas-scroll.panning, #canvas-scroll.panning * { cursor: grabbing !important; user-select: none; }
 #canvas svg.edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 #canvas svg.edges path { fill: none; stroke: var(--edge); stroke-width: 1.5; }
@@ -321,8 +323,9 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #tl-body .dur { color: var(--muted); font-weight: 400; }
 #tl-body .k.user { color: var(--fg); }
 #tl-body li.prompt { font-weight: 600; }
-/* 긴 사용자 입력·작업 알림·화판 글은 글 칸을 3줄로 접는다(줄 자체는 세 칸 격자) */
-#tl-body li.prompt .tl-t, #tl-body li.sys .tl-t { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+/* 긴 사용자 입력·작업 알림·화판 글·차례 끝 답은 글 칸을 3줄로 접는다(줄 자체는 세 칸 격자). 누르면 전체 보기 창 */
+#tl-body li.full .tl-t { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+#tl-body li.full { cursor: pointer; }
 #tl-body li.sys { color: var(--muted); }
 #tl-body li.new-mark { border: 0; border-top: 2px solid var(--accent); color: var(--accent); font-size: 12px; line-height: 16px; padding: 0; margin: 4px 0; }
 #tl-body .k { font-size: 12px; line-height: 16px; padding: 0 5px; border-radius: 4px; margin-right: 4px; border: 1px solid currentColor; }
@@ -414,8 +417,8 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 #thread-nav { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 
 /* 도움말 */
-#help, #settings { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 10px 16px 14px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
-#help::backdrop, #settings::backdrop { background: rgba(0, 0, 0, .35); }
+#help, #settings, #tl-full { width: min(640px, calc(100vw - 32px)); max-height: 80vh; overflow: auto; padding: 10px 16px 14px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
+#help::backdrop, #settings::backdrop, #tl-full::backdrop { background: rgba(0, 0, 0, .35); }
 #help h3, #settings h3 { font-size: 14px; line-height: 20px; font-weight: 600; margin: 12px 0 4px; }
 #settings input { padding: 4px 8px; width: 100%; }
 #help p, #settings p { margin: 0; }
@@ -427,10 +430,14 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 #settings dd.unit span { color: var(--muted); }
 #settings .crow { display: flex; margin-top: 10px; }
 /* 도움말: 자주 하는 일·표시의 뜻·단축키는 왼쪽 이름, 오른쪽 설명의 두 칸. 자세한 규칙은 접어 둔다 */
-#help, #settings { width: min(720px, calc(100vw - 32px)); padding: 12px 20px 18px; }
+#help, #settings, #tl-full { width: min(720px, calc(100vw - 32px)); padding: 12px 20px 18px; }
 #help .lead, #help li, #help dt, #help dd, #settings .lead, #settings p, #settings li, #settings dt, #settings dd { font-size: 14px; line-height: 22px; }
 #help h3, #settings h3 { margin: 18px 0 6px; }
-#help > .phead, #settings-form > .phead { position: sticky; top: -12px; z-index: 1; margin: -12px 0 6px; padding: 12px 0 6px; background: var(--panel); } /* 내려 읽어도 「닫기」 가 보인다 */
+#help > .phead, #settings-form > .phead, #tl-full > .phead { position: sticky; top: -12px; z-index: 1; margin: -12px 0 6px; padding: 12px 0 6px; background: var(--panel); } /* 내려 읽어도 「닫기」 가 보인다 */
+#help-q { flex: 0 1 260px; min-width: 0; margin-left: 10px; padding: 2px 8px; }
+#help [hidden] { display: none !important; } /* 찾기로 숨긴 항목(dt 의 display: flex 보다 앞선다) */
+::highlight(help-hit) { background-color: var(--flash); }
+#tl-full-body { white-space: pre-wrap; font-size: 14px; line-height: 22px; } /* 답의 줄 바꿈을 그대로 둔다 */
 #help dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; }
 #help dd { margin: 0; }
 #help dl.tasks dt { font-weight: 600; }
