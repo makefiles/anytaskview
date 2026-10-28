@@ -10,9 +10,10 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { TOOLS, INSTRUCTIONS } from "./tools.js";
-import { stateHome, readKeys, ensureDir, portOwner, PROTOCOL } from "../lib/store.js";
+import { stateHome, readKeys, ensureDir, portOwner, orphaned, codeVersion, versionCmp, PROTOCOL } from "../lib/store.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const VERSION = codeVersion(ROOT);
 const PORT = Number(process.env.ANYTASKVIEW_PORT || 4871);
 const HOME = stateHome();
 const PID = process.ppid;
@@ -32,6 +33,7 @@ const LOG_MAX = 1024 * 1024;
 
 let keys = readKeys(HOME);
 let stale = ""; // 화판 서버가 다른 약속 판이면 도구 결과 뒤에 붙일 알림
+let ready = Promise.resolve(); // 처음 인사(hello)가 끝나면 풀린다
 
 // ---- 화판 서버 띄우기 ----
 async function boardUp() {
@@ -45,13 +47,25 @@ async function boardUp() {
   }
 }
 
+// 화판 서버를 띄울 코드 폴더: root 가 갱신으로 밀려난 판 폴더(다시 읽지 않은 세션)면 옆의 새 판 폴더.
+// 옛 판 서버를 띄우면 새 판 세션이 곧바로 다시 갈아 끼우게 되므로
+function liveRoot(root) {
+  if (!orphaned(root)) return root;
+  const up = path.dirname(root);
+  try {
+    const live = fs.readdirSync(up).map((n) => path.join(up, n)).find((d) => !orphaned(d) && fs.existsSync(path.join(d, "scripts", "board.js")));
+    if (live) return live;
+  } catch { /* 폴더를 못 읽으면 이 판으로 */ }
+  return root;
+}
+
 let lastSpawn = 0, starting = null;
 // 띄우는 중이면 그 결과를 같이 기다린다(hello 가 띄우는 사이에 온 첫 도구 호출이 「꺼짐」으로 끝나지 않게)
-function ensureBoard() {
-  if (!starting) starting = startBoardIfDown().finally(() => { starting = null; });
+function ensureBoard(root = liveRoot(ROOT)) {
+  if (!starting) starting = startBoardIfDown(root).finally(() => { starting = null; });
   return starting;
 }
-async function startBoardIfDown() {
+async function startBoardIfDown(root) {
   if (await boardUp()) return true;
   if (!AUTOSTART || Date.now() - lastSpawn < 30_000) return false;
   lastSpawn = Date.now();
@@ -62,7 +76,7 @@ async function startBoardIfDown() {
     const fd = fs.openSync(logFile, "a", 0o600);
     // 화판 서버는 여러 세션이 함께 쓰므로 이 세션의 CLAUDE_* 값을 물려주지 않는다
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("CLAUDE")));
-    const child = spawn(process.execPath, [path.join(ROOT, "scripts", "board.js"), "--port", String(PORT)], { detached: true, stdio: ["ignore", fd, fd], env });
+    const child = spawn(process.execPath, [path.join(root, "scripts", "board.js"), "--port", String(PORT)], { detached: true, stdio: ["ignore", fd, fd], env });
     child.unref();
     fs.closeSync(fd);
   } catch {
@@ -70,7 +84,7 @@ async function startBoardIfDown() {
   }
   for (let i = 0; i < 30; i++) {
     await new Promise((ok) => setTimeout(ok, 100));
-    if (await boardUp()) return true;
+    if (await boardUp()) { stale = ""; return true; } // 이 판(또는 새 판 폴더)에서 띄웠으니 옛 판 알림은 지운다
   }
   return false;
 }
@@ -80,7 +94,8 @@ async function post(tool, input, timeoutMs = 3000, sid = null) {
   // 다른 사용자의 프로그램에 열쇠를 보내지 않는다. 듣는 소켓이 없으면 먼저 띄워 본다
   const owner = portOwner(PORT);
   if (owner === "other") return { ok: false, text: FOREIGN };
-  if (owner === "none" && tool === "bye") return { ok: true, text: "" }; // 알릴 서버가 없다(그 포트를 누가 잡았는지 모르는 채 열쇠를 보내지 않는다)
+  // 알릴(내릴) 서버가 없다. 그 포트를 누가 잡았는지 모르는 채 열쇠를 보내지 않고, 내리려고 띄우지도 않는다
+  if (owner === "none" && (tool === "bye" || tool === "stop")) return { ok: true, text: "" };
   if (owner === "none") {
     if (!(await ensureBoard())) return { ok: false, text: portOwner(PORT) === "other" ? FOREIGN : OFF };
     keys = readKeys(HOME);
@@ -96,7 +111,7 @@ async function post(tool, input, timeoutMs = 3000, sid = null) {
       });
     } catch (e) {
       // 연결이 거절됐을 때만(서버가 없을 때만) 띄워 보고 다시 보낸다. 시간 초과는 서버가 이미 기록했을 수 있어 다시 보내지 않는다
-      if (attempt === 0 && tool !== "bye" && e?.cause?.code === "ECONNREFUSED" && (await ensureBoard())) { keys = readKeys(HOME); continue; }
+      if (attempt === 0 && tool !== "bye" && tool !== "stop" && e?.cause?.code === "ECONNREFUSED" && (await ensureBoard())) { keys = readKeys(HOME); continue; }
       return { ok: false, text: OFF };
     }
     // 열쇠가 바뀌었으면(서버 상태 폴더를 새로 만든 경우) 한 번 다시 읽고 다시 보낸다
@@ -118,9 +133,41 @@ async function hello() {
     return;
   }
   try {
-    const { proto } = JSON.parse(r.text);
-    if (proto !== PROTOCOL) stale = `\n(화판 서버가 다른 판입니다: 서버 ${proto}, 플러그인 ${PROTOCOL}. 사용자께 「scripts/atv board --stop」 으로 화판 서버를 내려 달라고 알리세요.)`;
+    const info = JSON.parse(r.text);
+    const root = swapRoot(info);
+    if (root && (await replaceBoard(info.code, root))) return;
+    if (info.proto !== PROTOCOL) stale = `\n(화판 서버가 다른 판입니다: 서버 ${info.proto}, 플러그인 ${PROTOCOL}. 사용자께 「scripts/atv board --stop」 으로 화판 서버를 내려 달라고 알리세요.)`;
+    else if (root) stale = "\n(화판 서버가 갱신 전 판입니다. 사용자께 「scripts/atv board --stop」 으로 화판 서버를 내려 달라고 알리세요. 다음 호출 때 새 판이 뜹니다.)";
   } catch { /* 옛 서버는 hello 를 모른다 */ }
+}
+// 서버를 갈아 끼울지와, 그렇다면 어느 코드 폴더에서 다시 띄울지. 갈아 끼우지 않으면 null.
+// - 이 MCP 가 갱신으로 밀려난 판(다시 읽지 않은 세션)이면 건드리지 않는다
+// - 서버 판 번호(package.json)가 이 판보다 낮거나 판 정보를 모르면(28 전 판) 이 판 폴더로
+// - 판 번호가 같고 서버가 밀려났으면, 같은 설치(같은 폴더나 그 옆 판 폴더)일 때만 그 설치의 새 코드로.
+//   다른 설치(Claude·Codex 를 함께 씀)는 판 번호가 같으면 어느 쪽이 새것인지 몰라 건드리지 않는다
+function swapRoot(info) {
+  if (orphaned(ROOT)) return null;
+  if (!Object.hasOwn(info, "version")) return liveRoot(ROOT);
+  const cmp = versionCmp(info.version, VERSION);
+  if (cmp < 0) return liveRoot(ROOT);
+  if (cmp > 0 || !info.superseded) return null;
+  const same = typeof info.root === "string" && (info.root === ROOT || path.dirname(info.root) === path.dirname(ROOT));
+  return same ? liveRoot(info.root) : null;
+}
+// 떠 있는 서버를 내리고 새로 띄워 다시 인사한다. 내릴 서버의 표지(code)를 실어, 다른 세션이 먼저 갈아 끼운 새 서버는 내리지 않는다(409).
+// 내려가는 서버는 보내던 Codex 글을 마무리하느라 포트를 20초 남짓 쥘 수 있어 그만큼 기다리고, 새로 붙은 서버가 새 판인지 확인한다
+async function replaceBoard(code, root) {
+  const r = await post("stop", { code });
+  if (!r.ok && !r.text.startsWith("화판 오류 409")) return false;
+  if (r.ok) for (let i = 0; i < 250 && (await boardUp()); i++) await new Promise((ok) => setTimeout(ok, 100));
+  lastSpawn = 0;
+  if (!(await ensureBoard(root))) return false;
+  keys = readKeys(HOME);
+  const h = await post("hello", null);
+  try {
+    const info = h.ok ? JSON.parse(h.text) : null;
+    return !!info && info.superseded === false && versionCmp(info.version, VERSION) >= 0;
+  } catch { return false; }
 }
 
 // ---- stdio JSON-RPC ----
@@ -134,7 +181,7 @@ async function onRequest(m) {
   switch (m.method) {
     case "initialize":
       codexClient = m.params?.clientInfo?.name === "codex-mcp-client";
-      hello().catch(() => {});
+      ready = hello().catch(() => {});
       // 클라이언트가 고른 약속 판을 그대로 쓴다(이 서버는 도구만 쓴다)
       return reply(m.id, {
         protocolVersion: String(m.params?.protocolVersion || "2025-06-18"),
@@ -152,6 +199,7 @@ async function onRequest(m) {
       // Codex: _meta["x-codex-turn-metadata"].session_id(호출한 세션). 동시에 오는 호출이 섞이지 않게 호출마다 넘긴다
       const meta = m.params?._meta?.["x-codex-turn-metadata"];
       const sid = typeof meta?.session_id === "string" ? meta.session_id : null;
+      await ready; // 옛 판 서버를 갈아 끼우는 중이면 끝난 뒤 새 서버로 보낸다
       const r = await post(name, args, 3000, sid);
       return reply(m.id, { content: [{ type: "text", text: r.text + stale }] });
     }

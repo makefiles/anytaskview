@@ -453,14 +453,18 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 kbd { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; line-height: 16px; padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); }
 
 /* 세션 줄과 묶음: 줄을 끌어 묶음(머리나 그 아래 어디든)에 놓는다. ⋯ 는 줄에 마우스를 올리거나 초점이 있을 때 보인다 */
-.srow { display: flex; align-items: center; gap: 2px; margin: 0 0 4px; }
-.srow > .sess { flex: 1; min-width: 0; margin: 0; }
-.srow > .smenu { flex: none; opacity: 0; } /* 숨겨도 Tab 으로 갈 수 있게 visibility 가 아니라 opacity 로 감춘다 */
+/* ⋯ 는 줄 안 오른쪽 위에 겹쳐 둔다(줄이 목록 폭을 다 채워 머리줄과 오른쪽 끝이 맞게). 글은 그 자리를 비운다 */
+.srow { position: relative; margin: 0 0 4px; }
+.srow > .sess { margin: 0; padding-right: 30px; }
+.srow > .smenu { position: absolute; top: 5px; right: 4px; opacity: 0; } /* 숨겨도 Tab 으로 갈 수 있게 visibility 가 아니라 opacity 로 감춘다 */
 .srow:hover > .smenu, .srow:focus-within > .smenu, .smenu[aria-expanded="true"] { opacity: 1; }
 .sess[draggable="true"] { cursor: grab; }
 .gsec { border-radius: 6px; padding: 0 2px; }
 body.dragging .gsec { outline: 1px dashed var(--line); outline-offset: 1px; }
 body.dragging .gsec.drop { outline: 2px solid var(--accent); background: var(--panel-2); }
+/* 프로젝트 순서 끌기: 놓을 자리(그 프로젝트의 위·아래)에 선을 긋는다 */
+body.pdragging .gsec.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+body.pdragging .gsec.drop-after { box-shadow: 0 2px 0 var(--accent); }
 .gempty { font-size: 12px; line-height: 16px; color: var(--muted); padding: 2px 8px 6px; }
 #group-menu { position: fixed; z-index: 20; min-width: 180px; max-width: 280px; max-height: 60vh; overflow: auto; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
 #group-menu .gm-title { font-size: 12px; line-height: 16px; color: var(--muted); padding: 2px 8px 4px; }

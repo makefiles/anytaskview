@@ -95,13 +95,21 @@ curl -s --retry 10 --retry-connrefused --retry-delay 1 -o /dev/null -w '%{http_c
 ## 갱신
 
 ```sh
-OLD="$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)"
 claude plugin marketplace update anytaskview
 claude plugin update anytaskview@anytaskview
-"$OLD/scripts/atv" board --stop
 ```
 
-떠 있던 서버는 옛 판의 화면을 내주므로 내립니다. 그다음 세션이 새 판 서버를 띄웁니다(바로 띄우려면 3단계). 열린 세션에서는 `/reload-plugins`, 브라우저의 화판 탭은 모두 새로 고칩니다.
+열린 세션에서는 `/reload-plugins` 를 실행합니다(새 세션은 그대로 됩니다). 새 판 세션이 화판에 처음 붙을 때 떠 있던 옛 판 서버를 내리고 새 판으로 다시 띄우며, 열린 화판 탭도 새 판으로 다시 읽습니다. 이 기능이 들어가기 전 판에서 처음 갱신할 때만 열린 화판 탭을 모두 한 번씩 직접 새로 고칩니다.
+
+Claude Code 와 Codex 를 함께 쓰면: 판 번호(`package.json` 의 version)가 낮은 쪽이 띄운 서버는 높은 쪽 세션이 갈아 끼웁니다. 판 번호가 같으면 서버를 띄운 쪽 설치가 갱신되어야 바뀌므로, 두 쪽을 함께 갱신합니다.
+
+자동 갱신: 이 마켓플레이스는 Claude Code 의 자동 갱신이 꺼져 있습니다(공식이 아닌 마켓플레이스의 기본값이고, 만든 쪽에서 켤 수 없습니다). `/plugin` → Marketplaces → anytaskview → Enable auto-update 로 켜면 세션을 시작한 뒤 새 판을 받아 오고 「Run /reload-plugins to apply」 를 띄웁니다. 그 뒤는 위와 같습니다.
+
+서버가 바뀌지 않으면(도구 결과에 「화판 서버가 다른 판」 · 「갱신 전 판」 알림이 붙거나 화판 화면이 그대로면) 손으로 내립니다. 다음 도구 호출 때 새 판 서버가 뜹니다.
+
+```sh
+"$(for d in ~/.claude/plugins/cache/anytaskview/anytaskview/*/; do [ -e "${d}.orphaned_at" ] || echo "$d"; done | tail -n 1)scripts/atv" board --stop
+```
 
 ## 삭제
 
@@ -201,10 +209,9 @@ Codex 는 플러그인의 훅을 사용자가 검토하고 믿기 전에는 돌�
 
 ```sh
 codex plugin marketplace upgrade anytaskview
-"$HOME/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv" board --stop
 ```
 
-`upgrade` 하나로 설치된 사본까지 바뀝니다(0.163·0.164 확인). 떠 있던 서버는 옛 판의 화면을 내주므로 내립니다. 다음 세션이 새 판 서버를 띄웁니다(바로 띄우려면 C3). 새 세션을 열고, 훅 정의가 바뀌었으면 `/hooks` 에서 다시 믿습니다. Claude Code 플러그인도 쓰면 위 「갱신」 으로 같은 판에 맞춥니다.
+`upgrade` 하나로 설치된 사본까지 바뀝니다(0.163·0.164 확인). 새 세션을 열면 그 세션이 떠 있던 옛 판 서버를 내리고 새 판으로 다시 띄웁니다(이 기능이 들어가기 전 판에서 처음 갱신할 때만 열린 화판 탭을 모두 한 번씩 새로 고칩니다). 훅 정의가 바뀌었으면 `/hooks` 에서 다시 믿습니다. Claude Code 플러그인도 쓰면 위 「갱신」 으로 같은 판에 맞춥니다. 서버가 바뀌지 않으면 `"$HOME/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv" board --stop` 으로 내립니다.
 
 ```sh
 "$HOME/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv" board --stop

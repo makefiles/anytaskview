@@ -116,7 +116,12 @@ test("hello: 짝짓기 표에 없는 claude 만 넣고 약속 판을 돌려준�
   t.after(() => f.close());
   const { PROTOCOL } = await import("../lib/store.js");
   const r = await f.mcp("hello", null, { pid: process.pid, env: "H1" });
-  assert.deepEqual(JSON.parse(r.text), { proto: PROTOCOL });
+  const hi = JSON.parse(r.text);
+  assert.equal(hi.proto, PROTOCOL);
+  assert.equal(hi.superseded, false);
+  assert.match(hi.version, /^\d+\.\d+\.\d+$/);
+  assert.match(hi.code, /^[0-9a-f]{12}$/);
+  assert.equal(typeof hi.root, "string");
   assert.equal(f.board.pids.get(process.pid).sid, "H1");
   const h1 = (await f.read("/api/sessions/H1/snapshot")).json.scene;
   assert.equal(h1.meta.pid, process.pid);
@@ -609,7 +614,7 @@ test("SSE 화면과 기다리는 훅이 있어도 서버를 닫을 때 오류가
   const errors = [];
   process.on("uncaughtException", (e) => errors.push(e));
   await f.close();
-  assert.equal((await waiting).status, 204);
+  assert.equal((await waiting).status, 503); // 내려가는 서버: 훅은 잠깐 뒤 다시 묻는다
   await new Promise((ok) => setTimeout(ok, 50));
   assert.deepEqual(errors.map((e) => e.code), []);
 });
@@ -1379,4 +1384,56 @@ test("프로젝트 지우기: 큰 그림 기록을 휴지통으로 옮기지 못
   out = JSON.parse((await board(f, { op: "proj-drop", pid: A })).text);
   assert.equal(out.ok, true, out.msg);
   assert.ok(!f.board.projects.projects[A] && fs.readdirSync(trash).some((n) => n.startsWith(`${A}.`)));
+});
+
+test("프로젝트 순서: proj-order 로 받은 순서대로 pos 를 남기고(다시 띄워도), 겹치거나 없는 pid 는 거부", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const mk = async (name) => JSON.parse((await board(f, { op: "proj-new", name })).text).pid;
+  const [a, b, c] = [await mk("가"), await mk("나"), await mk("다")];
+  assert.equal(JSON.parse((await board(f, { op: "proj-order", pids: [c, a, b] })).text).ok, true);
+  const pos = () => [c, a, b].map((p) => f.board.projects.projects[p].pos);
+  assert.deepEqual(pos(), [0, 1, 2]);
+  assert.equal(JSON.parse((await board(f, { op: "proj-order", pids: [a, a] })).text).ok, false);
+  assert.equal(JSON.parse((await board(f, { op: "proj-order", pids: [a, "g00000000"] })).text).ok, false);
+  assert.equal(JSON.parse((await board(f, { op: "proj-order", pids: [] })).text).ok, false);
+  await f.restart();
+  assert.deepEqual(pos(), [0, 1, 2]);
+  // 끝으로 보내면(또는 다시 진행으로 두면) 반대쪽 순서 번호를 들고 가지 않는다
+  await board(f, { op: "proj-done", pid: a, done: true });
+  assert.equal(f.board.projects.projects[a].pos, undefined);
+});
+
+test("stop: 실린 표지가 이 서버와 다르면(다른 세션이 먼저 갈아 끼움) 409 로 거절하고 내려가지 않는다", async (t) => {
+  const { startBoard } = await import("../lib/server.js");
+  const os = await import("node:os");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atv-stop-"));
+  let stops = 0;
+  const b = await startBoard({ port: 0, home: path.join(dir, "home"), onStop: () => { stops++; } });
+  t.after(async () => { await b.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const key = JSON.parse(fs.readFileSync(path.join(dir, "home", "key.json"), "utf8")).write;
+  const call = (input) => fetch(`http://127.0.0.1:${b.port}/api/mcp`, { method: "POST", headers: { "content-type": "application/json", "x-atv-key": key, host: `127.0.0.1:${b.port}` }, body: JSON.stringify({ tool: "stop", input }) });
+  const { code } = await (await fetch(`http://127.0.0.1:${b.port}/api/mcp`, { method: "POST", headers: { "content-type": "application/json", "x-atv-key": key }, body: JSON.stringify({ tool: "hello", env: "S1" }) })).json();
+  assert.equal((await call({ code: "000000000000" })).status, 409);
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(stops, 0);
+  assert.equal((await call({ code })).status, 200);
+  await new Promise((ok) => setTimeout(ok, 50));
+  assert.equal(stops, 1);
+});
+
+test("코드 표지: 코드 파일이 바뀌면 달라지고, 판 폴더의 .orphaned_at 은 밀려난 판으로 본다", async (t) => {
+  const { codeSignature, orphaned } = await import("../lib/store.js");
+  const os = await import("node:os");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "atv-code-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "lib"));
+  fs.writeFileSync(path.join(root, "lib", "a.js"), "1");
+  const first = codeSignature(root);
+  assert.equal(codeSignature(root), first);
+  fs.writeFileSync(path.join(root, "lib", "a.js"), "22");
+  assert.notEqual(codeSignature(root), first);
+  assert.equal(orphaned(root), false);
+  fs.writeFileSync(path.join(root, ".orphaned_at"), "1");
+  assert.equal(orphaned(root), true);
 });

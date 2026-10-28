@@ -429,7 +429,12 @@ function connect(sid) {
     state.projects = JSON.parse(ev.data);
     queueRender();
   });
-  es.addEventListener("config", (ev) => { state.config = JSON.parse(ev.data); });
+  es.addEventListener("config", (ev) => {
+    state.config = JSON.parse(ev.data);
+    // 다시 붙은 서버가 다른 코드(새 판으로 갈아 끼운 서버)면 이 페이지도 새 판으로 다시 읽는다. 쓰던 글은 초안으로 남아 있다
+    if (state.code && state.config.code && state.config.code !== state.code) location.reload();
+    state.code ||= state.config.code;
+  });
   // 다른 탭이나 이 탭에서 지운 대화·푼 프로젝트. 보던 것이 지워졌으면 다른 대화로 옮겨 간다
   es.addEventListener("drop", (ev) => {
     const ids = JSON.parse(ev.data);
@@ -701,9 +706,42 @@ function sessRow(thread, now) {
 function endDrag() {
   if (!state.dragging) return;
   state.dragging = null;
-  document.body.classList.remove("dragging");
-  for (const x of document.querySelectorAll(".gsec.drop")) x.classList.remove("drop");
+  document.body.classList.remove("dragging", "pdragging");
+  for (const x of document.querySelectorAll(".gsec.drop, .gsec.drop-before, .gsec.drop-after")) x.classList.remove("drop", "drop-before", "drop-after");
   queueRender();
+}
+// 프로젝트 순서: 화면에 보이는 같은 쪽(진행 중·끝남) 프로젝트 순서에서 pid 를 target 앞(뒤)으로 옮겨 서버에 남긴다
+const PROJ_DRAG = "text/x-atv-pid";
+function moveProject(pid, target, after) {
+  const projs = state.projects.projects, done = (p) => !!projs[p]?.done;
+  const list = [...$("sess-body").querySelectorAll(".gsec[data-pid]")].map((s) => s.dataset.pid).filter((p) => p !== pid && done(p) === done(pid));
+  const at = list.indexOf(target);
+  if (at < 0 || pid === target) return;
+  list.splice(after ? at + 1 : at, 0, pid);
+  boardOp({ op: "proj-order", pids: list });
+}
+function projDropZone(sec, pid) {
+  const side = (ev) => ev.clientY > sec.getBoundingClientRect().top + sec.querySelector(".ghead").offsetHeight / 2;
+  const projs = () => state.projects.projects;
+  sec.addEventListener("dragover", (ev) => {
+    // 같은 쪽(진행 중·끝남) 프로젝트 사이에서만 옮긴다. 다른 쪽이면 놓기를 받지 않아 금지 표시가 된다
+    if (!ev.dataTransfer.types.includes(PROJ_DRAG) || state.dragging === pid || !!projs()[state.dragging]?.done !== !!projs()[pid]?.done) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = "move";
+    const after = side(ev);
+    sec.classList.toggle("drop-after", after);
+    sec.classList.toggle("drop-before", !after);
+  });
+  sec.addEventListener("dragleave", (ev) => { if (!sec.contains(ev.relatedTarget)) sec.classList.remove("drop-before", "drop-after"); });
+  sec.addEventListener("drop", (ev) => {
+    const from = ev.dataTransfer.getData(PROJ_DRAG);
+    if (!from) return; // 세션 줄 놓기는 dropZone 이 받는다
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    const after = side(ev);
+    endDrag();
+    moveProject(from, pid, after);
+  });
 }
 // 프로젝트 하나(머리 + 줄들)가 끌어 놓을 자리다. pid "" 은 「프로젝트 없음」(놓으면 프로젝트에서 뺀다)
 function dropZone(sec, pid) {
@@ -748,11 +786,20 @@ function projHead(p, count) {
   name.addEventListener("click", () => { if (state.sid !== p) connect(p); });
   head.append(name);
   if (canWrite()) {
+    // 이름을 끌어 다른 프로젝트의 위·아래에 놓으면 순서를 바꾼다
+    name.draggable = true;
+    name.addEventListener("dragstart", (ev) => {
+      state.dragging = p;
+      ev.dataTransfer.setData(PROJ_DRAG, p);
+      ev.dataTransfer.effectAllowed = "move";
+      document.body.classList.add("pdragging");
+    });
+    name.addEventListener("dragend", endDrag);
     const menu = el("button", "mini pmenu", "⋯");
     menu.type = "button";
     menu.dataset.pid = p;
     menu.setAttribute("aria-haspopup", "menu");
-    menu.setAttribute("aria-label", `${pr.name}: 이름·끝·지우기`);
+    menu.setAttribute("aria-label", `${pr.name}: 이름·순서·끝·지우기`);
     menu.addEventListener("click", () => openProjectMenu(p, menu));
     head.append(menu);
   }
@@ -761,6 +808,7 @@ function projHead(p, count) {
 // total: 끝난 세션 숨기기 전의 줄 수. 머리의 수와 「끌어 놓으세요」 안내는 숨긴 줄까지 센다
 function projSection(p, members, now, total = members.length) {
   const sec = el("div", "gsec");
+  if (p) { sec.dataset.pid = p; projDropZone(sec, p); }
   sec.append(projHead(p, total));
   if (!gfold.has(p)) {
     sec.append(...sectionRows(p, members, now));
@@ -830,7 +878,12 @@ function renderSessions(now) {
     const sort = sessSort();
     const cmp = sort === "name" ? (a, b) => projs[a].name.localeCompare(projs[b].name, "ko")
       : sort === "start" ? (a, b) => (projs[b].t || 0) - (projs[a].t || 0) : (a, b) => recent(b) - recent(a);
-    const order = (done) => pids.filter((p) => !!projs[p].done === done).sort(cmp);
+    // 끌어 옮긴 프로젝트(pos)는 그 순서를 지키고, 아직 옮긴 적 없는 프로젝트(새로 만든 것)는 그 위에 정렬 기준대로 둔다
+    const placed = (p) => typeof projs[p].pos === "number";
+    const order = (done) => {
+      const list = pids.filter((p) => !!projs[p].done === done);
+      return [...list.filter((p) => !placed(p)).sort(cmp), ...list.filter(placed).sort((a, b) => projs[a].pos - projs[b].pos)];
+    };
     for (const p of [...order(false), ""]) out.push(projSection(p, by.get(p), now, totals.get(p) || 0));
     const done = order(true);
     if (done.length) {
@@ -1708,6 +1761,16 @@ function openProjectMenu(pid, anchor) {
     return b;
   };
   const rename = item("이름 바꾸기…", () => inlineEdit(rename, pr.name, (name) => { closeGroupMenu(); boardOp({ op: "proj-rename", pid, name }); }));
+  // 순서 옮기기(끌기의 키보드 길): 화면에 보이는 같은 쪽 이웃 프로젝트의 앞·뒤로
+  const near = [...$("sess-body").querySelectorAll(".gsec[data-pid]")].map((s) => s.dataset.pid).filter((p) => !!state.projects.projects[p]?.done === !!pr.done);
+  const at = near.indexOf(pid);
+  // 갈 곳이 없으면 aria-disabled 로 끈다(disabled 는 초점을 받지 못해 방향키 이동이 그 자리에서 막힌다)
+  const shift = (label, to, after) => {
+    if (!to) { const b = item(label, () => {}); b.setAttribute("aria-disabled", "true"); return b; }
+    return item(label, () => { closeGroupMenu(); moveProject(pid, to, after); });
+  };
+  const up = shift("위로 옮기기", at > 0 && near[at - 1], false);
+  const down = shift("아래로 옮기기", at >= 0 && near[at + 1], true);
   const done = item(pr.done ? "다시 진행으로 두기" : "끝으로 표시", () => { closeGroupMenu(); boardOp({ op: "proj-done", pid, done: !pr.done }); });
   const drop = item("지우기", () => {
     if (!drop.classList.contains("armed")) { drop.classList.add("armed"); drop.textContent = "한 번 더 누르면 지웁니다(대화는 남습니다)"; return; }
@@ -1725,7 +1788,7 @@ function openProjectMenu(pid, anchor) {
     if (out.ok) toast(out.msg);
   }, "gm-del");
   purge.title = "프로젝트와 그 안의 끝난 대화를 지웁니다. 진행 중인 대화는 「프로젝트 없음」 으로 가고, 지운 기록은 상태 폴더의 trash 에 30일 동안 남습니다";
-  showMenu(anchor, () => $("sess-body").querySelector(`.pmenu[data-pid="${CSS.escape(pid)}"]`), [el("div", "gm-title", pr.name), rename, done, el("hr", "gm-sep"), drop, purge]);
+  showMenu(anchor, () => $("sess-body").querySelector(`.pmenu[data-pid="${CSS.escape(pid)}"]`), [el("div", "gm-title", pr.name), rename, up, down, done, el("hr", "gm-sep"), drop, purge]);
   rename.focus();
 }
 // 지난 세션 머리의 ⋯: 그 묶음의 지난 세션(이어진 대화 포함, 끝난 것만)을 모두 휴지통으로. 두 번 눌러야 지운다

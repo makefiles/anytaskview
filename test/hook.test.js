@@ -129,6 +129,23 @@ test("세션 이름: SessionStart·UserPromptSubmit 의 session_title 을 싣는
   assert.equal(toFact({ hook_event_name: "UserPromptSubmit", prompt: "x" }).title, undefined);
 });
 
+test("Stop --rewake: 화판 서버가 내려갔다 다시 떠도(새 판으로 갈아 끼우기) 기다림을 이어 가 메시지를 받는다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const env = { ANYTASKVIEW_HOME: f.home, ANYTASKVIEW_PORT: String(f.port), CLAUDE_CODE_SESSION_ATTENDED: "1" };
+  await f.hook("RW3", { f: "start", cwd: "/w" }, { pid: process.pid }); // 살아 있는 프로세스: 다시 뜬 서버가 끝난 세션으로 정리하지 않게
+  const run = runHook({ hook_event_name: "Stop", session_id: "RW3", last_assistant_message: "끝" }, env, ["--rewake"]);
+  const waiting = async () => { for (let i = 0; i < 400 && !f.board.waiters.has("RW3"); i++) await new Promise((ok) => setTimeout(ok, 25)); return f.board.waiters.has("RW3"); };
+  assert.ok(await waiting(), "Stop 훅이 메시지를 기다린다");
+  await f.restart({ samePort: true });
+  assert.ok(await waiting(), "다시 뜬 서버에 다시 묻는다");
+  const sent = await f.request("POST", "/api/board", { headers: boardHeaders(f), body: { op: "send", sid: "RW3", kind: "instruction", text: "다시 뜬 뒤의 지시" } });
+  assert.equal(sent.status, 200, sent.text);
+  const out = await run;
+  assert.equal(out.code, 2);
+  assert.match(out.err, /다시 뜬 뒤의 지시/);
+});
+
 test("Stop --rewake: 기다리던 화판 메시지를 받으면 stderr 로 내고 2 로 끝난다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());

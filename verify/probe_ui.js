@@ -1642,6 +1642,46 @@ async function main() {
     expect(board.sessions.has(live) && !board.sessions.has(done) && !board.projects.projects[made.pid], "지운 결과가 다름");
     expect(!board.projects.members[live] || board.projects.members[live].pid !== made.pid, "진행 중인 대화가 지운 프로젝트에 남음");
   });
+  await check("판 갈아 끼우기: 다시 붙은 화판 서버의 코드 표지가 다르면 페이지를 새로 읽고, 같으면 그대로", async () => {
+    await open(sid);
+    const code = await evaluate(`window.__atv.code`);
+    expect(typeof code === "string" && code.length === 12, `코드 표지: ${code}`);
+    // 다시 붙은 서버가 보낸 config 처럼 사건을 흉내 낸다. 새로 읽으면 표시(__mark)가 사라진다
+    const fire = (c) => evaluate(`(() => { window.__mark = 1; window.__atv.es.dispatchEvent(new MessageEvent('config', { data: JSON.stringify({ ...window.__atv.config, code: ${JSON.stringify(c)} }) })); return 1; })()`);
+    await fire(code);
+    await sleep(300);
+    expect(await evaluate(`window.__mark === 1`), "같은 표지인데 새로 읽음");
+    await fire("다른판000000");
+    await waitFor(`window.__mark === undefined && window.__atv?.code === ${JSON.stringify(code)}`, 10000);
+  });
+  await check("프로젝트 순서: 이름을 끌어 다른 프로젝트 아래에 놓으면 순서가 바뀌어 서버에 남고, ⋯ 의 「위로 옮기기」 로 되돌아감", async () => {
+    const op = async (body) => (await fetch(`http://127.0.0.1:${board.port}/api/board`, { method: "POST", headers: { "content-type": "application/json", origin: `http://127.0.0.1:${board.port}`, Host: `127.0.0.1:${board.port}`, cookie: `atv_r=${keys.read}`, "x-atv-board": keys.board }, body: JSON.stringify(body) })).json();
+    const a = (await op({ op: "proj-new", name: "순서 가" })).pid, b = (await op({ op: "proj-new", name: "순서 나" })).pid;
+    await open(sid);
+    const order = `[...document.querySelectorAll('#sess-body .gsec[data-pid]')].map((s) => s.dataset.pid).filter((p) => p === ${JSON.stringify(a)} || p === ${JSON.stringify(b)})`;
+    await waitFor(`${order}.length === 2`);
+    const before = await evaluate(order);
+    const [top, low] = before;
+    // 위 프로젝트의 이름을 끌어 아래 프로젝트 머리의 아래쪽 절반에 놓는다
+    await evaluate(`(() => {
+      const src = document.querySelector('#sess-body .gsec[data-pid=' + JSON.stringify(${JSON.stringify(top)}) + '] .gfold');
+      const target = document.querySelector('#sess-body .gsec[data-pid=' + JSON.stringify(${JSON.stringify(low)}) + ']');
+      const r = target.getBoundingClientRect(), y = r.top + target.querySelector('.ghead').offsetHeight - 1;
+      const dt = new DataTransfer();
+      src.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientY: y }));
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt, clientY: y }));
+      src.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    })()`);
+    await waitFor(`JSON.stringify(${order}) === ${JSON.stringify(JSON.stringify([low, top]))}`);
+    expect(board.projects.projects[low].pos < board.projects.projects[top].pos, "서버에 순서가 남지 않음");
+    await evaluate(`document.querySelector('#sess-body .pmenu[data-pid=' + JSON.stringify(${JSON.stringify(top)}) + ']').click()`);
+    await waitFor(`!document.getElementById('group-menu').hidden`);
+    await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((x) => x.textContent === '위로 옮기기').click()`);
+    await waitFor(`JSON.stringify(${order}) === ${JSON.stringify(JSON.stringify(before))}`);
+    for (const pid of [a, b]) await op({ op: "proj-drop", pid });
+    return `${before.join(",")} → 바꾸고 되돌림`;
+  });
   await check("지난 세션 모두 지우기: 지난 세션 머리의 ⋯ 에서 두 번 누르면 그 묶음의 지난 세션이 모두 지워지고 다른 줄은 남음", async () => {
     const olds = [`past-a-${process.pid}`, `past-b-${process.pid}`];
     for (const [i, id] of olds.entries()) {

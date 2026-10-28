@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import net from "node:net";
+import http from "node:http";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -81,6 +82,62 @@ test("화판이 꺼져 있으면 MCP 가 떼어 내 띄우고, 짝짓기 표에 
   assert.equal(scene.meta.pid, process.pid);
   assert.ok(scene.meta.pstart, "다시 띄울 때 짝을 되찾을 시작 시각");
   assert.ok(scene.timeline.some((e) => e.f === "start" && e.source === "mcp"));
+});
+
+// 다른 판 화판 서버 흉내: hello 에 helloBody 를 돌려주고, stop 을 받으면 내려간다
+async function fakeBoard(t, helloBody) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atv-swap-"));
+  const home = path.join(dir, "home"), port = await freePort();
+  const { ensureKeys } = await import("../lib/store.js");
+  const keys = ensureKeys(home);
+  const fake = { home, port, stopped: false };
+  const srv = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      const tool = (() => { try { return JSON.parse(body).tool; } catch { return ""; } })();
+      if (tool === "stop") { fake.stopped = true; res.end("멈춤"); srv.close(); srv.closeAllConnections(); return; }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(tool === "hello" ? helloBody : { ok: true }));
+    });
+  });
+  await new Promise((ok) => srv.listen(port, "127.0.0.1", ok));
+  t.after(async () => {
+    if (!fake.stopped) { srv.close(); srv.closeAllConnections(); }
+    try { await fetch(`http://127.0.0.1:${port}/api/mcp`, { method: "POST", headers: { "content-type": "application/json", "x-atv-key": keys.write }, body: JSON.stringify({ tool: "stop" }) }); } catch { /* 이미 없다 */ }
+    await new Promise((ok) => setTimeout(ok, 200));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  fake.hello = async () => (await fetch(`http://127.0.0.1:${port}/api/mcp`, { method: "POST", headers: { "content-type": "application/json", "x-atv-key": keys.write }, body: JSON.stringify({ tool: "hello" }) })).json();
+  return fake;
+}
+
+test("옛 판 화판 서버(판 정보를 모르는 28 전 판, 또는 판 번호가 낮음)면 MCP 가 내리고 이 판으로 다시 띄운다", async (t) => {
+  const { PROTOCOL } = await import("../lib/store.js");
+  for (const [i, helloBody] of [{ proto: PROTOCOL }, { proto: PROTOCOL, version: "0.1.0", code: "aaaaaaaaaaaa", root: "/다른/설치", superseded: false }].entries()) {
+    const fake = await fakeBoard(t, helloBody);
+    const client = await connect({ ANYTASKVIEW_HOME: fake.home, ANYTASKVIEW_PORT: String(fake.port), CLAUDE_CODE_SESSION_ID: `SWAP${i}` });
+    t.after(() => client.close());
+    // 첫 도구 호출은 처음 인사(갈아 끼우기)를 기다린 뒤 새 서버로 간다
+    assert.equal(text(await client.callTool({ name: "plan", arguments: { steps: [{ id: "s1", title: "새 판", status: "doing" }] } })), "계획 1단계 · 지금 s1");
+    assert.ok(fake.stopped, `옛 서버에 stop 을 보냈다(${i})`);
+    const hi = await fake.hello();
+    assert.equal(hi.superseded, false);
+    assert.equal(hi.proto, PROTOCOL);
+  }
+});
+
+test("판 번호가 더 높은 서버, 또는 판 번호가 같은 다른 설치의 서버는 밀려났어도 갈아 끼우지 않는다", async (t) => {
+  const { PROTOCOL, codeVersion } = await import("../lib/store.js");
+  const mine = codeVersion(path.join(path.dirname(SERVER), ".."));
+  for (const [i, helloBody] of [{ proto: PROTOCOL, version: "99.0.0", code: "bbbbbbbbbbbb", root: "/다른/설치", superseded: true },
+    { proto: PROTOCOL, version: mine, code: "cccccccccccc", root: "/다른/설치/local", superseded: true }].entries()) {
+    const fake = await fakeBoard(t, helloBody);
+    const client = await connect({ ANYTASKVIEW_HOME: fake.home, ANYTASKVIEW_PORT: String(fake.port), CLAUDE_CODE_SESSION_ID: `KEEP${i}` });
+    t.after(() => client.close());
+    await client.callTool({ name: "ids", arguments: {} });
+    assert.equal(fake.stopped, false, `서버를 그대로 둔다(${i})`);
+  }
 });
 
 test("JSON-RPC: 알림에는 답하지 않고, 깨진 줄·모르는 메서드는 오류, 나뉘어 온 줄도 읽는다", async (t) => {

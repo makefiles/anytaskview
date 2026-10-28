@@ -217,7 +217,8 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     const pack = (level) => (sep && !linked.has(level) && (shape.byParent.get(level) || []).length > 1
       ? { "elk.algorithm": "rectpacking", "elk.aspectRatio": String(ratio) } : null);
     const node = (p) => {
-      if (p.kind !== "group" || shape.size.has(p.id)) return { id: p.id, ...shape.size.get(p.id) }; // 접은 묶음은 잎
+      // 접은 묶음은 잎. 높이가 다른 상자(경로 줄·원통·마름모)도 같은 줄에서 가운데가 맞게 한다
+      if (p.kind !== "group" || shape.size.has(p.id)) return { id: p.id, ...shape.size.get(p.id), layoutOptions: { "elk.alignment": "CENTER" } };
       return {
         id: p.id,
         // 비었거나 제목이 자식보다 넓은 묶음도 제목이 다 보이게 최소 크기를 준다

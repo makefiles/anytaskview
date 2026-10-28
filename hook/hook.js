@@ -199,9 +199,12 @@ async function main() {
   return 0;
 }
 
-// 이 세션에 온 화판 메시지를 기다린다. 202 면 아직 없으니 다시 묻고, 204 면(새 Stop 훅이 이어받음·세션 끝) 그만둔다
+// 이 세션에 온 화판 메시지를 기다린다. 202 면 아직 없으니 다시 묻고, 204 면(새 Stop 훅이 이어받음·세션 끝) 그만둔다.
+// 503 이나 연결 실패는 화판 서버가 내려가 다시 뜨는 중(새 판으로 갈아 끼우기)일 수 있어, 조금씩 늦추며 다시 묻는다
 async function waitInbox(keys, sid) {
   const end = Date.now() + INBOX_WAIT;
+  let backoff = 1000;
+  const later = () => new Promise((ok) => setTimeout(ok, Math.min(backoff, Math.max(0, end - Date.now())))).then(() => { backoff = Math.min(backoff * 2, 30_000); });
   while (Date.now() < end) {
     let r;
     try {
@@ -212,8 +215,11 @@ async function waitInbox(keys, sid) {
         signal: AbortSignal.timeout(POLL_WAIT + 10_000),
       });
     } catch {
-      return 0;
+      await later();
+      continue;
     }
+    if (r.status === 503) { await later(); continue; }
+    backoff = 1000;
     if (r.status === 202) continue;
     if (r.status !== 200) return 0;
     const text = await r.text();

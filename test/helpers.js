@@ -15,7 +15,7 @@ export async function boardFixture() {
     get port() { return board.port; },
     get board() { return board; },
     keys,
-    async restart() { await board.close(); board = await startBoard({ port: 0, home }); },
+    async restart({ samePort = false } = {}) { const port = samePort ? board.port : 0; await board.close(); board = await startBoard({ port, home }); },
     async close() { await board.close(); fs.rmSync(dir, { recursive: true, force: true }); },
     // 원시 요청(헤더를 마음대로 정한다)
     request(method, url, { headers = {}, body } = {}) {

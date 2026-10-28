@@ -76,6 +76,14 @@ codex plugin add anytaskview@anytaskview
 
 터미널 `codex`, ChatGPT 데스크톱 앱, VS Code 의 Codex 가 같은 설치를 씁니다. 자세한 순서와 확인 방법, 갱신·삭제는 [INSTALL.md](INSTALL.md) 의 「Codex 에 설치」 에 있습니다.
 
+### 새 판 받기
+
+새 판은 저절로 오지 않고, 새 판이 나왔다는 알림도 없습니다. 소식은 이 저장소의 Watch → Custom → Releases 로 받습니다.
+
+- Claude Code: `/plugin` → Marketplaces → anytaskview → Enable auto-update 를 켜면 새 판을 받아 옵니다(기본은 꺼짐). 손으로 받을 때는 `claude plugin marketplace update anytaskview` 와 `claude plugin update anytaskview@anytaskview` 입니다.
+- Codex: `codex plugin marketplace upgrade anytaskview` 를 실행합니다.
+- 받은 뒤 새 세션을 열면(Claude Code 는 열린 세션에서 `/reload-plugins` 도 됩니다) 새 판이 떠 있던 옛 화판 서버를 내리고 다시 띄우며, 열린 화판 탭도 새로 읽습니다. 이 기능이 들어가기 전 판에서 처음 갱신할 때만 열린 화판 탭을 모두 한 번씩 직접 새로 고칩니다. Claude Code 와 Codex 를 함께 쓰면 두 쪽을 같은 판으로 받습니다(INSTALL.md 「갱신」).
+
 ### LLM 에게 설치를 맡기려면
 
 Claude Code·Codex 같은 코딩 에이전트에 이렇게 말하면 됩니다.
