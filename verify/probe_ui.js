@@ -1216,6 +1216,25 @@ async function main() {
     expect(fs.readdirSync(path.join(home, "trash")).length === 2, "휴지통에 기록이 없습니다");
     return `남은 줄 ${rows.length}개`;
   });
+  await check("지우기: 쉬는 Codex 앱(app-server) 대화는 끝나지 않았어도 ⋯ 의 「지우기」 가 켜지고, 지우면 목록에서 빠짐", async () => {
+    // 명령줄에 app-server 가 든 프로세스를 VS Code·데스크톱 앱의 codex 로 흉내 낸다
+    const host = spawn(process.execPath, ["-e", "setTimeout(() => {}, 120000)", "app-server"], { stdio: "ignore" });
+    try {
+      const cx = `codex-app-${process.pid}`, menu = `document.querySelector('#sess-body .smenu[data-sid="${cx}"]')`;
+      await post("/api/hook", { sid: cx, pid: host.pid, via: "codex", home: "/tmp/codex-home", fact: { f: "start", cwd: "/tmp/앱", source: "startup", via: "codex", home: "/tmp/codex-home" } });
+      await post("/api/hook", { sid: cx, pid: host.pid, via: "codex", home: "/tmp/codex-home", fact: { f: "prompt", text: "앱에서 연 대화" } });
+      await post("/api/hook", { sid: cx, pid: host.pid, via: "codex", home: "/tmp/codex-home", fact: { f: "stop", last: "끝" } });
+      await waitFor(`window.__atv.sessions.get(${JSON.stringify(cx)})?.status === 'idle' && ${menu} != null`);
+      await evaluate(`${menu}.focus()`);
+      await key("Enter", "Enter", 13, "\r");
+      await waitFor(`!document.getElementById('group-menu').hidden && document.querySelector('#group-menu .gm-del')?.textContent === '지우기' && !document.querySelector('#group-menu .gm-del').hasAttribute('aria-disabled')`);
+      expect((await evaluate(`document.querySelector('#group-menu .gm-del').title`)).includes("Codex 앱"), "쉬는 앱 대화를 지운다는 설명이 없음");
+      await evaluate(`document.querySelector('#group-menu .gm-del').click()`);
+      await evaluate(`document.querySelector('#group-menu .gm-del').click()`);
+      await waitFor(`!window.__atv.sessions.has(${JSON.stringify(cx)})`);
+      expect(board.pids.has(host.pid), "같은 프로세스의 다른 대화를 위한 짝짓기가 사라짐");
+    } finally { host.kill(); }
+  });
   await open(sid);
 
   // 13: 표·상자 모양·아이콘·Mermaid 크기, 세션 정렬·지난 세션·끝난 세션 숨기기·자동 휴지통 날수
@@ -1547,12 +1566,13 @@ async function main() {
     // 옛 기록을 보는 중에 위에 줄이 붙어도 보던 줄은 화면에서 제자리에 있다(코드 보정과 브라우저 스크롤 고정이 겹치지 않음)
     for (let i = 0; i < 30; i++) await mcp("note", { text: `스크롤 채우기 ${i}` });
     await waitFor(`document.getElementById('timeline').scrollHeight > document.getElementById('timeline').clientHeight + 300`);
-    await evaluate(`(() => { const box = document.getElementById('timeline'); box.scrollTop = 200; window.__row = [...document.querySelectorAll('#tl-body li')].find((li) => li.getBoundingClientRect().top >= box.getBoundingClientRect().top + 40); window.__rowTop = window.__row.getBoundingClientRect().top; window.__dbg0 = { st: box.scrollTop, band: document.getElementById('band').offsetHeight, top: document.getElementById('top').offsetHeight, boxTop: Math.round(box.getBoundingClientRect().top), n: document.querySelectorAll('#tl-body li').length }; return 1; })()`);
+    await evaluate(`(() => { const box = document.getElementById('timeline'); box.scrollTop = 200; window.__row = [...document.querySelectorAll('#tl-body li')].find((li) => li.getBoundingClientRect().top >= box.getBoundingClientRect().top + 40); window.__rowTop = window.__row.getBoundingClientRect().top; window.__dbg0 = { st: box.scrollTop, band: document.getElementById('band').offsetHeight, top: document.getElementById('top').offsetHeight, boxTop: Math.round(box.getBoundingClientRect().top), n: document.querySelectorAll('#tl-body li').length, sy: Math.round(scrollY), side: Math.round(document.getElementById('side').getBoundingClientRect().top), hplan: document.getElementById('side').style.getPropertyValue('--h-plan'), vh: innerHeight }; return 1; })()`);
     await sleep(100);
     await mcp("note", { text: "위에 붙는 줄" });
     await waitFor(`!document.getElementById('tl-new').hidden`);
     const moved = await evaluate(`Math.round(window.__row.getBoundingClientRect().top - window.__rowTop)`);
-    const dbg = await evaluate(`JSON.stringify({ before: window.__dbg0, after: { st: document.getElementById('timeline').scrollTop, band: document.getElementById('band').offsetHeight, top: document.getElementById('top').offsetHeight, boxTop: Math.round(document.getElementById('timeline').getBoundingClientRect().top), n: document.querySelectorAll('#tl-body li').length, conn: window.__row.isConnected, txt: window.__row.textContent.slice(0, 30) } })`);
+    const dbg = await evaluate(`JSON.stringify({ before: window.__dbg0, after: { st: document.getElementById('timeline').scrollTop, band: document.getElementById('band').offsetHeight, top: document.getElementById('top').offsetHeight, boxTop: Math.round(document.getElementById('timeline').getBoundingClientRect().top), n: document.querySelectorAll('#tl-body li').length, conn: window.__row.isConnected, txt: window.__row.textContent.slice(0, 30), sy: Math.round(scrollY), side: Math.round(document.getElementById('side').getBoundingClientRect().top), hplan: document.getElementById('side').style.getPropertyValue('--h-plan'), vh: innerHeight,
+      extra: [...document.body.children].filter((e) => !['top', 'band', 'replay'].includes(e.id) && e.tagName !== 'MAIN' && getComputedStyle(e).position === 'static' && getComputedStyle(e).display !== 'none').map((e) => e.tagName + '#' + e.id + ':' + e.offsetHeight) } })`);
     expect(moved === 0, `보던 줄이 ${moved}px 밀림 ${dbg}`);
     await evaluate(`document.getElementById('timeline').scrollTop = 0`);
     return `있던 줄 ${kept} 그대로`;

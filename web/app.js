@@ -1675,20 +1675,22 @@ function messageItem(sid) {
   });
   return b;
 }
-// 「지우기」: 그 줄의 끝난 대화를 지운다(진행 중인 대화는 남는다). 한 번 누르면 글이 바뀌고, 한 번 더 누르면 지운다.
+// 「지우기」: 그 줄의 끝난 대화와 쉬는 Codex 앱 대화를 지운다(진행 중인 대화는 남는다). 한 번 누르면 글이 바뀌고, 한 번 더 누르면 지운다.
 // 꺼짐은 disabled 대신 aria-disabled 로 둔다(disabled 는 초점을 받지 못해 방향키 이동이 그 자리에서 막힌다)
 function deleteItem(sid) {
-  const thread = threadOf(sid, true), ids = thread.filter((x) => x.status === "ended").map((x) => x.id);
-  const live = thread.length - ids.length;
-  const b = el("button", "gm-item gm-del", live && ids.length ? `지우기(끝난 대화 ${ids.length}개만)` : "지우기");
+  const thread = threadOf(sid, true), ids = thread.filter((x) => x.drop ?? x.status === "ended").map((x) => x.id);
+  const live = thread.length - ids.length, idle = thread.some((x) => x.idleApp);
+  const b = el("button", "gm-item gm-del", live && ids.length ? `지우기(${idle ? "지울 수 있는" : "끝난"} 대화 ${ids.length}개만)` : "지우기");
   b.type = "button";
   b.setAttribute("role", "menuitem");
   if (!ids.length) {
     b.setAttribute("aria-disabled", "true");
-    b.title = "진행 중인 대화는 지울 수 없습니다. 세션이 끝난 뒤에 지우세요";
+    b.title = "진행 중인 대화는 지울 수 없습니다. 끝난 뒤에 지우세요(Codex 앱 대화는 쉬는 중이 되면 지울 수 있습니다)";
     return b;
   }
-  b.title = "이 줄의 끝난 대화를 목록과 화판에서 지웁니다. 기록은 상태 폴더의 trash 에 30일 동안 남습니다";
+  b.title = idle
+    ? "이 줄의 대화를 목록과 화판에서 지웁니다. Codex 앱(VS Code·데스크톱 앱) 대화는 끝났는지 알 수 없어 쉬는 중이어도 지웁니다. 그 대화에서 다시 일하면 목록에 다시 나타납니다. 기록은 상태 폴더의 trash 에 30일 동안 남습니다"
+    : "이 줄의 끝난 대화를 목록과 화판에서 지웁니다. 기록은 상태 폴더의 trash 에 30일 동안 남습니다";
   b.addEventListener("click", async () => {
     if (!b.classList.contains("armed")) {
       b.classList.add("armed");

@@ -191,6 +191,91 @@ test("Codex app-server(데스크톱 앱·VS Code): 한 프로세스의 세션들
   assert.equal(f.board.sessions.get("D2").scene.sess.status, "ended");
 });
 
+test("Codex app-server 대화는 쉬는 중이어도 지울 수 있고, 함께 쓰던 다른 대화는 그 프로세스가 끝날 때 끝난다", async (t) => {
+  const host = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "app-server"], { stdio: "ignore" });
+  const f = await boardFixture();
+  t.after(async () => { host.kill(); await f.close(); });
+  await f.hook("V1", { f: "start", cwd: "/w", via: "codex" }, { pid: host.pid });
+  await f.hook("V2", { f: "start", cwd: "/w", via: "codex", source: "fork" }, { pid: host.pid });
+  assert.equal(f.board.pids.get(host.pid).sid, "V2", "나중에 시작한 대화가 그 프로세스의 대표(시험 전제)");
+  await f.hook("V1", { f: "prompt", text: "일하는 중", via: "codex" }, { pid: host.pid });
+  assert.deepEqual([(await summaryOf(f, "V1")).drop, (await summaryOf(f, "V2")).drop], [false, true], "쉬는 대화만, 일하는 대화는 아님");
+  assert.equal((await board(f, { op: "sess-delete", sids: ["V1"] })).status, 400);
+  const out = JSON.parse((await board(f, { op: "sess-delete", sids: ["V2"] })).text);
+  assert.deepEqual([out.ok, out.gone], [true, ["V2"]]);
+  assert.ok(!f.board.sessions.has("V2"));
+  assert.equal(f.board.pids.get(host.pid)?.sid, "V1", "짝짓기는 남기고 대표는 같은 프로세스의 남은 대화로 넘긴다");
+  // 지운 대화에 훅보다 MCP 호출이 먼저 와도 새 기록을 Codex 앱 대화로 시작한다
+  await f.write("/api/mcp", { pid: host.pid, sid: "V2", cwd: "/w", tool: "plan", input: { steps: [{ id: "s1", title: "다시", status: "doing" }] } });
+  const meta = f.board.sessions.get("V2").scene.meta;
+  assert.deepEqual([meta.via, meta.shared, meta.pid, typeof meta.pstart], ["codex", true, host.pid, "string"]);
+  assert.equal((await summaryOf(f, "V2")).agent, "codex");
+  // 프로세스가 끝나면 남은 대화와 다시 생긴 대화가 모두 끝난다
+  host.kill();
+  await new Promise((ok) => host.on("exit", ok));
+  f.board.checkLive();
+  await f.board.sessions.get("V1").chain;
+  await f.board.sessions.get("V2").chain;
+  assert.equal(f.board.sessions.get("V1").scene.sess.status, "ended");
+  assert.equal(f.board.sessions.get("V2").scene.sess.status, "ended");
+});
+
+test("쉬는 Codex 앱 대화를 지울 때 보내는 중인 글은 끝난 뒤에 지우고, 지운 뒤에는 보내지 않는다", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atv-codex-bin-"));
+  const log = path.join(dir, "calls.jsonl"), mode = path.join(dir, "mode");
+  fs.writeFileSync(path.join(dir, "codex"), `#!/bin/sh
+m=$(/bin/cat "${mode}")
+printf '%s\\n' "$3" >> "${log}"
+case "$m" in
+  fail) echo "error: busy" >&2; exit 3 ;;
+  hang) exec /bin/sleep 5 ;;
+esac
+echo "Queued"
+`, { mode: 0o755 });
+  fs.writeFileSync(mode, "fail");
+  const host = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "app-server"], { stdio: "ignore" });
+  const saved = { PATH: process.env.PATH, T: process.env.ANYTASKVIEW_QUEUE_TIMEOUT };
+  process.env.PATH = dir;
+  process.env.ANYTASKVIEW_QUEUE_TIMEOUT = "800";
+  const f = await boardFixture();
+  t.after(async () => {
+    process.env.PATH = saved.PATH;
+    if (saved.T === undefined) delete process.env.ANYTASKVIEW_QUEUE_TIMEOUT; else process.env.ANYTASKVIEW_QUEUE_TIMEOUT = saved.T;
+    host.kill();
+    await f.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : []);
+  await f.hook("Q1", { f: "start", cwd: "/w", via: "codex" }, { pid: host.pid });
+  assert.equal(JSON.parse((await board(f, { op: "send", sid: "Q1", kind: "instruction", text: "남은 글" })).text).ok, true);
+  await f.board.sessions.get("Q1").qjob;
+  assert.equal(calls().length, 1, "첫 보내기는 실패해 대기로 남는다");
+  // 차례 끝에 다시 보내는 중(답이 없어 0.8초 뒤 만료)에 지우면, 그 보내기가 끝난 뒤에 지운다
+  fs.writeFileSync(mode, "hang");
+  const held = f.board.sessions.get("Q1");
+  await f.hook("Q1", { f: "stop", last: "" }, { pid: host.pid });
+  const t0 = Date.now();
+  const out = JSON.parse((await board(f, { op: "sess-delete", sids: ["Q1"] })).text);
+  assert.deepEqual([out.ok, out.gone], [true, ["Q1"]]);
+  assert.ok(Date.now() - t0 >= 500, "보내는 중인 글을 기다리지 않고 지움");
+  assert.equal(calls().length, 2);
+  // 지운 대화를 쥐고 있던 처리가 다시 보내려 해도 보내지 않는다
+  fs.writeFileSync(mode, "ok");
+  assert.equal(held.broken, true);
+  await f.hook("Q1", { f: "stop", last: "" }, { pid: host.pid }); // 같은 id 의 새 기록: 보낼 글이 없다
+  await f.board.sessions.get("Q1").qjob;
+  assert.equal(calls().length, 2);
+});
+
+test("쉬는 대화라도 Codex 앱이 아니면(Claude·터미널 codex) 지우지 않는다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  await f.hook("T1", { f: "start", cwd: "/w", via: "codex" }, { pid: process.pid });
+  await f.hook("T2", { f: "start", cwd: "/w" }, { pid: (1 << 22) + 77 });
+  assert.deepEqual([(await summaryOf(f, "T1")).drop, (await summaryOf(f, "T2")).drop], [false, false]);
+  assert.equal((await board(f, { op: "sess-delete", sids: ["T1", "T2"] })).status, 400);
+});
+
 test("hello: Codex 클라이언트는 임의 id 로 짝짓지 않고, 훅 없는 다른 MCP 클라이언트는 예전처럼 짝짓는다", async (t) => {
   for (const [name, paired] of [["codex-mcp-client", false], ["other-agent", true]]) {
     const f = await boardFixture();
