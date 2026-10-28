@@ -62,7 +62,19 @@ Claude Code 안에서는 `/plugin marketplace add makefiles/anytaskview` 와 `/p
 
 ### OpenAI Codex
 
-터미널 `codex`, ChatGPT 데스크톱 앱, VS Code 의 Codex 에서 씁니다. `codex plugin marketplace add makefiles/anytaskview` 와 `codex plugin add anytaskview@anytaskview` 로 설치하고, 그리기 도구 다섯을 사용자 Codex 설정에서 늘 허용한 뒤 `/hooks` 에서 훅을 믿어 줍니다. 순서는 [INSTALL.md](INSTALL.md) 의 「Codex 에 설치」 에 있습니다. Codex 세션은 목록 줄에 파란 OpenAI 로고가 붙고, 화판에서 보낸 글은 쉬는 세션이면 바로, 일하는 중이면 그 차례가 끝난 뒤 받습니다.
+터미널에서:
+
+```sh
+codex plugin marketplace add makefiles/anytaskview
+codex plugin add anytaskview@anytaskview
+```
+
+설치한 뒤 두 가지를 더 합니다.
+
+- 그리기 도구 다섯을 사용자 Codex 설정 `~/.codex/config.toml` 에서 늘 허용합니다(붙일 줄은 INSTALL.md 「C2」). 허용하지 않으면 도구를 부를 때마다 승인을 묻고, `codex exec` 에서는 호출이 실패합니다.
+- `codex` 를 띄워 `/hooks` 에서 `anytaskview@anytaskview` 의 훅을 믿어 줍니다. 믿기 전에는 명령·파일 수정 같은 사실이 화판에 오르지 않고, 화판에서 글을 보낼 수 없습니다.
+
+터미널 `codex`, ChatGPT 데스크톱 앱, VS Code 의 Codex 가 같은 설치를 씁니다. 자세한 순서와 확인 방법, 갱신·삭제는 [INSTALL.md](INSTALL.md) 의 「Codex 에 설치」 에 있습니다.
 
 ### LLM 에게 설치를 맡기려면
 
