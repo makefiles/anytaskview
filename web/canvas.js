@@ -43,9 +43,50 @@ const SHAPE_FIT = {
 // 원·막대 차트 색: Mermaid 기본(옅은 보라·노랑·연두)보다 서로 잘 구분되고 밝은·어두운 바탕에서 모두 읽히는 색
 const CHART_COLORS = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2", "#b279a2", "#eeca3b", "#9d755d"];
 
-// 배치에 영향을 주는 값만 모은 열쇠. 이것이 같으면 다시 배치하지 않는다
-function layoutKey(scene, parts) {
-  return JSON.stringify([scene.view.dir, parts.map((p) => [p.id, p.kind, p.label, p.in, p.from, p.to, p.text, p.src, p.ref, p.note, p.value, p.max, p.shape, p.icon, p.cols, p.rows])]);
+// 배치에 영향을 주는 값만 모은 열쇠. 이것이 같으면 다시 배치하지 않는다(접은 묶음과 그 요약 글도 넣는다)
+function layoutKey(scene, parts, fold) {
+  return JSON.stringify([scene.view.dir, parts.map((p) => [p.id, p.kind, p.label, p.in, p.from, p.to, p.text, p.src, p.ref, p.note, p.value, p.max, p.shape, p.icon, p.cols, p.rows]),
+    [...fold.folded].sort().map((id) => [id, fold.info.get(id)])]);
+}
+
+// 끝난 묶음(화면의 접기와 주의 띠가 함께 쓴다): 안(하위 묶음·목록 항목까지)에 진행·막힘·대기가 없고, 자기 상태가 있으면
+// 그것이 끝·실패, 없으면 안의 상태 있는 부품이 하나 이상이고 모두 끝·실패(상태 없는 설명 글 따위는 따지지 않는다).
+// 묶음만 끝으로 두고 안에 승인 대기를 남긴 경우 그 대기가 접혀 숨지 않게 한다. 빈 묶음은 싣지 않는다.
+// 묶음 id → { n: 안의 부품 수(항목 빼고), fail: 실패 수, allFail: 상태 있는 것이 모두 실패, done }
+const FINISHED = new Set(["done", "fail"]), ACTIVE = new Set(["doing", "blocked", "wait"]);
+export function groupSummary(scene) {
+  const kids = new Map();
+  for (const p of Object.values(scene.items)) {
+    if (p.kind === "edge" || p.kind === "step" || !p.in) continue;
+    if (!kids.has(p.in)) kids.set(p.in, []);
+    kids.get(p.in).push(p);
+  }
+  const under = (id, out = [], depth = 0) => { if (depth < 10) for (const c of kids.get(id) || []) { out.push(c); under(c.id, out, depth + 1); } return out; };
+  const info = new Map();
+  for (const g of Object.values(scene.items)) {
+    if (g.kind !== "group") continue;
+    const all = under(g.id), marked = all.filter((d) => d.status), fail = marked.filter((d) => d.status === "fail").length;
+    if (!all.length) continue;
+    const done = !marked.some((d) => ACTIVE.has(d.status)) && (g.status ? FINISHED.has(g.status) : marked.length > 0 && marked.every((d) => FINISHED.has(d.status)));
+    info.set(g.id, { n: all.filter((d) => d.kind !== "item").length, fail, allFail: g.status ? g.status === "fail" : marked.length > 0 && fail === marked.length, done });
+  }
+  return info;
+}
+// 끝난 묶음 안의 부품인가(그 안의 실패는 지난 일이라 주의 띠에 올리지 않는다)
+export function inFinishedGroup(scene, info, id) {
+  for (let p = own(scene.items, id)?.in, i = 0; p && i < 10; p = own(scene.items, p)?.in, i++) if (info.get(p)?.done) return true;
+  return false;
+}
+
+// 끝난 묶음은 접는다. 맨 바깥 묶음이 모두 끝났으면 가장 나중에 만든 것은 펼쳐 둔다(방금 끝낸 작업이 통째로 접히지 않게).
+// pick: 사용자가 누른 것(묶음 id → true 접음 / false 펼침)
+function foldState(scene, pick) {
+  const info = groupSummary(scene);
+  const top = [...info.keys()].map((id) => scene.items[id]).filter((g) => own(scene.items, g.in)?.kind !== "group");
+  const keep = top.length && top.every((g) => info.get(g.id).done) ? top.reduce((a, b) => (b.ord > a.ord ? b : a)).id : null;
+  const folded = new Set();
+  for (const [id, i] of info) if (pick.has(id) ? pick.get(id) : i.done && id !== keep) folded.add(id);
+  return { folded, info };
 }
 
 // 배치 후보: 그림 전체를 한 방향으로 놓는 넷(LLM 이 준 방향·반대 방향, 각각 줄 바꿈 없음·있음)과, 바깥과 묶음 안의
@@ -64,9 +105,9 @@ const LAYERED = {
 // getViewport: 그림이 들어갈 칸의 크기 { w, h }(px). 모르면 LLM 이 준 방향 하나로만 배치한다.
 // mailFor: 그 부품에 보낸 글 수 표시({ text, queued, title }, 없으면 null), onMail: 그 표시를 눌렀을 때(부품 id)
 // 도형 옮기기: canMove() 는 옮길 수 없으면 까닭(글), onMove(id, pos|null) 은 옮긴 자리를 기록하고 성공 여부를 돌려준다(Promise),
-// onRefuse(까닭) 은 옮기지 않을 때 알린다, getZoom() 은 그림 배율
+// onRefuse(까닭) 은 옮기지 않을 때 알린다, getZoom() 은 그림 배율. onFold() 는 묶음을 접거나 펼쳤을 때 다시 그리게 한다
 export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onMail = () => {}, getTheme, getViewport,
-  canMove = () => null, onMove = async () => false, onRefuse = () => {}, getZoom = () => 1, onPlaced = () => {} }) {
+  canMove = () => null, onMove = async () => false, onRefuse = () => {}, getZoom = () => 1, onPlaced = () => {}, onFold = null }) {
   const elk = new window.ELK();
   const groupLayer = el("div", "layer groups"), partLayer = el("div", "layer parts");
   const svg = document.createElementNS(SVGNS, "svg");
@@ -87,6 +128,16 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   // drag: 끄는 중인 도형
   let layout = null, lastScene = null, placedSig = null, used = new Map(), drag = null;
   const pending = new Map();
+  // fold: 이번 그리기에서 접은 묶음과 묶음마다의 요약. foldPick: 사용자가 누른 것(세션을 바꾸면 잊는다)
+  let fold = { folded: new Set(), info: new Map() }, refocus = null; // refocus: ▸·▾ 단추로 접고 편 묶음(새 단추에 초점을 줄 것)
+  const foldPick = new Map();
+  // 접힌 묶음 안의 부품이면 그것을 가린 가장 바깥 묶음
+  const foldedAbove = (scene, id) => {
+    let top = null;
+    for (let p = own(scene.items, id)?.in, i = 0; p && i < 10; p = own(scene.items, p)?.in, i++) if (fold.folded.has(p)) top = p;
+    return top;
+  };
+  const refold = () => (onFold ? onFold() : lastScene && render(lastScene, { animate: false }));
 
   // Mermaid(5.5MB)는 mermaid 부품이 처음 나올 때 불러온다. 그림이 없는 화판은 열 때마다 받고 읽느라 늦어지지 않는다
   // 받지 못했으면 오류를 그린 배치를 확정하지 않아, 다음 그리기(다음 사건) 때 다시 배치하며 다시 받는다. 쉬는 화판은 사건이 올 때까지 기다린다
@@ -166,7 +217,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     const pack = (level) => (sep && !linked.has(level) && (shape.byParent.get(level) || []).length > 1
       ? { "elk.algorithm": "rectpacking", "elk.aspectRatio": String(ratio) } : null);
     const node = (p) => {
-      if (p.kind !== "group") return { id: p.id, ...shape.size.get(p.id) };
+      if (p.kind !== "group" || shape.size.has(p.id)) return { id: p.id, ...shape.size.get(p.id) }; // 접은 묶음은 잎
       return {
         id: p.id,
         // 비었거나 제목이 자식보다 넓은 묶음도 제목이 다 보이게 최소 크기를 준다
@@ -234,7 +285,20 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   // 시작되면 이 결과는 버려야 하므로, 붙이는 것은 부른 쪽이 최신인지 확인한 뒤에 한다
   async function buildContent(p, scene) {
     const e = el("div");
-    if (p.kind === "group") { e.append(el("div", "lbl", p.label || "")); }
+    if (p.kind === "group") {
+      const lbl = el("div", "lbl"), info = fold.info.get(p.id), shut = fold.folded.has(p.id);
+      if (info) {
+        const b = el("button", "fold", shut ? "▸" : "▾");
+        b.type = "button";
+        b.dataset.fold = p.id;
+        b.setAttribute("aria-expanded", String(!shut));
+        b.setAttribute("aria-label", shut ? "묶음 펼치기" : "묶음 접기");
+        lbl.append(b);
+      }
+      lbl.append(document.createTextNode(p.label || ""));
+      e.append(lbl);
+      if (shut) e.append(el("div", "fsum", `${info.done ? "끝" : "접어 둠"} · 부품 ${info.n}개${info.fail ? ` · 실패 ${info.fail}` : ""}`));
+    }
     else if (p.kind === "box") {
       if (SHAPE_PATH[p.shape]) {
         const out = svgEl("svg", { class: "shp", viewBox: "0 0 100 100", preserveAspectRatio: "none", "aria-hidden": "true" });
@@ -312,12 +376,16 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     const lbl = e.querySelector(":scope > .lbl");
     if (!lbl || !label) return 120;
     ruler.font = getComputedStyle(lbl).font;
-    return Math.ceil(ruler.measureText(label).width) + 9 + 30 + 8;
+    const btn = lbl.querySelector(":scope > .fold");
+    return Math.ceil(ruler.measureText(label).width) + 9 + 30 + 8 + (btn ? btn.offsetWidth + 4 : 0);
   }
 
   // 상태·표시처럼 크기를 바꾸지 않는 것
   function decorate(e, p) {
-    e.className = `part ${p.kind}` + (p.status ? ` st-${p.status}` : " nostatus") + (p.ref ? " has-ref" : "") + (shaped(p) ? ` shaped shape-${p.shape}` : "") +
+    // 접은 묶음은 상태가 없어도 안이 끝났으면 끝으로 보인다(아니라고 지운 후보 따위로 실패가 섞여도 끝, 모두 실패일 때만 실패)
+    const shut = fold.folded.has(p.id), info = fold.info.get(p.id);
+    if (shut && !p.status && info?.done) p = { ...p, status: info.allFail ? "fail" : "done" };
+    e.className = `part ${p.kind}` + (shut ? " folded" : "") + (p.status ? ` st-${p.status}` : " nostatus") + (p.ref ? " has-ref" : "") + (shaped(p) ? ` shaped shape-${p.shape}` : "") +
       (drag && drag.moved && drag.id === p.id ? " dragging" : "") + ((pending.has(p.id) ? pending.get(p.id).pos : p.pos) ? " moved" : ""); // 끄는 중에 다시 그려도 들린 모양을 지킨다
     const chip = e.querySelector(":scope > .stchip");
     if (chip) chip.textContent = p.status ? ST_ICO[p.status] : "";
@@ -334,7 +402,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
         badges.append(mail);
       }
     }
-    const tip = [p.status && ST_KO[p.status], p.ref, ...notesFor(p.id).map((n) => n.text)].filter(Boolean);
+    const tip = [p.status && ST_KO[p.status], p.ref, ...notesFor(p.id).map((n) => n.text), shut && "누르면 펼칩니다"].filter(Boolean);
     e.title = tip.join("\n");
     if (safeRef(p.ref)) e.dataset.ref = p.ref; else delete e.dataset.ref;
   }
@@ -352,8 +420,10 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
 
   async function render(scene, { animate = true } = {}) {
     const parts = Object.values(scene.items).filter((p) => p.kind !== "step").sort((a, b) => a.ord - b.ord);
-    const shown = parts.filter((p) => p.kind !== "edge" && p.kind !== "item");
-    const key = layoutKey(scene, parts);
+    fold = foldState(scene, foldPick);
+    // 접힌 묶음 안의 부품은 그리지 않는다
+    const shown = parts.filter((p) => p.kind !== "edge" && p.kind !== "item" && !foldedAbove(scene, p.id));
+    const key = layoutKey(scene, parts, fold);
     // 재고 있는 배치가 있으면 그것과, 없으면 마지막 배치와 견준다(재는 사이 구조가 앞으로 되돌아가도 새로 잰다)
     const relayout = key !== (pendingKey ?? lastKey);
     // rev 는 새 배치를 시작할 때만 올린다. 구조가 같은 그리기는 재고 있는 배치를 버리게 하지 않는다
@@ -377,6 +447,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
         const kids = await buildContent(p, scene);
         if (myRev !== rev) return; // 더 새 그리기가 시작됐다
         e.replaceChildren(...kids);
+        if (refocus === p.id) { refocus = null; e.querySelector(":scope > .lbl > button.fold")?.focus({ preventScroll: true }); }
       }
       // 기다리는 사이 구조가 같은 그리기가 상태를 바꿨을 수 있으므로 지금의 부품으로 꾸민다(구조가 같으니 부품 목록은 같다)
       p = own(scene.items, p.id) || p;
@@ -415,7 +486,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     const size = new Map(), groupMin = new Map();
     for (const p of shown) {
       const e = nodes.get(p.id);
-      if (p.kind === "group") { groupMin.set(p.id, `(${groupMinWidth(e, p.label)}, 44)`); continue; }
+      if (p.kind === "group" && !fold.folded.has(p.id)) { groupMin.set(p.id, `(${groupMinWidth(e, p.label)}, 44)`); continue; } // 접은 묶음은 상자처럼 잰다
       e.style.left = "0px"; e.style.top = "0px"; e.style.width = ""; e.style.height = "";
       // offset 크기는 화면 배율(transform)과 상관없는 레이아웃 크기다
       let w = e.offsetWidth, h = e.offsetHeight;
@@ -430,9 +501,14 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     const edges = [];
     const measure = el("span", "elabel");
     labelLayer.append(measure);
+    // 접힌 묶음 안에 닿는 선은 접힌 상자에 닿는다. 안끼리의 선은 숨기고, 같은 두 끝을 잇는 선은 하나만 긋는다
+    const seen = new Set();
     for (const ed of parts.filter((p) => p.kind === "edge")) {
-      const a = anchorOf(scene, ed.from), b = anchorOf(scene, ed.to);
+      let a = anchorOf(scene, ed.from), b = anchorOf(scene, ed.to);
+      a = a && (foldedAbove(scene, a) || a); b = b && (foldedAbove(scene, b) || b);
       if (!a || !b || a === b || isAncestor(scene, a, b) || isAncestor(scene, b, a)) continue;
+      if ((fold.folded.has(a) || fold.folded.has(b)) && seen.has(`${a}\n${b}`)) continue;
+      seen.add(`${a}\n${b}`);
       let label;
       if (ed.label) {
         measure.textContent = ed.label;
@@ -495,7 +571,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
       const e = nodes.get(id);
       if (e) {
         e.style.left = `${r.x}px`; e.style.top = `${r.y}px`;
-        if (own(scene.items, id)?.kind === "group") { e.style.width = `${r.width}px`; e.style.height = `${r.height}px`; }
+        if (own(scene.items, id)?.kind === "group" && !fold.folded.has(id)) { e.style.width = `${r.width}px`; e.style.height = `${r.height}px`; }
         e.classList.toggle("moved", !!posOf(id));
       }
       w = Math.max(w, r.x + r.width + 8);
@@ -504,7 +580,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
 
     const delta = (id) => { const a = final.get(id), b = elkOf.get(id); return a && b ? { x: a.x - b.x, y: a.y - b.y } : { x: 0, y: 0 }; };
     const ends = new Map(layout.edges.map((e) => [e.id, e]));
-    const leaves = [...final].filter(([id]) => own(scene.items, id)?.kind !== "group").map(([, r]) => r);
+    const leaves = [...final].filter(([id]) => own(scene.items, id)?.kind !== "group" || fold.folded.has(id)).map(([, r]) => r);
     const ctx = {};
     // 선 하나를 어떻게 그을지: null 이면 ELK·직접 그린 길 그대로, {dx,dy} 면 그만큼 옮김, "route" 면 새로 찾음
     const howOf = (id) => {
@@ -634,7 +710,8 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     // 다음 진짜 클릭을 먹지 않게 다음 차례에 푼다
     swallowClick = true;
     setTimeout(() => { swallowClick = false; }, 0);
-    if (cancel) { place(lastScene); return; }
+    // 끄는 사이 그 도형이 접힌 묶음 안으로 숨었으면 놓은 자리를 기록하지 않는다(배치에 없으면 자동 자리로 지워진다)
+    if (cancel || !nodes.has(d.id)) { place(lastScene); return; }
     if (d.moved) commit(d.id, d.pos, d.inAt);
     else if (posOfScene(d.id)) commit(d.id, null, d.inAt); // 움직이지 않고 누름: 옮긴 도형이면 자동 자리로
   };
@@ -662,7 +739,16 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
   root.addEventListener("click", (ev) => {
     if (ev.ctrlKey || swallowClick) return;
     const mail = ev.target.closest(".badge.mail");
-    if (mail) { onMail(mail.closest(".part")?.dataset.id); return; } // 보낸 글 수는 복사하지 않고 보내기 창을 연다
+    if (mail) { onMail(mail.closest(".part")?.dataset.id); return; } // 보낸 글 수는 복사하지 않고 보내기 창을 연다(접힌 묶음에서도)
+    // 묶음의 ▸·▾ 단추, 또는 접힌 묶음 아무 곳: 펼치고 접는다. 다시 그리면 단추가 새로 만들어지므로 초점을 새 단추로 옮긴다
+    const shut = ev.target.closest("button.fold, .part.group.folded");
+    if (shut && root.contains(shut)) {
+      const id = shut.dataset.fold || shut.dataset.id;
+      if (shut.matches("button.fold")) refocus = id;
+      foldPick.set(id, !fold.folded.has(id));
+      refold();
+      return;
+    }
     const hit = ev.target.closest("[data-ref]");
     if (hit && root.contains(hit)) onCopy(hit.dataset.ref);
   });
@@ -671,7 +757,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     render,
     // 재고 있던 배치도 버린다(rev). 그대로 두면 끝난 뒤 lastKey 를 채워 다시 배치하라는 요청을 지운다
     reset() {
-      rev++; lastKey = pendingKey = null; prevJson = new Map(); mermaidCache.clear(); layout = null; pending.clear();
+      rev++; lastKey = pendingKey = null; prevJson = new Map(); mermaidCache.clear(); layout = null; pending.clear(); foldPick.clear();
       // 끄는 중에 다른 세션으로 바뀌었다: 끄기를 버린다(들린 모양·커서·글자 고르기 막기를 풀고 포인터를 놓는다)
       if (drag) {
         if (drag.raf) cancelAnimationFrame(drag.raf);
@@ -685,5 +771,12 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     isEmpty: () => nodes.size === 0,
     busy: () => pendingKey !== null, // 배치를 재는 중(부품이 아직 옛 자리나 0,0 에 있다)
     elementOf: (id) => nodes.get(id) || null,
+    // 접힌 묶음 안의 부품이면 그 묶음들을 펼쳐 다시 그리게 하고 true(찾기로 고른 부품을 보이려고)
+    unfold(id) {
+      if (!lastScene || !foldedAbove(lastScene, id)) return false;
+      for (let p = own(lastScene.items, id)?.in, i = 0; p && i < 10; p = own(lastScene.items, p)?.in, i++) if (fold.folded.has(p)) foldPick.set(p, false);
+      refold();
+      return true;
+    },
   };
 }

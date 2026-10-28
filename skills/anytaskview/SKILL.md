@@ -21,7 +21,7 @@ Board calls ride along with your work: put them first in the same message as you
 
 ## Project board (big picture)
 
-While the conversation belongs to a project, add `project:"<id>"` to plan/draw/note only at milestones: a work unit starts or ends, or a user decision is made or awaited. Units are plan steps (`u01` "01 첫 화판" done, `u08` "08 …" doing), open decisions are `note` kind `wait` on the unit, and a few boxes may show the current unit's parts. Never `clear` it (other conversations share it); remove parts with `del`. Session detail stays on the session board (no `project`).
+While the conversation belongs to a project, add `project:"<id>"` to plan/draw/note only at milestones: a work unit starts or ends, or a user decision is made or awaited. Units are plan steps (`u01` "01 첫 화판" done, `u08` "08 …" doing, and the next planned units as todo so the user sees what comes), open decisions are `note` kind `wait` on the unit. Keep one drawing there that shows the whole road: one box per unit in order with an edge to the next (done, the current one doing, planned ones todo; box ids must differ from step ids, e.g. box `b01` for step `u01`), extended when a unit starts, ends or is added; group finished phases if the road gets long, and the board folds them. Never `clear` it (other conversations share it); remove parts with `del`. Session detail stays on the session board (no `project`).
 
 ## Choosing the form
 
@@ -48,15 +48,15 @@ Pick the form that fits each part of the problem and mix two or three in a view.
 
 ## Patterns
 
-- Bug hunt: one `group` per area, one `box` per suspect with `ref` (path:line) and a `note` with the evidence; set the confirmed cause `done`, ruled-out ones `fail`. Add a `table` of what you reproduced (case, expected, actual).
+- Bug hunt: inside the task group, one `group` per area, one `box` per suspect with `ref` (path:line) and a `note` with the evidence; set the confirmed cause `done`, ruled-out ones `fail`. Add a `table` of what you reproduced (case, expected, actual).
 - Change across files: boxes for the call path in order, `edge` between them; mark the box you are editing `doing`. A `diamond` box for the branch that decides the behaviour.
 - Document or report: a `list` with one `item` per section; nested items for sub-sections; status per section.
 - Decision with options: a `table` with one row per option and its trade-offs, `status` `wait` while the user decides, the recommended one in `note`; after the answer, `note` the decision.
 - Flow the user must read as a whole (calls in order, a state machine, a schedule): one `mermaid` part next to the boxes.
 
-Keep each view small: about 8 boxes, short tables and diagrams. When a structure is finished, `del` it or `clear` before the next problem instead of growing one huge diagram.
+Keep each group small: about 8 boxes, short tables and diagrams.
 
-In a long conversation each new task (a new set of plan steps) gets its own drawing, sent with that plan; routine steps such as commit and push need none. Give a finished task's parts their final status in the message with your last tool calls for that task, not in a board-only message. If the drawing is still from before the task's steps, the board marks it as an earlier task's drawing and the next plan result says so once.
+The user wants to see the whole work at a glance, not a new picture per task. Draw each task inside one `group` titled with the task; inside it you have three more levels (for example an area group, a list in it, the list's items). In a long conversation each new task (a new set of plan steps) in the same work adds its own `group` to the existing drawing, sent with that plan, and may link it to earlier parts with edges; routine steps such as commit and push need none. Give a finished task's parts their final status (the group folds once nothing in it is doing, blocked or wait) in the message with your last tool calls for that task, not in a board-only message. The board folds a finished group into one box (the user clicks it to unfold), so the drawing stays readable as it grows. Use `clear` only when the subject changes completely (another project or problem); `del` parts that turned out wrong. If the drawing is still from before the task's steps, the board marks it as an earlier task's drawing and the next plan result says so once.
 
 ## Example
 
@@ -64,11 +64,11 @@ One message: plan, draw and the first Read of the work.
 
 ```json
 plan: {"steps":[{"id":"s1","title":"원인 찾기","status":"doing"},{"id":"s2","title":"고치기"},{"id":"s3","title":"검증"}]}
-draw: {"ops":[{"id":"g","kind":"group","label":"의심 지점"},
+draw: {"ops":[{"id":"t1","kind":"group","label":"빈 줄 멈춤 고치기"},{"id":"g","kind":"group","in":"t1","label":"의심 지점"},
   {"id":"a","kind":"box","in":"g","label":"파서 경계값","ref":"src/parse.c:120","status":"doing","icon":"code"},
   {"id":"b","kind":"box","in":"g","label":"버퍼 길이","ref":"src/buf.c:40"},
-  {"id":"t","kind":"table","label":"재현","cols":["입력","기대","실제"],"rows":[["빈 줄","무시","멈춤"],["한 줄","읽음","읽음"]]},
-  {"id":"q","kind":"mermaid","label":"호출 순서","src":"sequenceDiagram\n  읽기->>파서: 줄\n  파서->>버퍼: 복사\n  버퍼-->>파서: 넘침"}]}
+  {"id":"t","kind":"table","in":"t1","label":"재현","cols":["입력","기대","실제"],"rows":[["빈 줄","무시","멈춤"],["한 줄","읽음","읽음"]]},
+  {"id":"q","kind":"mermaid","in":"t1","label":"호출 순서","src":"sequenceDiagram\n  읽기->>파서: 줄\n  파서->>버퍼: 복사\n  버퍼-->>파서: 넘침"}]}
 Read: {"file_path":"src/parse.c"}
 ```
 

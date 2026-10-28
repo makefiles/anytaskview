@@ -209,6 +209,12 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .part.nostatus { border-left-color: var(--line); }
 .part.group { background: transparent; border-style: dashed; border-left-style: solid; padding: 0; max-width: none; }
 .part.group > .lbl { padding: 4px 30px 0 9px; color: var(--muted); }
+/* 끝난 묶음 접기: 접힌 묶음은 상자처럼 보이고 누르면 펼친다. ▸·▾ 단추는 묶음 제목 앞 */
+.part.group.folded { background: var(--panel); border-style: solid; padding: 6px 30px 6px 9px; max-width: 260px; cursor: pointer; }
+.part.group.folded > .lbl { padding: 0; color: var(--fg); }
+.part.group .fold { border: 0; background: none; padding: 0 4px 0 0; color: var(--muted); font: inherit; cursor: pointer; }
+.part.group .fold:hover { color: var(--accent); }
+.part .fsum { font-size: 12px; line-height: 16px; color: var(--muted); }
 .part .lbl { font-weight: 600; overflow-wrap: anywhere; }
 .part .ref { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 16px; color: var(--muted); overflow-wrap: anywhere; }
 .part .pnote { font-size: 13px; line-height: 18px; color: var(--muted); }

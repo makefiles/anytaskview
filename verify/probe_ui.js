@@ -1049,6 +1049,54 @@ async function main() {
     return `이름표 ${m.left}~${m.right}, 그림 폭 ${m.w}`;
   });
 
+  await check("끝난 묶음 접기: 처음부터 상자 하나로 접히고(선은 접힌 상자로, 안의 실패는 띠에 없음), 누르면 펼치고 접으며, 다 끝나면 마지막 묶음은 펼쳐 두고, 찾기로 고르면 펼쳐 보임", async () => {
+    const fd = `fold-${process.pid}`, sel = (id) => `document.querySelector('#canvas .part[data-id="${id}"]')`;
+    const draw = (ops) => post("/api/mcp", { env: fd, cwd, tool: "draw", input: { ops } });
+    await draw([
+      { id: "t1", kind: "group", label: "첫 작업" }, { id: "a", kind: "box", in: "t1", label: "접힌속상자A", status: "done" }, { id: "b", kind: "box", in: "t1", label: "B", status: "done" },
+      { id: "memo", kind: "text", in: "t1", text: "상태 없는 설명은 따지지 않음" }, { id: "x", kind: "box", in: "t1", label: "아니라고 지운 후보", status: "fail" },
+      { id: "t2", kind: "group", label: "둘째 작업" }, { id: "c", kind: "box", in: "t2", label: "C", status: "doing" },
+      { id: "ab", kind: "edge", from: "a", to: "b" }, { id: "bc", kind: "edge", from: "b", to: "c" }, { id: "ac", kind: "edge", from: "a", to: "c" },
+    ]);
+    await open(fd);
+    await waitFor(`${sel("t1")}?.classList.contains('folded') && !${sel("a")} && ${sel("c")} && !${sel("t2")}.classList.contains('folded')`);
+    await sleep(200);
+    // 안끼리의 선(ab)은 숨고, 밖으로 가는 두 선(bc·ac)은 접힌 상자에서 나가는 선 하나가 된다
+    const m = await evaluate(`(() => ({ edges: [...document.querySelectorAll('#canvas svg.edges path[data-id]')].map((p) => p.dataset.id).sort().join(','),
+      sum: ${sel("t1")}.querySelector('.fsum')?.textContent, done: ${sel("t1")}.classList.contains('st-done'), btn: ${sel("t1")}.querySelector('button.fold')?.getAttribute('aria-expanded') }))()`);
+    expect(m.edges === "bc", `선 ${m.edges}`);
+    // 아니라고 지운 후보(실패)가 섞여도 묶음은 끝이고, 끝난 묶음 안의 실패는 주의 띠에 올리지 않는다
+    expect(m.sum === "끝 · 부품 4개 · 실패 1" && m.done && m.btn === "false", JSON.stringify(m));
+    expect(!(await evaluate(`document.getElementById('band').textContent.includes('아니라고 지운 후보')`)), "끝난 묶음 안의 실패가 주의 띠에 남음");
+    // 접힌 상자를 누르면 펼치고, 단추로 다시 접는다
+    await evaluate(`${sel("t1")}.click()`);
+    await waitFor(`!${sel("t1")}.classList.contains('folded') && ${sel("a")} && ${sel("t1")}.querySelector('button.fold').getAttribute('aria-expanded') === 'true' && document.querySelectorAll('#canvas svg.edges path[data-id]').length === 3`);
+    await evaluate(`${sel("t1")}.querySelector('button.fold').click()`);
+    await waitFor(`${sel("t1")}.classList.contains('folded') && !${sel("a")}`);
+    // 키보드: 단추에서 Enter 로 펴도 다시 그린 뒤 초점이 새 단추에 남는다(다음 Enter 로 다시 접힘)
+    await evaluate(`${sel("t1")}.querySelector('button.fold').focus()`);
+    await key("Enter", "Enter", 13, "\r");
+    await waitFor(`!${sel("t1")}.classList.contains('folded') && document.activeElement === ${sel("t1")}.querySelector('button.fold')`);
+    await key("Enter", "Enter", 13, "\r");
+    await waitFor(`${sel("t1")}.classList.contains('folded') && document.activeElement === ${sel("t1")}.querySelector('button.fold')`);
+    // 묶음만 끝으로 두고 안에 승인 대기를 남기면 접지 않고, 그 대기는 주의 띠에 남는다
+    await draw([{ id: "t9", kind: "group", label: "배포", status: "done" }, { id: "w9", kind: "box", in: "t9", label: "배포 승인 받기", status: "wait" }]);
+    await waitFor(`${sel("w9")} && !${sel("t9")}.classList.contains('folded') && document.getElementById('band').textContent.includes('배포 승인 받기')`);
+    await draw([{ id: "t9", del: true }]);
+    // 둘째 작업도 끝나면 맨 바깥 묶음이 모두 끝났으니 가장 나중 묶음(t2)은 펼쳐 둔다. 새 작업 묶음이 생기면 접힌다
+    await draw([{ id: "c", status: "done" }]);
+    await waitFor(`${sel("t2")} && ${sel("c")} && !${sel("t2")}.classList.contains('folded')`);
+    await draw([{ id: "t3", kind: "group", label: "셋째 작업" }, { id: "d", kind: "box", in: "t3", label: "D", status: "doing" }]);
+    await waitFor(`${sel("t2")}?.classList.contains('folded') && !${sel("c")} && ${sel("d")}`);
+    // 찾기로 접힌 묶음 안의 상자를 고르면 그 묶음을 펼쳐 보인다
+    await evaluate(`document.getElementById('search-open').click()`);
+    await evaluate(`(() => { const i = document.getElementById('search-q'); i.value = '접힌속상자A'; i.dispatchEvent(new Event('input')); return 1; })()`);
+    await waitFor(`document.querySelector('#search .s-opt[aria-selected="true"]')?.textContent.includes('접힌속상자A')`);
+    await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await waitFor(`document.getElementById('search').hidden && ${sel("a")} && !${sel("t1")}.classList.contains('folded') && document.activeElement === ${sel("a")}`);
+    return `요약 「${m.sum}」, 선 ${m.edges}`;
+  });
+
   await check("모두 같은 크기로 들어가면 직접 그린 직선이 다른 상자를 지나지 않는 배치를 고름", async () => {
     // 02 세션이 그린 모양: 묶음 셋을 잇는 선 가운데 둘이 같은 묶음의 두 상자에서 나온다(섞기에서 한 선이 옆 상자를 지났다)
     const id = `cross-${process.pid}`;

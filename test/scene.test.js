@@ -84,7 +84,7 @@ test("draw: clear 는 ops 보다 먼저, 묶음을 지우면 자손과 화살표
   assert.deepEqual(Object.keys(h.scene.items), ["s1"]);
 });
 
-test("draw: in 은 group(item 은 list·item)만, 순환과 3단 넘는 깊이는 거부", () => {
+test("draw: in 은 group(item 은 list·item)만, 순환과 4단 넘는 깊이는 거부", () => {
   const h = harness();
   h.draw({ ops: [{ id: "a", kind: "box" }, { id: "l", kind: "list", label: "목차" }] });
   assert.match(h.draw({ ops: [{ id: "x", kind: "box", in: "a" }] }), /in 'a' 은 box/);
@@ -92,7 +92,11 @@ test("draw: in 은 group(item 은 list·item)만, 순환과 3단 넘는 깊이�
   assert.equal(h.draw({ ops: [{ id: "i1", kind: "item", label: "1장", in: "l" }, { id: "i2", kind: "item", label: "1.1", in: "i1" }] }), "적용 2");
   h.draw({ ops: [{ id: "g1", kind: "group" }, { id: "g2", kind: "group", in: "g1" }, { id: "g3", kind: "group", in: "g2" }] });
   assert.match(h.draw({ ops: [{ id: "g1", in: "g3" }] }), /돌아서 자기에게 옴/);
-  assert.match(h.draw({ ops: [{ id: "deep", kind: "box", in: "g3" }] }), /3단보다 깊음/);
+  // 작업 묶음 안에 3단(영역 묶음 > 목록 > 하위 항목)까지 둔다
+  assert.equal(h.draw({ ops: [{ id: "deep", kind: "box", in: "g3" }] }), "적용 1");
+  assert.match(h.draw({ ops: [{ id: "g4", kind: "group", in: "g3" }, { id: "deeper", kind: "box", in: "g4" }] }), /deeper 4단보다 깊음/);
+  h.draw({ ops: [{ id: "t", kind: "group", label: "작업" }, { id: "tl", kind: "list", in: "t" }, { id: "t1", kind: "item", in: "tl", label: "가 장" }] });
+  assert.equal(h.draw({ ops: [{ id: "t11", kind: "item", in: "t1", label: "가.1" }] }), "적용 1");
 });
 
 test("draw: 내장 속성 이름(constructor 등)을 부품이나 kind 로 착각하지 않는다", () => {
@@ -124,7 +128,7 @@ test("옛 그림: 새 작업 뒤 그림이 그대로면 그 작업의 다음 pla
   const msg = h.plan({ steps: [{ id: "b1", status: "done" }, { id: "b2", status: "doing" }] }, t2 + MIN);
   assert.match(msg, /^계획 4단계 · 지금 b2 · The drawing on the board is from before this task's steps \(last redrawn 60 min before the task began\)/);
   assert.match(msg, /still marked doing, blocked or wait there: x\./); // 끝난 상자·선은 싣지 않는다
-  assert.match(msg, /this message does not already draw it, draw it with your next tool calls/);
+  assert.match(msg, /this message does not already draw it, add it to the drawing as a new group with your next tool calls \(clear:true only when the subject changed completely\)/);
   assert.match(msg, /routine steps such as commit and push need none/);
   assert.equal(h.scene.view.hintT, t2);
   assert.doesNotMatch(h.plan({ steps: [{ id: "b2", status: "doing", note: "다시" }] }, t2 + 2 * MIN), /drawing/); // 작업마다 한 번
@@ -447,6 +451,22 @@ test("ids 줄이기(brief): 끝난 단계는 최근 몇 개만 제목을 싣고 
   const v = idsView(g.scene, 40, 1);
   assert.match(v.text, /^plan: 끝남 69: d60 d59 .* d1 외 9개, d0 "끝 0" done$/);
   assert.equal(v.cut, true);
+});
+
+test("ids 줄이기(brief): 큰 그림의 단위 상자도 끝난 것은 id 만, 선은 수만 실어 단위가 쌓여도 잘리지 않는다", () => {
+  const h = harness(), N = 30;
+  h.plan({ steps: Array.from({ length: N }, (_, i) => ({ id: `u${i}`, title: `단위 ${i}`, status: i < N - 2 ? "done" : i === N - 2 ? "doing" : "todo" })) });
+  for (let at = 0; at < N; at += 20) {
+    const ops = [];
+    for (let i = at; i < Math.min(N, at + 20); i++) {
+      ops.push({ id: `b${i}`, kind: "box", label: `단위 ${i}`, status: i < N - 2 ? "done" : i === N - 2 ? "doing" : "todo" });
+      if (i) ops.push({ id: `w${i}`, kind: "edge", from: `b${i - 1}`, to: `b${i}` });
+    }
+    h.draw({ ops });
+  }
+  const v = idsView(h.scene, 40, 3);
+  assert.equal(v.cut, false);
+  assert.match(v.text, / \| draw: 끝남 25: b0 b1 .* b24, b25 "단위 25" box done, b26 "단위 26" box done, b27 "단위 27" box done, b28 "단위 28" box doing, b29 "단위 29" box todo, 선 29개$/);
 });
 
 test("ref 에 줄바꿈 같은 제어 문자는 받지 않는다(복사해 터미널에 붙이면 명령이 된다)", () => {

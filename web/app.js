@@ -2,7 +2,7 @@
 // 서버가 SSE 로 보내는 결과(res)를 lib/scene.js 의 applyRes 로 적용한다. 재생도 같은 함수로 처음부터 다시 적용한다.
 // 패널 폭·접힘·배율·거르기처럼 이 브라우저에만 남는 값은 localStorage 에 두고, 읽을 때 범위로 자른다.
 import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK } from "/lib/scene.js";
-import { createCanvas, safeRef } from "/canvas.js";
+import { createCanvas, safeRef, groupSummary, inFinishedGroup } from "/canvas.js";
 
 const ST_KO = { todo: "할 일", doing: "진행", done: "끝", fail: "실패", blocked: "막힘", wait: "승인 대기" };
 const ST_ICO = { todo: "○", doing: "▶", done: "✓", fail: "✗", blocked: "‼", wait: "…" };
@@ -115,6 +115,7 @@ const canvas = createCanvas($("canvas"), {
   onRefuse: toast,
   getZoom: () => view.zoom,
   onPlaced: () => { if (askFor && !askBtn.hidden && $("canvas").contains(askFor)) showAsk(askFor); placeComposer(); },
+  onFold: () => queueRender("view"), // 접고 펼친 뒤에도 상자마다의 보내기 표시를 다시 단다
 });
 
 const viewScene = () => (state.replay ? state.replay.scene : state.scene);
@@ -579,8 +580,10 @@ function bandItems(scene) {
     const last = [...scene.timeline].reverse().find((e) => e.type === "fact" && e.f === "notify");
     out.push({ kind: "input", ico: "?", text: `입력 필요${last && last.text ? ": " + last.text : ""}` });
   }
+  // 끝난 묶음 안의 실패(아니라고 지운 후보 따위)는 지난 일이라 띄우지 않는다
+  const groups = groupSummary(scene);
   for (const it of Object.values(scene.items)) {
-    if (it.kind === "edge") continue;
+    if (it.kind === "edge" || (it.kind !== "step" && it.status === "fail" && inFinishedGroup(scene, groups, it.id))) continue;
     const name = it.kind === "step" ? it.title : it.label || it.id;
     if (it.status === "wait" && !it.answered) { if (live) out.push({ kind: "wait", ico: ST_ICO.wait, text: `승인 대기: ${name}`, id: it.id, step: it.kind === "step", ord: it.ord }); }
     else if (it.status === "blocked") { if (live) out.push({ kind: "blocked", ico: ST_ICO.blocked, text: `막힘: ${name}${it.note ? " · " + it.note : ""}`, id: it.id, step: it.kind === "step", ord: it.ord }); }
@@ -2414,6 +2417,7 @@ function applyFocus(afterCanvas) {
     if (li) { state.focus = null; li.scrollIntoView({ block: "center" }); flashIt(li); li.focus({ preventScroll: true }); }
     else if (afterCanvas) state.focus = null;
   } else if (f.part && afterCanvas && !canvas.busy()) {
+    if (canvas.unfold(f.part)) return; // 접힌 묶음 안: 펼쳐 다시 그린 뒤에 고른다
     state.focus = null;
     if (revealPart(f.part)) canvas.elementOf(f.part)?.focus({ preventScroll: true });
   } else if (!f.part) { state.focus = null; $("sess-name").focus({ preventScroll: true }); } // 세션·프로젝트만 골랐다
