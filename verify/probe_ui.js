@@ -342,6 +342,15 @@ async function main() {
     await settledPositions();
     expect(exceptions.length === errorCount, "Mermaid 오류가 페이지 예외로 전달됐습니다.");
   });
+  await check("Mermaid 를 그리는 동안 임시 요소가 body 에 붙지 않아 화면이 밀리지 않음", async () => {
+    // body 는 행을 못박은 grid 라 body 에 붙은 흐름 요소는 띠 자리(2행)에 들어가 화면 전체를 민다
+    await evaluate(`(() => { window.__added = []; window.__mo = new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) window.__added.push(n.id || n.tagName); }); window.__mo.observe(document.body, { childList: true }); return 1; })()`);
+    await mcp("draw", { ops: [{ id: "mermaid-seq", kind: "mermaid", label: "순서 Mermaid", src: "sequenceDiagram\n  A->>B: 요청\n  B-->>A: 응답" }] });
+    await waitFor(`!!document.querySelector('[data-id="mermaid-seq"] .msvg svg')`);
+    const added = await evaluate(`(() => { window.__mo.disconnect(); return window.__added; })()`);
+    expect(!added.some((id) => /^d?atv-m/.test(id)), `body 에 붙은 Mermaid 임시 요소: ${added.join(", ")}`);
+    return added.length ? `body 에 붙은 것: ${added.join(", ")}` : "";
+  });
   await check("현재 단계의 wait 메모가 띠와 입력 필요 탭 제목을 표시함", async () => {
     await mcp("note", { kind: "wait", on: "s1", text: "확인 후 알려 주세요." });
     await waitFor(`!document.getElementById('band').hidden &&

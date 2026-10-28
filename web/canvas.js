@@ -99,6 +99,20 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     document.head.append(s);
   }));
 
+  // Mermaid 는 그림 크기를 재려고 임시 요소(d<id>)를 붙인다. 자리를 주지 않으면 body 에 붙는데, body 는 행을 못박은 grid 라
+  // 띠가 숨어 빈 2행에 그 요소가 들어가 그리는 동안 화면 전체를 그 높이만큼 아래로 민다. 화면 밖 고정 칸에서 재게 한다
+  function mermaidWork() {
+    let el = document.getElementById("mermaid-work");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "mermaid-work";
+      el.setAttribute("aria-hidden", "true");
+      el.style.cssText = "position:fixed;left:-100000px;top:0;width:1600px;pointer-events:none";
+      document.body.append(el);
+    }
+    return el;
+  }
+
   async function mermaidSvg(src) {
     try { await loadMermaid(); } catch (e) { return { error: e.message }; }
     const theme = getTheme();
@@ -118,7 +132,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     let out;
     try {
       await window.mermaid.parse(src); // 문법이 틀리면 그리기 전에 여기서 멈춘다
-      out = { svg: (await window.mermaid.render(id, src)).svg };
+      out = { svg: (await window.mermaid.render(id, src, mermaidWork())).svg };
     } catch (e) {
       out = { error: String(e && e.message ? e.message : e).slice(0, 300) };
       for (const left of [id, `d${id}`]) document.getElementById(left)?.remove(); // 그리다 남긴 임시 요소

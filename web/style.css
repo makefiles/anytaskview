@@ -69,6 +69,8 @@ h2 { font-size: 15px; line-height: 20px; font-weight: 700; color: var(--title); 
 
 /* 아이콘(.i)과 받는 쪽 로고(.logo): index.html 의 SVG 심벌. 아이콘은 글자색을 따른다 */
 .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+/* Mermaid 가 글자 크기를 재려고 body 에 잠깐 붙이는 svg 가 body grid 의 빈 행(숨은 띠 자리)에 들어가 배치를 흔들지 않게 */
+body > svg:not(.sprite) { position: fixed; left: -100000px; top: 0; }
 svg.i { width: 16px; height: 16px; flex: none; }
 svg.logo { width: 16px; height: 16px; flex: none; color: var(--fg); }
 button:has(> svg) { display: inline-flex; align-items: center; gap: 6px; }
