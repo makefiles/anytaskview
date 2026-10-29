@@ -695,6 +695,21 @@ test("빈 세션: 모르는 세션의 끝으로는 세션을 만들지 않고, �
   assert.deepEqual([s.X0, s.X1.empty, s.X2.empty, s.X3.empty], [undefined, true, false, false]);
 });
 
+test("세션 목록에 도는 하위 에이전트 수를 싣는다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  await f.hook("G1", { f: "start", cwd: "/w" });
+  const agents = async () => (await f.read("/api/sessions")).json.find((s) => s.id === "G1").agents;
+  assert.equal(await agents(), 0);
+  await f.hook("G1", { f: "agent-start", agent: "a1", agentType: "Explore" });
+  await f.hook("G1", { f: "agent-start", agent: "a2", agentType: "workflow-subagent", desc: "review:bugs" });
+  await f.hook("G1", { f: "agent-call", agent: "a1", desc: "문서 찾기", agentType: "Explore" });
+  assert.equal(await agents(), 2);
+  await f.hook("G1", { f: "agent-stop", agent: "a1", agentType: "Explore", last: "끝" });
+  assert.equal(await agents(), 1);
+  assert.equal((await f.read("/api/sessions/G1/snapshot")).json.scene.agents.a1.desc, "문서 찾기");
+});
+
 test("SessionStart 답에 그 대화의 화판에 그림이 있는지 싣는다(그리기 알림을 끈다)", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());

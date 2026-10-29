@@ -1519,6 +1519,75 @@ async function main() {
     expect(r.clamp === "3" && r.promptH <= r.lineH * 3 + 1, `사용자 입력이 3줄로 접히지 않음: ${r.clamp} ${r.promptH}px`);
     return `글 머리 ${r.lefts[0]}px, 메모 ${r.noteLines}줄`;
   });
+  await check("하위 에이전트 이름표: 도는 에이전트 칸·타임라인 줄 앞·세션 줄에 같은 이름과 색, 이름표를 누르면 그 에이전트 줄만, 끝나면 칸이 사라짐", async () => {
+    await open(sid);
+    await hook({ f: "agent-start", agent: "probe-ag1", agentType: "general-purpose" });
+    await hook({ f: "agent-call", agent: "probe-ag1", desc: "로그 원인 찾기", agentType: "general-purpose" });
+    await hook({ f: "agent-start", agent: "probe-wf1", agentType: "workflow-subagent", desc: "review:bugs" });
+    await hook({ f: "run-start", id: "probe-ag-run", cmd: "grep -r err logs", desc: "오류 줄 찾기", agent: "probe-ag1", agentType: "general-purpose" });
+    await hook({ f: "run-start", id: "probe-main-run", cmd: "ls", desc: "주 에이전트 명령" });
+    const chips = `[...document.querySelectorAll('#plan-agents button.atag')]`;
+    await waitFor(`!document.getElementById('plan-agents').hidden && ${chips}.length === 2 && document.querySelector('#sessions .sess.sel').textContent.includes('에이전트 2')`);
+    const r = await evaluate(`(() => {
+      const chips = ${chips}.map((b) => ({ text: b.textContent, color: getComputedStyle(b.querySelector('.adot')).backgroundColor }));
+      const row = [...document.querySelectorAll('#tl-body li')].find((li) => li.textContent.includes('오류 줄 찾기'));
+      const tag = row?.querySelector('.tl-t button.atag');
+      return { chips, tag: tag?.textContent, tagColor: tag && getComputedStyle(tag.querySelector('.adot')).backgroundColor, sub: row?.classList.contains('sub') };
+    })()`);
+    expect(r.chips.some((c) => c.text.includes('로그 원인 찾기')) && r.chips.some((c) => c.text.includes('review:bugs')), JSON.stringify(r.chips));
+    const mine = r.chips.find((c) => c.text.includes('로그 원인 찾기'));
+    expect(r.sub && r.tag?.includes('로그 원인 찾기') && r.tagColor === mine.color, `줄 앞 이름표: ${JSON.stringify(r)}`);
+    // 칸의 이름표를 누르면 그 에이전트 줄만 보이고, 거르기 줄의 ✕ 로 풀린다
+    const rows = `[...document.querySelectorAll('#tl-body li[data-key]')]`;
+    const onlyAg = `${rows}.length > 0 && ${rows}.every((li) => li.querySelector('.atag')?.textContent.includes('로그 원인 찾기'))`;
+    await evaluate(`${chips}.find((b) => b.textContent.includes('로그 원인 찾기')).click()`);
+    await waitFor(`${onlyAg} && document.querySelector('#tl-filters button.atag')?.textContent.includes('로그 원인 찾기')`);
+    await evaluate(`document.querySelector('#tl-filters button.atag').click()`);
+    await waitFor(`!document.querySelector('#tl-filters button.atag') && document.getElementById('tl-body').textContent.includes('주 에이전트 명령')`);
+    // 줄 앞 이름표를 눌러도 걸리고, 다시 누르면 풀린다. 이름표를 눌러도 줄의 창은 열리지 않는다
+    const rowTag = `[...document.querySelectorAll('#tl-body li')].find((li) => li.textContent.includes('오류 줄 찾기')).querySelector('button.atag')`;
+    await evaluate(`${rowTag}.click()`);
+    await waitFor(onlyAg);
+    expect(!(await evaluate(`document.getElementById('tl-full').open`)), "이름표를 누르니 줄의 창이 열렸습니다");
+    await evaluate(`${rowTag}.click()`);
+    await waitFor(`document.getElementById('tl-body').textContent.includes('주 에이전트 명령')`);
+    // 도는 명령 줄은 매초 새로 만들어도 그 줄 이름표의 키보드 초점이 남는다
+    await evaluate(`${rowTag}.focus()`);
+    await new Promise((ok) => setTimeout(ok, 2200));
+    expect(await evaluate(`document.activeElement?.matches('#tl-body button.atag') && document.activeElement.closest('li').textContent.includes('오류 줄 찾기')`), "도는 명령 줄의 이름표 초점이 사라졌습니다");
+    await hook({ f: "run-end", id: "probe-ag-run", cmd: "grep -r err logs", agent: "probe-ag1", agentType: "general-purpose" });
+    await hook({ f: "run-end", id: "probe-main-run", cmd: "ls" });
+    await hook({ f: "agent-stop", agent: "probe-ag1", agentType: "general-purpose", last: "원인 하나" });
+    await hook({ f: "agent-stop", agent: "probe-wf1", agentType: "workflow-subagent", last: "지적 없음" });
+    await waitFor(`document.getElementById('plan-agents').hidden && !document.querySelector('#sessions .sess.sel').textContent.includes('에이전트')`);
+    // 누르면 창이 열리는 줄(끝 줄, 마지막 글)의 이름표를 눌러도 창은 열리지 않고 거르기만 걸린다
+    const stopTag = `[...document.querySelectorAll('#tl-body li.full')].find((li) => li.textContent.includes('원인 하나')).querySelector('button.atag')`;
+    await waitFor(`${stopTag} != null`);
+    await evaluate(`${stopTag}.click()`);
+    await waitFor(onlyAg);
+    expect(!(await evaluate(`document.getElementById('tl-full').open`)), "끝 줄의 이름표를 누르니 창이 열렸습니다");
+    await evaluate(`${stopTag}.click()`);
+    await waitFor(`document.getElementById('tl-body').textContent.includes('주 에이전트 명령')`);
+    // 줄의 다른 곳을 누르면 전체 보기 창: 글에는 이름표 이름이 섞이지 않고 제목에 붙는다
+    await evaluate(`${stopTag}.closest('li').querySelector('.when').click()`);
+    await waitFor(`document.getElementById('tl-full').open`);
+    const full = await evaluate(`({ body: document.getElementById('tl-full-body').textContent, title: document.getElementById('tl-full-title').textContent })`);
+    await evaluate(`document.getElementById('tl-full').close()`);
+    expect(full.body.startsWith('끝') && full.body.includes('원인 하나') && !full.body.includes('로그 원인 찾기') && full.title.includes('로그 원인 찾기'), JSON.stringify(full));
+    // 줄이 400개를 넘는 세션: 먼저 시작한 에이전트를 골라도 그 시작 줄까지 보인다
+    const many = `ui-agents-${process.pid}`, mpid = process.pid + 80;
+    await post("/api/hook", { sid: many, pid: mpid, fact: { f: "start", cwd: "/tmp/에이전트", source: "startup" } });
+    await post("/api/hook", { sid: many, pid: mpid, fact: { f: "agent-start", agent: "probe-old1", agentType: "Explore", desc: "먼저 시작한 일" } });
+    for (let i = 0; i < 410; i++) await post("/api/hook", { sid: many, pid: mpid, fact: { f: "todo", tool: "TodoWrite", text: `주 에이전트 할 일 ${i}` } });
+    await open(many);
+    const oldChip = `[...document.querySelectorAll('#plan-agents button.atag')].find((b) => b.textContent.includes('먼저 시작한 일'))`;
+    await waitFor(`${oldChip} != null`);
+    await evaluate(`${oldChip}.click()`);
+    await waitFor(`[...document.querySelectorAll('#tl-body li')].some((li) => li.textContent.includes('먼저 시작한 일') && li.querySelector('.tl-k')?.textContent === '에이전트')`);
+    await post("/api/hook", { sid: many, pid: mpid, fact: { f: "end", reason: "other" } });
+    await open(sid);
+    return `칸 ${r.chips.length}개, 색 ${mine.color}`;
+  });
   await check("한국어 줄바꿈: 넘어간 줄은 낱말 중간이 아니라 띄어쓰기 자리에서 바뀜", async () => {
     const r = await evaluate(`(() => {
       const note = [...document.querySelectorAll('#tl-body li')].find((li) => li.textContent.includes('아주 긴 결정 메모')).querySelector('.tl-t');

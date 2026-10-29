@@ -1,5 +1,5 @@
 {
-  "description": "anytaskview: 세션 사건을 화판에 올린다(파일 수정·명령·하위 에이전트·입력 필요). 그림 없이 도구를 8번 넘게 쓰면 그 대화에 한 번 알린다",
+  "description": "anytaskview: 세션 사건을 화판에 올린다(파일 수정·명령·하위 에이전트·입력 필요). 그림 없이 도구를 8번 넘게 쓰면 그 대화에 한 번 알린다. 하위 에이전트의 화판 호출은 막고, 그린 적 있는 대화에는 하위 에이전트 결과가 돌아올 때 알린다",
   "hooks": {
     "SessionStart": [
       {
@@ -53,6 +53,19 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "mcp__.*anytaskview.*__(plan|draw|note|ids|project)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/nudge",
+            "args": [
+              "pre"
+            ],
+            "timeout": 2
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -68,7 +81,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|TaskCreate|TaskUpdate|TodoWrite",
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|TaskCreate|TaskUpdate|TodoWrite|Agent|Task",
         "hooks": [
           {
             "type": "command",

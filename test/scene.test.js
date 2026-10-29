@@ -1,7 +1,7 @@
 // 장면 규칙 시험: 명령 검사, 지금 단계, 훅 사실의 순서 처리, 재생이 실시간과 같은지
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs, drawingStale, DRAW_SLACK } from "../lib/scene.js";
+import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs, drawingStale, DRAW_SLACK, agentsRunning } from "../lib/scene.js";
 
 // 서버처럼: 검사 → 기록(JSON) → 기록을 되읽어 적용
 function harness(resume) {
@@ -509,6 +509,41 @@ test("하위 에이전트가 끝나면 그 에이전트가 열어 둔 실행을 
   h.fact({ f: "agent-stop", agent: "ag" }, 20);
   assert.equal(h.scene.runs.r1.state, "unknown");
   assert.equal(h.scene.runs.r2.state, "running");
+});
+
+test("하위 에이전트 이름표: 시작·설명·끝을 도착 순서와 상관없이 합치고, 도는 것만 세며, 재생도 같다", () => {
+  const h = harness(), H = 3600_000;
+  // 설명(Agent 도구 결과)이 시작보다 먼저 온다
+  h.fact({ f: "agent-call", agent: "a1", desc: "로그 원인 찾기", agentType: "general-purpose" }, 10);
+  h.fact({ f: "agent-start", agent: "a1", agentType: "general-purpose" }, 20);
+  h.fact({ f: "agent-start", agent: "w1", agentType: "workflow-subagent", desc: "review:bugs" }, 30);
+  // 끝이 시작보다 먼저 온 에이전트는 돌지 않는다
+  h.fact({ f: "agent-stop", agent: "w2", agentType: "workflow-subagent", desc: "review:perf" }, 40, 35);
+  h.fact({ f: "agent-start", agent: "w2", agentType: "workflow-subagent" }, 41, 31);
+  assert.deepEqual(h.scene.agents.a1, { id: "a1", type: "general-purpose", desc: "로그 원인 찾기", startT: 20 });
+  assert.equal(h.scene.agents.w2.desc, "review:perf");
+  assert.equal(h.scene.agents.w2.stopT, 35);
+  assert.equal(h.scene.timeline.filter((e) => e.f === "agent-call").length, 0, "설명은 타임라인 줄을 만들지 않는다");
+  assert.deepEqual(agentsRunning(h.scene, 100).map((a) => a.id), ["a1", "w1"]);
+  h.fact({ f: "agent-stop", agent: "a1", agentType: "general-purpose", last: "찾음" }, 200);
+  assert.deepEqual(agentsRunning(h.scene, 300).map((a) => a.id), ["w1"]);
+  assert.deepEqual(agentsRunning(h.scene, 30 + 2 * H + 1), [], "끝을 잃은 것은 두 시간 뒤 돌지 않는 것으로 본다");
+  const start = h.scene.timeline.find((e) => e.f === "agent-start" && e.agent === "a1");
+  assert.equal(entryText(h.scene, start), "로그 원인 찾기 general-purpose", "찾기에 설명이 들어간다");
+  // 모양이 틀린 사실은 이름표를 만들지 않는다
+  h.fact({ f: "agent-call", agent: "__proto__", desc: "x" }, 400);
+  h.fact({ f: "agent-call", agent: "a3", desc: { no: 1 } }, 401);
+  assert.equal(Object.hasOwn(h.scene.agents, "__proto__"), false);
+  assert.equal(h.scene.agents.a3.desc, undefined);
+  assert.deepEqual(h.replay().agents, h.scene.agents);
+  h.fact({ f: "end", reason: "exit" }, 500);
+  assert.deepEqual(agentsRunning(h.scene, 600), [], "세션이 끝나면 돌지 않는다");
+  // 같은 세션을 다시 열어도 끝을 잃은 에이전트(w1)는 되살아나지 않고, 끝난 에이전트를 이어 돌리면 다시 돈다
+  h.fact({ f: "start", source: "resume" }, 700);
+  assert.deepEqual(agentsRunning(h.scene, 800), []);
+  h.fact({ f: "agent-start", agent: "a1", agentType: "general-purpose" }, 900);
+  assert.deepEqual(agentsRunning(h.scene, 1000).map((a) => a.id), ["a1"]);
+  assert.deepEqual(h.replay().agents, h.scene.agents);
 });
 
 test("이어받기 문구: 설정한 문구·인계 문서 경로에서 키를 읽고, 설정이 없으면 읽지 않으며, 앞 대화(prev)는 처음 한 번만 남긴다", () => {

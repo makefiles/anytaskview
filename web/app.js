@@ -1,7 +1,7 @@
 // 화면: 세션 목록, 맨 위 한 줄, 주의 띠, 가운데 그림, 계획 나무, 타임라인, 재생 막대.
 // 서버가 SSE 로 보내는 결과(res)를 lib/scene.js 의 applyRes 로 적용한다. 재생도 같은 함수로 처음부터 다시 적용한다.
 // 패널 폭·접힘·배율·거르기처럼 이 브라우저에만 남는 값은 localStorage 에 두고, 읽을 때 범위로 자른다.
-import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK, refPath, normPath } from "/lib/scene.js";
+import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK, refPath, normPath, agentsRunning } from "/lib/scene.js";
 import { createCanvas, safeRef, groupSummary, inFinishedGroup } from "/canvas.js";
 
 const ST_KO = { todo: "할 일", doing: "진행", done: "끝", fail: "실패", blocked: "막힘", wait: "승인 대기" };
@@ -94,6 +94,7 @@ const state = {
   projects: { projects: {}, members: {} }, // 프로젝트 정의·소속과 큰 그림 요약(서버의 projects.json)
   config: { resume: null, trashDays: 30, diffKB: 16 }, // 서버 설정(이어받기 문구, 지난 대화를 휴지통으로 옮기기까지 날수·null 이면 끔, 수정 diff 보관 KB·0 이면 끔)
   dragging: null,        // 목록에서 끌고 있는 세션 id
+  tlAgent: null,         // 타임라인을 이 하위 에이전트의 줄만 보이게 거르는 중(이름표를 눌렀을 때)
 };
 
 function theme() {
@@ -397,6 +398,7 @@ function connect(sid) {
   state.replayLoading = null;
   state.replayToken++; // 받는 중이던 다른 세션의 기록은 버린다
   state.tlTopSeq = 0;
+  state.tlAgent = null; // 에이전트 id 는 세션마다 다르다
   state.followed = null;
   canvas.reset();
   tlCache = new Map();
@@ -679,7 +681,7 @@ function sessRow(thread, now) {
   // 상태 글자는 따로 감싸 작업 중·입력 필요면 빛이 지나가게 한다(CSS .stw)
   const stw = el("span", `stw ${s.status}`, SESS_KO[s.status] || s.status);
   if (s.status === "working" || s.status === "input") addShine(stw);
-  r2.append(logo, stw, ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}`);
+  r2.append(logo, stw, ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}${s.agents ? ` · 에이전트 ${s.agents}` : ""}`);
   b.title = `${sessName(s)}\n${agentName(s)} · ${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
   b.append(r1, r2);
   b.addEventListener("click", () => { if (s.id !== state.sid) connect(s.id); }); // 앞 대화를 보는 중이어도 줄이 보이는 대화로 간다
@@ -1111,7 +1113,30 @@ const showDone = () => store.get("atv.showDone") === "1";
 function setShowDone(on) { store.set("atv.showDone", on ? "1" : "0"); queueRender(); }
 $("toggle-done").addEventListener("click", () => { state.planReveal = null; setShowDone(!showDone()); });
 
+// 계획 칸 위 「도는 에이전트」: 지금 도는 하위 에이전트의 이름표와 걸린 시간. 1초마다 불리므로 바뀔 때만 다시 만든다
+const AGENTS_SHOWN = 6;
+function renderAgents(scene, now) {
+  const box = $("plan-agents"), list = isProj(state.sid) ? [] : agentsRunning(scene, now);
+  box.hidden = !list.length;
+  const shown = list.slice(0, AGENTS_SHOWN), more = list.length - shown.length;
+  const key = JSON.stringify([more, shown.map((a) => [a.id, subInfo(scene, a.id).name])]);
+  if (key !== renderAgents.key) {
+    renderAgents.key = key;
+    const keep = document.activeElement?.closest?.("#plan-agents button.atag")?.dataset.agent; // 다시 만든 뒤 같은 이름표로 초점을 되돌린다
+    box.replaceChildren(...(list.length ? [el("span", "alabel", `에이전트 ${list.length}`)] : []),
+      ...shown.map((a) => { const b = agentTag(scene, a.id); b.append(el("span", "dur")); return b; }),
+      ...(more ? [el("span", "muted", `외 ${more}`)] : []));
+    if (keep) box.querySelector(`button.atag[data-agent="${CSS.escape(keep)}"]`)?.focus({ preventScroll: true });
+  }
+  for (const b of box.querySelectorAll("button.atag")) {
+    b.setAttribute("aria-pressed", String(state.tlAgent === b.dataset.agent));
+    const a = own(scene.agents || {}, b.dataset.agent), d = b.querySelector(".dur"), text = a?.startT ? fmtDur(now - a.startT) : "";
+    if (d.textContent !== text) d.textContent = text;
+  }
+}
+
 function renderPlan(scene, now) {
+  renderAgents(scene, now);
   const body = $("plan-body"), cur = currentStep(scene), nowBox = $("plan-now");
   const steps = Object.values(scene.items).filter((it) => it.kind === "step").sort((a, b) => a.ord - b.ord);
   const toggle = $("toggle-done");
@@ -1232,6 +1257,42 @@ function factParts(e) {
   }
 }
 
+// 하위 에이전트 이름표: 이름(맡은 일의 설명, 없으면 종류)과 색(id 로 고른 8색 가운데 하나, 점에만 쓴다).
+// 계획 칸 위·타임라인 줄 앞·거르기 줄에 같은 모양으로 쓰고, 누르면 타임라인을 그 에이전트의 줄만 보이게 한다
+const AGENT_COLORS = 8;
+const agentOf = (scene, e) => (e.type === "run" ? own(scene.runs, e.id)?.agent : e.agent);
+// 1.4.0 전 기록에는 이름표(agents)가 없다. 그때는 타임라인의 시작 줄에 실린 종류를 쓴다(타임라인이 늘 때만 다시 모음)
+const oldTypes = new WeakMap();
+function startType(scene, id) {
+  let m = oldTypes.get(scene);
+  if (!m || m.n !== scene.timeline.length) {
+    m = { n: scene.timeline.length, types: new Map() };
+    for (const e of scene.timeline) if (e.f === "agent-start" && e.agent && e.agentType) m.types.set(e.agent, e.agentType);
+    oldTypes.set(scene, m);
+  }
+  return m.types.get(id) || "";
+}
+function subInfo(scene, id) {
+  const a = own(scene.agents || {}, id);
+  let h = 0;
+  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return { name: a?.desc || a?.type || startType(scene, id) || "에이전트", color: `ac${h % AGENT_COLORS}` };
+}
+function agentTag(scene, id) {
+  const { name, color } = subInfo(scene, id), b = el("button", `atag ${color}`);
+  b.type = "button";
+  b.dataset.agent = id;
+  b.append(el("span", "adot"), el("span", "aname", name));
+  b.title = `${name}\n누르면 타임라인에 이 에이전트의 줄만 보입니다(다시 누르면 풀림)`;
+  return b;
+}
+// 같은 이름표를 다시 누르면 풀린다
+function setTlAgent(id) {
+  state.tlAgent = state.tlAgent === id ? null : id;
+  state.tlFocus = null; // 찾기로 펼쳐 둔 줄이 거르기를 비켜 보이지 않게
+  queueRender();
+}
+
 // 타임라인 거르기: 종류별로 켜고 끈다(눌린 것이 보이는 것)
 const TL_KINDS = [["talk", "대화"], ["run", "명령"], ["file", "파일"], ["note", "메모"], ["agent", "에이전트"]];
 const tlHide = new Set(Array.isArray(store.json("atv.tlHide", [])) ? store.json("atv.tlHide", []) : []);
@@ -1301,8 +1362,11 @@ function rowKey(scene, row, now) {
   if (row.mark) return "mark";
   const e = row.e;
   if (e.type === "msg") return `m${e.seq}:${JSON.stringify(own(scene.msgs || {}, e.mid))}:${agentName(state.sessions.get(state.sid))}`;
-  if (e.type === "run") { const r = own(scene.runs, e.id); return `r${e.seq}:${JSON.stringify(r)}:${runDur(r, now) ?? ""}`; }
-  return `${e.type}${e.seq}:${row.n}`;
+  // 하위 에이전트 줄은 이름표 이름도 열쇠에 넣는다(설명이 시작 뒤에 올 수 있다)
+  const sub = agentOf(scene, e), tag = sub ? `:${subInfo(scene, sub).name}` : "";
+  // 실행 줄의 걸린 시간은 열쇠에 넣지 않고 같은 줄의 글자만 고친다(매초 새로 만들면 누르는 사이 줄이 바뀌어 클릭이 사라진다)
+  if (e.type === "run") return `r${e.seq}:${JSON.stringify(own(scene.runs, e.id))}${tag}`;
+  return `${e.type}${e.seq}:${row.n}${tag}`;
 }
 const runDur = (r, now) => { const d = r.state === "running" || r.state === "wait" ? now - r.start : r.dur ?? (r.end && r.start ? r.end - r.start : null); return d == null ? null : fmtDur(d); };
 function tlRow(scene, { mark, e, n, edits }, now) {
@@ -1332,7 +1396,7 @@ function tlRow(scene, { mark, e, n, edits }, now) {
     const t = body(r.desc || r.cmd);
     if (dur != null) t.append(el("span", "dur", ` · ${dur}`)); // 걸린 시간은 글 뒤에(표지를 짧게 두어 칸 폭을 맞춘다)
     li.title = r.cmd + (r.error ? `\n${r.error}` : "");
-    if (r.agent) li.classList.add("sub");
+    if (r.agent) { li.classList.add("sub"); t.prepend(agentTag(scene, r.agent)); }
   } else {
     if (e.agent) li.classList.add("sub");
     if (e.f === "prompt") { li.classList.add(isSysPrompt(e) ? "sys" : "prompt"); full(); }
@@ -1340,6 +1404,7 @@ function tlRow(scene, { mark, e, n, edits }, now) {
     // 사용자 입력은 「사용자」 표지를 붙여 화판에서 보낸 글·기계 기록과 가른다
     if (e.f === "prompt" && !isSysPrompt(e)) { kind("user", "사용자"); body(e.text); }
     else { const [label, text] = factParts(e); kind(`fact ${e.f}`, label); body(text); }
+    if (e.agent) li.querySelector(".tl-t").prepend(agentTag(scene, e.agent));
     if (e.f === "edit") {
       const t = li.querySelector(".tl-t");
       t.append(el("span", "times", n > 1 ? `×${n}` : ""));
@@ -1373,6 +1438,18 @@ function reconcile(parent, nodes) {
   }
 }
 
+// 거르기 줄 끝의 「● 이름 ✕」: 이름표로 거르는 중일 때만. 누르면 풀린다
+function renderAgentFilter(scene, id) {
+  const old = $("tl-filters").querySelector("button.atag");
+  if (!id) return old?.remove();
+  const b = agentTag(scene, id);
+  b.append(el("span", "ax", "✕"));
+  b.setAttribute("aria-pressed", "true");
+  b.title = `${subInfo(scene, id).name} 의 줄만 보는 중입니다. 누르면 풉니다`;
+  if (old?.dataset.agent === id && old.textContent === b.textContent) return;
+  if (old) old.replaceWith(b); else $("tl-filters").append(b);
+}
+
 function renderTimeline(scene, now) {
   const proj = isProj(state.sid);
   $("tl-title").textContent = proj ? "대화 이력" : "타임라인";
@@ -1389,8 +1466,14 @@ function renderTimeline(scene, now) {
   // 보통은 최근 400줄. 찾기로 고른 줄(tlFocus)이 그보다 옛것이거나 거르기로 숨긴 것이어도 그 줄까지 보인다
   const fi = state.tlFocus != null ? scene.timeline.findIndex((e) => e.seq === state.tlFocus) : -1;
   const from = Math.max(0, scene.timeline.length - 400), focus = fi >= 0 ? state.tlFocus : null;
-  const entries = scene.timeline.slice(fi >= 0 ? Math.min(fi, from) : from).reverse()
-    .filter((e) => e.seq === focus || (!tlHide.has(tlKind(e)) && !(e.agent && tlHide.has("agent")) && !helper(e)));
+  // 이름표로 고른 하위 에이전트가 있으면 그 에이전트의 줄만(종류 거르기는 걸고 「에이전트」 끄기는 보지 않는다).
+  // 오래 돈 에이전트의 시작 줄이 빠지지 않게 세션 전체에서 고른 뒤 최근 400줄로 자른다
+  const only = state.tlAgent;
+  renderAgentFilter(scene, only);
+  const entries = (only
+    ? scene.timeline.filter((e) => e.seq === focus || (agentOf(scene, e) === only && (tlKind(e) === "agent" || !tlHide.has(tlKind(e))))).slice(-400)
+    : scene.timeline.slice(fi >= 0 ? Math.min(fi, from) : from).filter((e) => e.seq === focus || (!tlHide.has(tlKind(e)) && !(agentOf(scene, e) && tlHide.has("agent")) && !helper(e)))
+  ).reverse();
   // 먼저 줄을 정한다: 「여기부터 새것」 표시, 같은 파일을 잇달아 고친 기록은 한 줄로(가장 최근 줄에 횟수를 붙인다)
   const rows = [];
   let marked = false, prevEdit = null;
@@ -1414,10 +1497,16 @@ function renderTimeline(scene, now) {
     let key = rowKey(scene, row, now);
     while (next.has(key)) key += "'"; // 같은 열쇠가 둘이면(같은 기록 번호의 줄 둘) 따로 만든다
     const li = tlCache.get(key) || tlRow(scene, row, now);
+    if (row.e?.type === "run") {
+      const dur = runDur(own(scene.runs, row.e.id), now), span = li.querySelector(".tl-t > .dur");
+      if (span && dur != null && span.textContent !== ` · ${dur}`) span.textContent = ` · ${dur}`;
+    }
     next.set(key, li);
     items.push(li);
   }
   tlCache = next;
+  // 줄 앞 이름표의 눌림 표시(거르는 중인 에이전트). 줄은 거르기와 상관없이 다시 쓰므로 여기서 맞춘다
+  for (const li of items) for (const b of li.querySelectorAll("button.atag")) b.setAttribute("aria-pressed", String(state.tlAgent === b.dataset.agent));
   // 새 항목은 위에 붙는다. 사용자가 아래(옛 기록)를 보고 있으면 보던 자리를 지키고 「새 항목」 단추를 띄운다
   const latest = scene.timeline.length ? scene.timeline[scene.timeline.length - 1].seq : 0;
   const away = box.scrollTop > 8 && !state.replay;
@@ -1430,7 +1519,10 @@ function renderTimeline(scene, now) {
     anchor = [...ol.children].find((li) => li.getBoundingClientRect().bottom > edge) || null;
     if (anchor) top = anchor.getBoundingClientRect().top;
   }
+  // 도는 명령 줄은 걸린 시간 때문에 매초 새로 만든다. 그 줄의 이름표에 있던 키보드 초점을 새 줄의 이름표로 옮긴다
+  const act = document.activeElement, tagRow = act?.matches?.("button.atag") && ol.contains(act) ? act.closest("li")?.dataset.key : null;
   reconcile(ol, items);
+  if (tagRow && !act.isConnected) ol.querySelector(`li[data-key="${CSS.escape(tagRow)}"] button.atag`)?.focus({ preventScroll: true });
   if (!away) state.tlTopSeq = latest;
   const fresh = scene.timeline.filter((e) => e.seq > state.tlTopSeq).length;
   const btn = $("tl-new");
@@ -1674,8 +1766,10 @@ helpQ.addEventListener("input", filterHelp);
 const tlFull = $("tl-full");
 function openFull(li) {
   diffAsk++; // 받는 중인 diff 가 늦게 와도 이 글을 덮지 않게
-  $("tl-full-title").textContent = `${li.querySelector(".tl-k")?.textContent || ""} · ${li.querySelector(".when")?.textContent || ""}`;
-  $("tl-full-body").textContent = li.querySelector(".tl-t")?.textContent || "";
+  // 하위 에이전트 줄의 이름표(단추)는 글에서 빼고 제목에 붙인다
+  const t = li.querySelector(".tl-t"), tag = t?.querySelector(":scope > .atag");
+  $("tl-full-title").textContent = `${li.querySelector(".tl-k")?.textContent || ""} · ${li.querySelector(".when")?.textContent || ""}${tag ? ` · ${tag.textContent}` : ""}`;
+  $("tl-full-body").textContent = t ? [...t.childNodes].filter((n) => n !== tag).map((n) => n.textContent).join("") : "";
   $("tl-full-body").classList.remove("diffs");
   $("tl-full-copy").hidden = true;
   tlFull.showModal();
@@ -1731,6 +1825,7 @@ function openRef(ref) {
 let tlSelDown = true;
 $("tl-body").addEventListener("pointerdown", () => { tlSelDown = getSelection().isCollapsed; }, true);
 $("tl-body").addEventListener("click", (ev) => {
+  if (ev.target.closest("button.atag")) return; // 이름표는 거르기(아래 side 의 처리)이고 줄의 창은 열지 않는다
   const li = ev.target.closest("li.full, li.diff");
   if (!li || !(getSelection().isCollapsed || !tlSelDown)) return;
   openRow(li);
@@ -1782,6 +1877,8 @@ window.addEventListener("storage", (ev) => { if (ev.key === "atv.theme") applyTh
 
 // 타임라인·계획의 위치 복사
 side.addEventListener("click", (ev) => {
+  const tag = ev.target.closest("button.atag");
+  if (tag) return setTlAgent(tag.dataset.agent);
   const hit = ev.target.closest("[data-ref]");
   if (hit) copyRef(hit.dataset.ref);
 });

@@ -1,12 +1,25 @@
 #!/bin/sh
 # 그리기 알림: 사용자 입력 뒤 도구를 8번 넘게 썼는데 이 대화의 화판에 그림이 없으면, 그 대화에 한 번만 알린다.
+# 하위 에이전트: 화판 도구 호출은 막고(pre), 그린 적 있는 대화에는 하위 에이전트·워크플로 결과가 돌아올 때마다 알린다.
 # 도구를 쓸 때마다 동기로 도는 훅이라 node 를 띄우지 않고 sh 와 작은 파일만 쓴다.
 # 파일은 Claude 면 claude 프로세스 번호로, Codex 면 세션 id 로 가른다(데스크톱 앱·VS Code 는 한 프로세스에 세션이 여럿).
-# 쓰는 법: nudge prompt|tool [codex]. stdin 은 훅 입력(JSON)이다.
-# 대화가 새로 시작하거나 끝날 때 파일을 지우고, 이미 그림이 있는 대화(재개·압축)에 「끝」을 남기는 일은 hook/hook.js 가 한다.
+# 쓰는 법: nudge pre|prompt|tool [codex]. stdin 은 훅 입력(JSON)이다.
+# 대화가 새로 시작하거나 끝날 때 파일을 지우고, 이미 그림이 있는 대화(재개·압축)에 「끝」·「그림 있음」을 남기는 일은 hook/hook.js 가 한다.
 D=${ANYTASKVIEW_HOME:-$HOME/.local/state/anytaskview}/nudge
 LIMIT=${ANYTASKVIEW_NUDGE_AFTER:-8}
 in=$(cat)
+# 최상위 키만 본다. 문자열 안의 따옴표는 \" 로 이스케이프되어 있어 아래 모양에 걸리지 않는다.
+# 하위 에이전트인지는 tool_input 앞부분에서만 본다(Claude Code 2.1 은 agent_id 를 공통 필드로 tool_input 앞에 쓴다.
+# 도구 입력·결과 안에 agent_id 라는 키가 있어도 주 에이전트로 본다)
+head=${in%%\"tool_input\"*}
+# 하위 에이전트의 화판 호출: 거부하고 그 까닭을 돌려준다. 화판은 상위 에이전트가 결과를 받아 그린다
+if [ "$1" = pre ]; then
+  case "$head" in *'"agent_id":'*) ;; *) exit 0 ;; esac
+  cat <<EOF
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"anytaskview: board tools are for the main agent only. The main agent draws your results after you report back, so continue your task without the board."}}
+EOF
+  exit 0
+fi
 if [ "$2" = codex ]; then
   # Codex 는 session_id 를 맨 앞에 쓴다. Claude 세션 안에서 띄운 codex 에 물려 온 CLAUDE_PID 는 보지 않는다
   P=$(printf '%s\n' "$in" | grep -o '"session_id": *"[^"]*"' | head -n 1 | sed 's/^.*"\([^"]*\)"$/\1/')
@@ -15,28 +28,45 @@ else
   P=$CLAUDE_PID
   case "$P" in ''|*[!0-9]*) exit 0 ;; esac
 fi
-# 최상위 키만 본다. 문자열 안의 따옴표는 \" 로 이스케이프되어 있어 아래 모양에 걸리지 않는다
+# 결과 알림. 명령문이 아니라 사실로 쓴다(Claude Code 문서: 명령 모양의 글은 주입 방어에 걸릴 수 있다)
+result() {
+  cat <<EOF
+{"hookSpecificOutput":{"hookEventName":"$1","additionalContext":"anytaskview: a subagent result just came back. The user follows the work on this conversation's board; the board's rule is to update the parts and steps this result settles in the same message as your next tool calls. This note appears once per result."}}
+EOF
+}
 case "$1" in
   prompt)
-    # 백그라운드 작업 완료 알림도 이 훅으로 온다. 사용자 입력이 아니므로 다시 세지 않는다
-    case "$in" in *'"prompt":"<task-notification>'*|*'"prompt": "<task-notification>'*) exit 0 ;; esac
+    # 백그라운드 작업 완료 알림도 이 훅으로 온다. 사용자 입력이 아니므로 다시 세지 않는다.
+    # 그린 적 있는 대화면 하위 에이전트·워크플로의 결과에만 알린다(백그라운드 명령·Monitor 는 빼고). 요약 글은 Claude Code 의 형식이다
+    case "$in" in
+      *'"prompt":"<task-notification>'*|*'"prompt": "<task-notification>'*)
+        [ -e "$D/$P.drew" ] || exit 0
+        case "$in" in *'<summary>Agent \"'*|*'<summary>Dynamic workflow \"'*) result UserPromptSubmit ;; esac
+        exit 0 ;;
+    esac
     rm -f "$D/$P.n"; exit 0 ;;
   tool) ;;
   *) exit 0 ;;
 esac
-[ -e "$D/$P.done" ] && exit 0
-# 하위 에이전트의 도구는 같은 claude 프로세스에서 돈다. 세지 않는다(알림이 하위 에이전트로 가지 않게).
+# 하위 에이전트의 도구는 같은 claude 프로세스에서 돈다. 세지도 알리지도 않는다(알림이 하위 에이전트로 가지 않게).
 # Codex 는 하위 에이전트의 도구 사건에 agent_id 를 싣지 않아 함께 센다
-case "$in" in *'"agent_id":'*) exit 0 ;; esac
-mkdir -p -m 700 "$D" || exit 0
+case "$head" in *'"agent_id":'*) exit 0 ;; esac
 # 첫 tool_name 이 최상위 값이다(Claude Code·Codex 모두 tool_name 을 tool_input·tool_response 보다 앞에 쓴다)
 name=$(printf '%s\n' "$in" | grep -o '"tool_name": *"[^"]*"' | head -n 1 | sed 's/^.*"\([^"]*\)"$/\1/')
 case "$name" in
   # 실제로 적용된 그리기만 그림으로 친다(결과 글이 「적용 N」, N≥1). 모두 거부됐거나 화판이 꺼져 있었으면 도구로 센다.
   # 같은 호출을 세는 훅이 따로 없어 「끝」과 세기가 엇갈리지 않는다
   mcp__*anytaskview*__draw)
-    case "${in#*\"tool_response\"}" in *"적용 "[1-9]*) : >"$D/$P.done"; exit 0 ;; esac ;;
+    case "${in#*\"tool_response\"}" in *"적용 "[1-9]*) mkdir -p -m 700 "$D" && : >"$D/$P.drew" && : >"$D/$P.done"; exit 0 ;; esac ;;
+  # 바로 끝난 하위 에이전트의 결과만(상태 completed). 백그라운드·클라우드로 띄운 것과 팀원 띄우기(async_launched·
+  # remote_launched·teammate_spawned)는 아직 결과가 아니다. 백그라운드 결과는 끝날 때 작업 알림으로 온다
+  Agent|Task)
+    if [ -e "$D/$P.drew" ]; then
+      case "${in#*\"tool_response\"}" in *'"status":"completed"'*|*'"status": "completed"'*) result PostToolUse; exit 0 ;; esac
+    fi ;;
 esac
+[ -e "$D/$P.done" ] && exit 0
+mkdir -p -m 700 "$D" || exit 0
 n=$(cat "$D/$P.n" 2>/dev/null)
 case "$n" in ''|*[!0-9]*) n=0 ;; esac
 n=$((n + 1))
@@ -47,7 +77,6 @@ if [ "$n" -le "$LIMIT" ]; then
 fi
 # 나란히 돈 도구들의 훅이 함께 문턱을 넘어도 「끝」을 먼저 만든 하나만 알린다(noclobber 로 만들기는 원자적이다)
 ( set -C; : >"$D/$P.done" ) 2>/dev/null || exit 0
-# 명령문이 아니라 사실로 쓴다(Claude Code 문서: 명령 모양의 글은 주입 방어에 걸릴 수 있다)
 cat <<EOF
 {"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"anytaskview: ${LIMIT} tool calls have run since the user's last message and this conversation's board has no drawing yet. The user follows the work on that board; the board's rule for a multi-step task is one draw of the problem structure with the first plan, in the forms that fit (boxes, a table, a diagram), sent in the same message as other tool calls. This reminder appears once per conversation."}}
 EOF

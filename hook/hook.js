@@ -138,6 +138,49 @@ function todoText(tool, input) {
   return clip(`${todos.length}개${now ? " · 지금 " + (now.content || "") : ""}`, 120);
 }
 
+// 하위 에이전트의 설명(이름표). Claude Code 가 세션 폴더에 남기는 `subagents/(workflows/<wf>/)agent-<id>.meta.json` 의
+// description 이다(워크플로는 「review:bugs」 같은 이름표). 문서에 없는 내부 파일이라 없거나 모양이 다르면 설명 없이 둔다.
+// 끝 사건은 에이전트 기록 파일(agent_transcript_path) 옆을, 시작 사건은 세션 기록(transcript_path) 옆 폴더를 찾는다
+const AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const META_MAX = 64 * 1024;
+// 파일 자체가 심볼릭 링크면 열지 않고(O_NOFOLLOW), 연 파일의 크기를 본다(보고 여는 사이에 바뀌어도 그 파일이다)
+function readMeta(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || st.size > META_MAX) return undefined;
+    const d = JSON.parse(fs.readFileSync(fd, "utf8")).description;
+    return typeof d === "string" && d ? clip(d, 80) : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+// 링크가 아닌 진짜 폴더인가(폴더 링크를 따라 세션 밖의 파일을 읽지 않게)
+const realDir = (p) => { try { return fs.lstatSync(p).isDirectory(); } catch { return false; } };
+function agentDesc(ev) {
+  const id = String(ev.agent_id || "");
+  if (!AGENT_ID.test(id)) return undefined;
+  const at = typeof ev.agent_transcript_path === "string" && ev.agent_transcript_path;
+  if (at && path.basename(at) === `agent-${id}.jsonl`) return realDir(path.dirname(at)) ? readMeta(at.replace(/\.jsonl$/, ".meta.json")) : undefined;
+  if (typeof ev.transcript_path !== "string" || !ev.transcript_path.endsWith(".jsonl")) return undefined;
+  const sub = path.join(ev.transcript_path.slice(0, -".jsonl".length), "subagents"), name = `agent-${id}.meta.json`;
+  if (!realDir(sub)) return undefined;
+  const direct = readMeta(path.join(sub, name));
+  if (direct !== undefined) return direct;
+  const wf = path.join(sub, "workflows");
+  let wfs = [];
+  try { if (realDir(wf)) wfs = fs.readdirSync(wf, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { /* 워크플로를 쓴 적 없음 */ }
+  for (const d of wfs) {
+    const desc = readMeta(path.join(wf, d.name, name));
+    if (desc !== undefined) return desc;
+  }
+  return undefined;
+}
+const withDesc = (ev) => { const desc = agentDesc(ev); return desc ? { desc } : {}; };
+
 // 이 Codex 세션의 CODEX_HOME. 화판 서버가 다른 값을 물려받았을 수 있어 기본값(~/.codex)도 적어 보낸다
 const codexHome = () => process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 
@@ -188,6 +231,10 @@ export function toFact(ev, { codex = false } = {}) {
       if (EDIT_TOOLS.has(tool)) return { f: "edit", tool, path: input.file_path || input.notebook_path || "", lines: editLines(resp), ...diffFields(patchLines(resp), until, input.file_path || input.notebook_path || ""), ...who };
       if (TODO_TOOLS.has(tool)) return { f: "todo", tool, text: todoText(tool, input), ...who };
       if (tool === "apply_patch") return patchFacts(input, resp, who, until, ev.cwd);
+      // Agent 도구(옛 이름 Task): 설명과 하위 에이전트 id(문서에 있는 길). 백그라운드로 띄우면 곧바로 온다
+      if ((tool === "Agent" || tool === "Task") && resp && typeof resp.agentId === "string" && resp.agentId) {
+        return { f: "agent-call", agent: resp.agentId, desc: clip(input.description || "", 80), agentType: String(input.subagent_type || "") };
+      }
       return null;
     case "PermissionRequest":
       // Codex: 승인 창이 뜨기 직전이다. Claude 의 Notification(permission_prompt)처럼 「입력 필요」로 둔다
@@ -197,9 +244,9 @@ export function toFact(ev, { codex = false } = {}) {
       if (EDIT_TOOLS.has(tool)) return { f: "edit-fail", tool, path: input.file_path || input.notebook_path || "", error: clip(ev.error || "", 200), ...who };
       return null;
     case "SubagentStart":
-      return { f: "agent-start", agent: String(ev.agent_id || ""), agentType: String(ev.agent_type || "") };
+      return { f: "agent-start", agent: String(ev.agent_id || ""), agentType: String(ev.agent_type || ""), ...withDesc(ev) };
     case "SubagentStop":
-      return { f: "agent-stop", agent: String(ev.agent_id || ""), agentType: String(ev.agent_type || ""), last: clip(ev.last_assistant_message || "", TEXT_MAX) };
+      return { f: "agent-stop", agent: String(ev.agent_id || ""), agentType: String(ev.agent_type || ""), ...withDesc(ev), last: clip(ev.last_assistant_message || "", TEXT_MAX) };
     case "Notification":
       return { f: "notify", ntype: ev.notification_type || "", text: clip(ev.message || "", 200) };
     case "Stop":
@@ -216,19 +263,19 @@ export function toFact(ev, { codex = false } = {}) {
 // 나중에 붙어 쓰는 대화형 세션이라 화판 글로 깨워야 한다. 그쪽 진입점은 cli, 한 번 실행은 sdk-cli·sdk-ts·sdk-py 다
 const headless = () => process.env.CLAUDE_CODE_SESSION_ATTENDED === "0" && /^sdk-/.test(process.env.CLAUDE_CODE_ENTRYPOINT || "");
 
-// 그리기 알림(scripts/nudge)이 대화마다 쓰는 파일: 도구 수(.n)와 「이 대화는 끝」(.done). 이름은 Claude 면 claude 프로세스 번호,
-// Codex 면 세션 id 다(데스크톱 앱·VS Code 는 한 프로세스에 세션이 여럿). 대화가 시작하거나 끝나면 지운다.
-// 시작한 대화의 화판에 이미 그림이 있으면(재개·압축) 「끝」으로 둔다
+// 그리기 알림(scripts/nudge)이 대화마다 쓰는 파일: 도구 수(.n), 「이 대화는 끝」(.done), 「그린 적 있음」(.drew, 결과 알림의 조건).
+// 이름은 Claude 면 claude 프로세스 번호, Codex 면 세션 id 다(데스크톱 앱·VS Code 는 한 프로세스에 세션이 여럿). 대화가 시작하거나 끝나면 지운다.
+// 시작한 대화의 화판에 이미 그림이 있으면(재개·압축) 「끝」·「그린 적 있음」으로 둔다
 function nudgeReset(key, drawn) {
   if (!key || !SID_RE.test(String(key))) return;
   const dir = path.join(stateHome(), "nudge");
   try {
     if (drawn) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      fs.writeFileSync(path.join(dir, `${key}.done`), "", { mode: 0o600 });
+      for (const f of [`${key}.done`, `${key}.drew`]) fs.writeFileSync(path.join(dir, f), "", { mode: 0o600 });
       return;
     }
-    for (const f of [`${key}.n`, `${key}.done`]) fs.rmSync(path.join(dir, f), { force: true });
+    for (const f of [`${key}.n`, `${key}.done`, `${key}.drew`]) fs.rmSync(path.join(dir, f), { force: true });
   } catch { /* 알림이 한 번 더 가거나 빠질 뿐이다 */ }
 }
 
@@ -264,6 +311,23 @@ async function main() {
     if (fact.f === "start" && body.drawn) nudgeReset(nudgeKey, true);
     // 압축 직후: 화판에 이미 있는 이름표를 맥락에 다시 넣는다(SessionStart 의 stdout 은 맥락에 들어간다)
     if (body.out) await writeOut(body.out + "\n");
+  }
+  // 하위 에이전트의 meta 파일은 시작 훅보다 조금 늦게 써질 때가 있다. 시작 사실을 먼저 보낸 뒤 잠깐 다시 보고,
+  // 찾으면 설명만 따로 보낸다(이 훅은 비동기라 Claude 를 기다리게 하지 않는다. 못 찾으면 끝 사건이 채운다)
+  // 시간은 800ms 종료 타이머 안에서 나눈다: 다시 보기는 시작 뒤 600ms 까지, 보내기는 780ms 까지
+  if (facts[0].f === "agent-start" && !facts[0].desc) {
+    while (Date.now() < HT + 600) {
+      await new Promise((ok) => setTimeout(ok, 50));
+      const desc = agentDesc(ev);
+      if (!desc) continue;
+      await fetch(`http://127.0.0.1:${PORT}/api/hook`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-atv-key": keys.write },
+        body: JSON.stringify({ pid, ht: HT, sid: ev.session_id, cwd: ev.cwd || "", fact: { f: "agent-call", agent: facts[0].agent, desc, agentType: facts[0].agentType } }),
+        signal: AbortSignal.timeout(Math.max(1, HT + 780 - Date.now())),
+      });
+      break;
+    }
   }
   if (REWAKE && ev.hook_event_name === "Stop" && typeof ev.session_id === "string" && !headless()) return waitInbox(keys, ev.session_id);
   return 0;

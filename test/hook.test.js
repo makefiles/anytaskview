@@ -71,6 +71,39 @@ test("사용자 입력·차례 끝 답·하위 에이전트 끝 답은 4,000자�
   assert.equal(toFact({ hook_event_name: "UserPromptSubmit", prompt: long }).text.length, 4000);
 });
 
+test("하위 에이전트 이름: 세션 폴더의 meta 파일(보통·워크플로)과 Agent 도구 결과에서 설명을 얻고, 링크·큰 파일·틀린 id 는 읽지 않는다", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atv-meta-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const sess = path.join(dir, "S1"), sub = path.join(sess, "subagents"), wf = path.join(sub, "workflows", "wf_1");
+  fs.mkdirSync(wf, { recursive: true });
+  fs.writeFileSync(path.join(sub, "agent-a1.meta.json"), JSON.stringify({ agentType: "general-purpose", description: "로그 원인 찾기 token=abc123" }));
+  fs.writeFileSync(path.join(wf, "agent-w1.meta.json"), JSON.stringify({ agentType: "workflow-subagent", description: "review:bugs" }));
+  fs.writeFileSync(path.join(sub, "agent-big.meta.json"), JSON.stringify({ description: "크다", pad: "x".repeat(70_000) }));
+  fs.symlinkSync(path.join(sub, "agent-a1.meta.json"), path.join(sub, "agent-ln.meta.json"));
+  // 세션 밖 폴더를 가리키는 워크플로 폴더 링크
+  const outside = path.join(dir, "outside");
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, "agent-out.meta.json"), JSON.stringify({ description: "밖" }));
+  fs.symlinkSync(outside, path.join(sub, "workflows", "wf_ln"));
+  const start = (id) => toFact({ hook_event_name: "SubagentStart", session_id: "S1", transcript_path: sess + ".jsonl", agent_id: id, agent_type: "x" });
+  assert.equal(start("a1").desc, "로그 원인 찾기 token=***", "비밀 모양은 가린다");
+  assert.equal(start("w1").desc, "review:bugs");
+  assert.equal(start("none").desc, undefined);
+  assert.equal(start("big").desc, undefined, "64KB 넘는 파일");
+  assert.equal(start("ln").desc, undefined, "심볼릭 링크");
+  assert.equal(start("out").desc, undefined, "폴더 링크를 따라가지 않는다");
+  assert.equal(start("../S1/subagents/agent-a1").desc, undefined, "id 에 경로 글자");
+  assert.equal(toFact({ hook_event_name: "SubagentStart", agent_id: "a1", agent_type: "x" }).desc, undefined, "transcript_path 없음");
+  // 끝: 에이전트 기록 파일 옆의 meta 파일
+  const stop = toFact({ hook_event_name: "SubagentStop", agent_id: "w1", agent_type: "workflow-subagent", agent_transcript_path: path.join(wf, "agent-w1.jsonl"), last_assistant_message: "끝" });
+  assert.equal(stop.desc, "review:bugs");
+  // Agent 도구 결과(문서에 있는 길): 설명·종류·agentId
+  const call = (tool, resp) => toFact({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { description: "문서 찾기", subagent_type: "Explore", prompt: "긴 지시문" }, tool_response: resp });
+  assert.deepEqual(call("Agent", { status: "async_launched", agentId: "a9", description: "문서 찾기" }), { f: "agent-call", agent: "a9", desc: "문서 찾기", agentType: "Explore" });
+  assert.equal(call("Task", { agentId: "a8", content: [] }).agent, "a8", "옛 이름 Task");
+  assert.equal(call("Agent", { status: "async_launched" }), null, "agentId 가 없으면 올리지 않는다");
+});
+
 test("백그라운드 작업 알림은 sys 입력으로, 요약만 남긴다", () => {
   const f = toFact({ hook_event_name: "UserPromptSubmit", prompt: "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"빌드\" completed</summary>\n</task-notification>" });
   assert.deepEqual(f, { f: "prompt", sys: true, text: "Background command \"빌드\" completed" });
@@ -251,7 +284,9 @@ test("그리기 알림: 입력 뒤 도구를 8번 넘게 쓰면 대화마다 한
   assert.equal(tools(1, "103", draw("적용 0 · 거부 1: a: kind 필요")), "", "모두 거부된 그리기는 도구로 센다");
   assert.equal(tools(1, "103", draw("비움 · 적용 3")), "", "그린 호출 자체는 알리지 않는다");
   assert.equal(tools(20, "103"), "", "그림이 있으면 알리지 않는다");
-  assert.equal(tools(20, "104", ev("Read", { agent_id: "a1", agent_type: "Explore" })), "", "하위 에이전트의 도구는 세지 않는다");
+  // Claude Code 는 agent_id 를 공통 필드로 tool_input 앞에 쓴다
+  const subEv = JSON.stringify({ session_id: "N1", agent_id: "a1", agent_type: "Explore", hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "/w/a" }, tool_response: { stdout: "x" } });
+  assert.equal(tools(20, "104", subEv), "", "하위 에이전트의 도구는 세지 않는다");
   assert.equal(nudge("tool", "").stdout, "", "claude 번호가 없으면 아무것도 하지 않는다");
   // 나란히 돈 도구들의 훅이 함께 문턱을 넘어도 알림은 하나
   tools(8, "105");
@@ -269,5 +304,47 @@ test("그리기 알림: 입력 뒤 도구를 8번 넘게 쓰면 대화마다 한
   assert.ok(!fs.existsSync(path.join(home, "nudge", "101.done")));
   assert.equal(tools(8, "101"), "");
   assert.notEqual(tools(1, "101"), "");
+});
+
+test("하위 에이전트의 화판 호출은 막고, 그린 적 있는 대화에는 에이전트·워크플로 결과가 돌아올 때 한 번씩 알린다", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "atv-nudge-agent-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const env = (pid) => ({ ...process.env, ANYTASKVIEW_HOME: home, CLAUDE_PID: pid });
+  const nudge = (arg, pid, input) => spawnSync(NUDGE, [arg], { input: JSON.stringify(input), encoding: "utf8", env: env(pid) }).stdout;
+  // Claude Code 는 agent_id 를 공통 필드로 tool_input 앞에 쓴다
+  const pre = (tool, sub = {}, input = { steps: [{ id: "s1", title: "\"agent_id\": 흉내" }] }) => ({ session_id: "A1", ...sub, hook_event_name: "PreToolUse", tool_name: tool, tool_input: input });
+  // 막기: 하위 에이전트(agent_id)의 화판 도구만
+  const denied = JSON.parse(nudge("pre", "201", pre("mcp__plugin_anytaskview_anytaskview__plan", { agent_id: "a1", agent_type: "general-purpose" })));
+  assert.equal(denied.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(denied.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(denied.hookSpecificOutput.permissionDecisionReason, /main agent/);
+  assert.equal(nudge("pre", "201", pre("mcp__plugin_anytaskview_anytaskview__plan")), "", "주 에이전트는 막지 않는다(글 안의 agent_id 는 보지 않음)");
+  assert.equal(nudge("pre", "201", pre("mcp__plugin_anytaskview_anytaskview__draw", {}, { ops: [{ id: "b", kind: "box", agent_id: "x" }] })), "", "입력 안의 agent_id 키도 주 에이전트");
+  // 알림: 그린 적이 없으면 붙이지 않는다
+  const note = (summary) => ({ session_id: "A1", hook_event_name: "UserPromptSubmit", prompt: `<task-notification>\n<task-id>t1</task-id>\n<status>completed</status>\n<summary>${summary}</summary>\n</task-notification>` });
+  const agentDone = (resp, sub = {}) => ({ session_id: "A1", ...sub, hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: { description: "찾기" }, tool_response: resp });
+  assert.equal(nudge("prompt", "201", note('Agent "찾기" finished')), "");
+  assert.equal(nudge("tool", "201", agentDone({ status: "completed", agentId: "a1", content: [{ type: "text", text: "결과" }] })), "");
+  // 그리기가 적용되면 표시가 생긴다(그리기 알림이 이미 나간 대화여도)
+  for (let i = 0; i < 9; i++) nudge("tool", "201", { hook_event_name: "PostToolUse", tool_name: "Read" });
+  nudge("tool", "201", { hook_event_name: "PostToolUse", tool_name: "mcp__plugin_anytaskview_anytaskview__draw", tool_response: [{ type: "text", text: "적용 2" }] });
+  assert.ok(fs.existsSync(path.join(home, "nudge", "201.drew")));
+  const ctx = (out, ev) => { const j = JSON.parse(out); assert.equal(j.hookSpecificOutput.hookEventName, ev); return j.hookSpecificOutput.additionalContext; };
+  assert.match(ctx(nudge("prompt", "201", note('Agent "찾기" finished')), "UserPromptSubmit"), /subagent result/);
+  assert.match(ctx(nudge("prompt", "201", note('Dynamic workflow "검토" completed')), "UserPromptSubmit"), /subagent result/);
+  assert.match(ctx(nudge("prompt", "201", note('Agent "찾기" finished')), "UserPromptSubmit"), /once per result/, "결과마다 한 번");
+  assert.equal(nudge("prompt", "201", note('Background command "빌드" completed (exit code 0)')), "", "백그라운드 명령 결과에는 붙이지 않는다");
+  assert.match(ctx(nudge("tool", "201", agentDone({ status: "completed", agentId: "a1", content: [{ type: "text", text: "결과" }] })), "PostToolUse"), /subagent result/, "바로 끝난 Agent 결과");
+  // 아직 결과가 아닌 것: 백그라운드·클라우드로 띄움, 팀원 띄우기(응답 안에 agent_id 가 있어도)
+  assert.equal(nudge("tool", "201", agentDone({ status: "async_launched", agentId: "a2", isAsync: true })), "", "백그라운드로 띄운 것은 아직 결과가 아니다");
+  assert.equal(nudge("tool", "201", agentDone({ status: "remote_launched", taskId: "r1" })), "", "클라우드로 띄움");
+  assert.equal(nudge("tool", "201", agentDone({ status: "teammate_spawned", agentId: "t1", agent_id: "t1" })), "", "팀원 띄우기");
+  assert.notEqual(nudge("tool", "201", agentDone({ status: "completed", agentId: "a4", content: [{ type: "text", text: "\"status\":\"async_launched\"" }] })), "", "결과 글이 그 모양이어도 결과다");
+  assert.equal(nudge("tool", "201", agentDone({ status: "completed", agentId: "a3" }, { agent_id: "a1" })), "", "하위 에이전트가 띄운 에이전트");
+  // 새 대화가 시작하면 표시를 지운다
+  const r = await runHook({ hook_event_name: "SessionStart", session_id: "A2", cwd: "/w", source: "clear" }, { ANYTASKVIEW_HOME: home, ANYTASKVIEW_PORT: "1", CLAUDE_PID: "201" });
+  assert.equal(r.code, 0);
+  assert.ok(!fs.existsSync(path.join(home, "nudge", "201.drew")));
+  assert.equal(nudge("prompt", "201", note('Agent "찾기" finished')), "");
 });
 
