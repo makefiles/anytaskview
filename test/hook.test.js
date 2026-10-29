@@ -89,7 +89,7 @@ test("사건 → 사실: 명령은 설명과 함께, 수정은 경로와 줄, �
   assert.equal(toFact({ hook_event_name: "PreToolUse", tool_name: "Read" }), null);
 });
 
-test("수정 diff: 바뀐 줄과 더하기·빼기 수를 싣고, 비밀 모양·개인 키는 가리며, 128KB·한 줄 2,000자·시간 상한에서 자른다", () => {
+test("수정 diff: 바뀐 줄과 더하기·빼기 수를 싣고, 비밀 모양·개인 키는 가리며, 512KB·한 줄 2,000자·시간 상한에서 자른다", () => {
   const post = (tool, resp) => toFact({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { file_path: "/w/a.js" }, tool_response: resp });
   const edit = post("Edit", { structuredPatch: [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 2, lines: [" a", "-b", "+c"] }, { oldStart: 9, oldLines: 1, newStart: 9, newLines: 2, lines: ["+d"] }] });
   assert.equal(edit.diff, "@@ -3,2 +3,2 @@\n a\n-b\n+c\n@@ -9,1 +9,2 @@\n+d");
@@ -113,16 +113,17 @@ test("수정 diff: 바뀐 줄과 더하기·빼기 수를 싣고, 비밀 모양�
   // 개인 키 파일은 바뀐 줄을 싣지 않고 수만 싣는다
   const pem = toFact({ hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "/w/certs/server.pem" }, tool_response: { structuredPatch: [{ oldStart: 5, oldLines: 1, newStart: 5, newLines: 1, lines: ["-MIIEold", "+MIIEnew"] }] } });
   assert.deepEqual([pem.add, pem.del, pem.diff], [1, 1, undefined]);
-  const ctrl = post("Write", { type: "create", content: Array.from({ length: 70 }, () => "\u0000".repeat(2000)).join("\n") });
-  assert.ok(Buffer.byteLength(JSON.stringify(ctrl)) < 200 * 1024 && ctrl.cut === true, `${Buffer.byteLength(JSON.stringify(ctrl))}`);
+  const ctrl = post("Write", { type: "create", content: Array.from({ length: 100 }, () => "\u0000".repeat(2000)).join("\n") });
+  assert.ok(Buffer.byteLength(JSON.stringify(ctrl)) < 600 * 1024 && ctrl.cut === true, `${Buffer.byteLength(JSON.stringify(ctrl))}`);
   const long = post("Write", { type: "create", content: "q".repeat(5000) });
   assert.equal(long.diff.split("\n")[1].length, 2000);
   assert.ok(long.diff.endsWith("…"));
-  const big = post("Write", { type: "create", content: Array.from({ length: 3000 }, (_, i) => `line ${i} ${"z".repeat(50)}`).join("\n") });
-  assert.ok(Buffer.byteLength(big.diff) <= 128 * 1024 && big.cut === true && big.add === 3000, `${Buffer.byteLength(big.diff)} ${big.cut} ${big.add}`);
-  // 가리기가 오래 걸리는 줄(「key-key-…」)이 128KB 넘게 와도 훅 시간 안에 끝난다
+  const big = post("Write", { type: "create", content: Array.from({ length: 12000 }, (_, i) => `line ${i} ${"z".repeat(50)}`).join("\n") });
+  // 512KB 까지 꽉 채우는지는 서버 시험에서 본다(훅은 바쁜 PC 에서 가리기 시간 상한에 먼저 닿을 수 있다)
+  assert.ok(Buffer.byteLength(big.diff) <= 512 * 1024 && big.cut === true && big.add === 12000, `${Buffer.byteLength(big.diff)} ${big.cut} ${big.add}`);
+  // 가리기가 오래 걸리는 줄(「key-key-…」)이 512KB 넘게 와도 훅 시간 안에 끝난다
   const t0 = performance.now();
-  const slow = post("Write", { type: "create", content: Array.from({ length: 70 }, () => "key-".repeat(500)).join("\n") });
+  const slow = post("Write", { type: "create", content: Array.from({ length: 270 }, () => "key-".repeat(500)).join("\n") });
   assert.ok(performance.now() - t0 < 500 && slow.cut === true, `${Math.round(performance.now() - t0)}ms`);
   // structuredPatch 에 줄이 없으면(옛 응답 모양) diff 를 싣지 않는다
   assert.equal(post("Edit", { structuredPatch: [{ newStart: 1, newLines: 1 }] }).diff, undefined);

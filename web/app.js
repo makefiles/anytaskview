@@ -1695,17 +1695,19 @@ async function openDiff(all, path) {
   copy.dataset.path = path;
   tlFull.showModal();
   tlFull.scrollTop = 0;
-  let got = null;
+  let got = null, from = 0;
   try {
     const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/diff?seq=${seqs.join(",")}`);
-    if (r.ok) got = (await r.json()).diffs;
+    if (r.ok) { const j = await r.json(); got = j.diffs; from = j.from || 0; }
   } catch { /* 아래에서 알린다 */ }
   // 그사이 창을 닫았거나 다른 줄·긴 글을 열었다. 닫힘 사건으로 번호를 올리지 않는다: 닫고 바로 다시 열면 늦게 온 닫힘이 새 요청을 버린다
   if (ask !== diffAsk || !tlFull.open) return;
   if (!got) return body.replaceChildren(el("p", "dnote", "바뀐 줄을 받지 못했습니다. 화판 서버가 떠 있는지 확인하세요."));
   const byseq = new Map(viewScene().timeline.filter((x) => x.type === "fact" && x.f === "edit").map((x) => [x.seq, x]));
-  const parts = all.length > seqs.length ? [el("p", "dnote", `고친 ${all.length}번 가운데 최근 ${seqs.length}번만 보입니다.`)] : [];
-  for (const q of seqs) {
+  // 큰 수정이 여럿이면 서버가 최근 것부터 일정 크기까지만 준다(from 보다 옛 번호는 크기 때문에 빠짐, lib/server.js DIFF_SHOW_MAX)
+  const shown = seqs.filter((q) => q >= from);
+  const parts = all.length > shown.length ? [el("p", "dnote", `고친 ${all.length}번 가운데 최근 ${shown.length}번만 보입니다.`)] : [];
+  for (const q of shown) {
     const e = byseq.get(q) || {}, text = got[q];
     parts.push(el("div", "dhead", `${e.t ? fmtClock(e.t) : ""}${e.lines ? " · " + e.lines : ""} · +${e.add || 0} −${e.del || 0}`));
     if (typeof text !== "string") { parts.push(el("p", "dnote", "이 수정의 바뀐 줄은 남아 있지 않습니다.")); continue; }
@@ -1748,9 +1750,9 @@ tlFull.addEventListener("click", (ev) => {
 
 // ---- 설정: 이어받기 문구, 지난 세션 정리, 수정 diff 보관 크기 ----
 const settings = $("settings");
-const DIFF_STEPS = [0, 16, 32, 64, 128]; // 슬라이더 칸 → KB(서버 DIFF_KB 와 같음)
+// 슬라이더 값이 곧 KB 다(0~512, 16KB 단위, 서버 lib/scene.js 의 DIFF_KB_* 와 같음)
 const diffLabel = () => {
-  const kb = DIFF_STEPS[Number($("cfg-diff").value)], text = kb ? `${kb}KB${kb === 16 ? "(기본)" : ""}` : "끔";
+  const kb = Number($("cfg-diff").value), text = kb ? `${kb}KB${kb === 16 ? "(기본)" : ""}` : "끔";
   $("cfg-diff-val").textContent = text;
   $("cfg-diff").setAttribute("aria-valuetext", text);
 };
@@ -1760,7 +1762,7 @@ $("settings-open").addEventListener("click", () => {
   $("cfg-phrase").value = r?.phrase || "";
   $("cfg-doc").value = r?.doc || "";
   $("cfg-trash").value = state.config.trashDays ?? "";
-  $("cfg-diff").value = Math.max(0, DIFF_STEPS.indexOf(state.config.diffKB ?? 16));
+  $("cfg-diff").value = String(state.config.diffKB ?? 16);
   diffLabel();
   settings.showModal();
   $("cfg-phrase").focus();
@@ -1769,7 +1771,7 @@ $("settings-close").addEventListener("click", () => settings.close());
 $("settings-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const phrase = $("cfg-phrase").value.trim(), doc = $("cfg-doc").value.trim(), days = $("cfg-trash").value.trim();
-  const out = await boardOp({ op: "config-set", resume: phrase ? { phrase, doc } : null, trashDays: days ? Number(days) : null, diffKB: DIFF_STEPS[Number($("cfg-diff").value)] });
+  const out = await boardOp({ op: "config-set", resume: phrase ? { phrase, doc } : null, trashDays: days ? Number(days) : null, diffKB: Number($("cfg-diff").value) });
   if (!out.ok) return;
   settings.close();
   toast(out.msg);

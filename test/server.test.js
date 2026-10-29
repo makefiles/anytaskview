@@ -1462,8 +1462,10 @@ test("수정 diff: 설정한 크기(기본 16KB)로 잘라 결과에만 남기�
   // 다시 띄워도 기록의 결과에서 되살린다
   await f.restart();
   assert.equal((await f.read(`/api/sessions/D1/diff?seq=${edits[0].seq}`)).json.diffs[edits[0].seq], "@@ -3,1 +3,1 @@\n-a\n+b");
-  // 설정: 틀린 값은 거절, 128KB 로 늘리면 다음 수정부터 잘리지 않고, 끄면 더하기·빼기 수만 남는다
-  assert.equal((await board(f, { op: "config-set", resume: null, diffKB: 100 })).status, 400);
+  // 설정: 0~512KB 의 16KB 단위만 받고(틀린 값은 거절), 128KB 로 늘리면 다음 수정부터 잘리지 않고, 끄면 더하기·빼기 수만 남는다
+  for (const v of [100, 520, -16, 16.5, "16"]) assert.equal((await board(f, { op: "config-set", resume: null, diffKB: v })).status, 400, `${v}`);
+  assert.equal((await board(f, { op: "config-set", resume: null, diffKB: 512 })).status, 200);
+  assert.equal(f.board.config.diffKB, 512);
   assert.equal((await board(f, { op: "config-set", resume: null, diffKB: 128 })).status, 200);
   assert.equal(f.board.config.diffKB, 128);
   await f.hook("D1", { f: "edit", tool: "Write", path: "/w/c.js", add: 400, del: 0, diff: big });
@@ -1473,5 +1475,18 @@ test("수정 diff: 설정한 크기(기본 16KB)로 잘라 결과에만 남기�
   assert.deepEqual(tl.map((e) => [e.path, e.diff, e.cut, e.add]), [["/w/c.js", true, undefined, 400], ["/w/d.js", undefined, undefined, 2]]);
   assert.equal((await f.read(`/api/sessions/D1/diff?seq=${tl[0].seq}`)).json.diffs[tl[0].seq], big);
   // 큰 diff(JSON 으로 늘어나는 따옴표·역빗금)도 훅 본문 상한에 걸리지 않는다
-  assert.equal((await f.hook("D1", { f: "edit", tool: "Edit", path: "/w/e.js", diff: '+"\\'.repeat(43_000) })).status, 200);
+  assert.equal((await f.hook("D1", { f: "edit", tool: "Edit", path: "/w/e.js", diff: '+"\\'.repeat(170_000) })).status, 200);
+  // 훅 본문 상한은 2MB: 바로 아래는 받고 바로 위는 413
+  const pad = (n) => ({ f: "edit", tool: "Edit", path: "/w/p.js", diff: "+" + "p".repeat(n) });
+  const over = 2 * 1024 * 1024 - Buffer.byteLength(JSON.stringify({ pid: 4242, sid: "D1", fact: pad(0) }));
+  assert.equal((await f.hook("D1", pad(over))).status, 200);
+  assert.equal((await f.hook("D1", pad(over + 1))).status, 413);
+  // 512KB 로 두면 서버가 줄 경계에서 꽉 채워 남기고(시간 상한 없음), /diff 는 최근 것부터 110만 자까지만 주며 그보다 옛 번호의 경계를 from 으로 알린다
+  assert.equal((await board(f, { op: "config-set", resume: null, diffKB: 512 })).status, 200);
+  const huge = (tag) => Array.from({ length: 6000 }, (_, i) => `+${tag}${i} ${"w".repeat(100)}`).join("\n"); // 약 640KB
+  for (const tag of ["a", "b", "c"]) await f.hook("D1", { f: "edit", tool: "Write", path: "/w/h.js", add: 6000, del: 0, diff: huge(tag) });
+  const hs = (await f.read("/api/sessions/D1/snapshot")).json.scene.timeline.filter((e) => e.f === "edit" && e.path === "/w/h.js").map((e) => e.seq);
+  const hd = (await f.read(`/api/sessions/D1/diff?seq=${hs.join(",")}`)).json;
+  const sizes = hs.map((q) => (typeof hd.diffs[q] === "string" ? Buffer.byteLength(hd.diffs[q]) : 0));
+  assert.ok(hs.length === 3 && sizes[0] === 0 && sizes.slice(1).every((n) => n > 500 * 1024 && n <= 512 * 1024) && hd.from === hs[0] + 1, `${sizes} from ${hd.from} seq ${hs}`);
 });

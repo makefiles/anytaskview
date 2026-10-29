@@ -331,14 +331,15 @@
     <p>타임라인의 「수정」 줄을 누르면 바뀐 줄을 봅니다. 수정 한 번에 남길 크기를 정합니다. 바꾸면 다음 수정부터 적용됩니다.</p>
     <dl class="fields">
       <dt><label for="cfg-diff">수정 한 번에</label></dt>
-      <dd class="unit"><input id="cfg-diff" type="range" min="0" max="4" step="1"><output id="cfg-diff-val" for="cfg-diff"></output></dd>
+      <dd class="unit"><input id="cfg-diff" type="range" min="0" max="512" step="16"><output id="cfg-diff-val" for="cfg-diff"></output></dd>
     </dl>
     <details>
       <summary>자세히</summary>
       <ul>
         <li>바뀐 줄은 이 PC 의 기록(상태 폴더)에 남습니다. 파일 내용을 남기고 싶지 않으면 「끔」 으로 둡니다. 끄면 더하기·빼기 줄 수만 남습니다.</li>
         <li>비밀처럼 보이는 값(토큰, 비밀번호, 개인 키 따위)은 가려서 남기고, 개인 키 파일(.pem·.key 따위)은 바뀐 줄을 남기지 않습니다. 모든 모양을 잡지는 못하고, 반대로 이름에 key·token 이 든 변수에 값을 넣는 코드 줄은 값 자리가 *** 로 보일 수 있습니다.</li>
-        <li>대부분의 수정은 16KB 안에 듭니다. 그보다 큰 것은 대개 파일 전체를 다시 쓴 것입니다. 넘는 부분은 잘리고, 크기를 나중에 늘려도 되살아나지 않습니다.</li>
+        <li>끔부터 512KB 까지 16KB 단위로 고릅니다(방향키 한 번에 16KB). 대부분의 수정은 16KB 안에 듭니다. 그보다 큰 것은 대개 파일 전체를 다시 쓴 것입니다. 넘는 부분은 잘리고, 크기를 나중에 늘려도 되살아나지 않습니다.</li>
+        <li>크게 둘수록 이 PC 의 기록이 빨리 커집니다. 한 창에 큰 수정이 여럿 모이면 브라우저가 무거워지지 않게 최근 것부터 바뀐 줄 110만 자까지만 보입니다(512KB 수정이면 둘).</li>
       </ul>
     </details>
     <div class="crow"><span class="grow"></span><button type="submit" class="primary">저장</button></div>

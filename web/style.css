@@ -427,13 +427,15 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 #help::backdrop, #settings::backdrop, #tl-full::backdrop { background: rgba(0, 0, 0, .35); }
 #help h3, #settings h3 { font-size: 14px; line-height: 20px; font-weight: 600; margin: 12px 0 4px; }
 #settings input { padding: 4px 8px; width: 100%; }
+#settings input[type="range"] { padding: 0; margin: 0; } /* 여백이 있으면 트랙이 다른 입력 칸보다 안쪽에서 시작한다 */
 #help p, #settings p { margin: 0; }
-#settings dl.fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px 16px; margin: 10px 0; }
+#settings dl.fields { display: grid; grid-template-columns: 11em minmax(0, 1fr); align-items: center; gap: 8px 16px; margin: 10px 0; }
 #settings dl.fields dt { font-weight: 600; }
 #settings dl.fields dd { margin: 0; }
 #settings dd.unit { display: flex; align-items: center; gap: 8px; }
 #settings dd.unit input { width: 8em; }
-#settings dd.unit input[type="range"] { width: 12em; }
+#settings dd.unit input[type="range"] { flex: 1; width: auto; min-width: 0; max-width: 26em; } /* 눈금 33개: 넓어야 한 칸씩 고르기 쉽다 */
+@media (max-width: 520px) { #settings dl.fields { grid-template-columns: minmax(0, 1fr); gap: 4px 0; } #settings dl.fields dd { margin-bottom: 6px; } } /* 좁으면 이름 아래에 칸(넘치지 않고 시작 위치도 같다) */
 #settings dd.unit output { min-width: 6em; }
 #settings dd.unit span { color: var(--muted); }
 #settings .crow { display: flex; margin-top: 10px; }

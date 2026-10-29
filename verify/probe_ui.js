@@ -1600,15 +1600,51 @@ async function main() {
     await waitFor(`window.__copied.length === 1`);
     expect(await evaluate(`window.__copied[0] === '/tmp/작업/none.js:1' && !document.getElementById('tl-full').open`), `안 고친 파일 상자: ${await evaluate(`JSON.stringify(window.__copied)`)}`);
     await mcp("draw", { ops: [{ id: "dref", del: true }, { id: "nref", del: true }] });
-    // 설정: 기본 16KB, 「끔」 으로 바꾸면 서버에 저장되고 다시 열면 그대로
+    // 설정: 기본 16KB, 0(끔)~512KB 를 16KB 단위로 고르고, 서버에 저장되어 다시 열면 그대로. 구역마다 입력 칸이 같은 곳에서 시작한다
+    const setDiff = (v) => evaluate(`(() => { const s = document.getElementById('cfg-diff'); s.value = '${v}'; s.dispatchEvent(new Event('input')); document.getElementById('settings-form').requestSubmit(); })()`);
     await evaluate(`document.getElementById('settings-open').click()`);
-    await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-diff').value === '1' && document.getElementById('cfg-diff-val').textContent === '16KB(기본)'`);
-    await evaluate(`(() => { const s = document.getElementById('cfg-diff'); s.value = '0'; s.dispatchEvent(new Event('input')); document.getElementById('settings-form').requestSubmit(); })()`);
+    await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-diff').value === '16' && document.getElementById('cfg-diff-val').textContent === '16KB(기본)'`);
+    const form = await evaluate(`(() => { const s = document.getElementById('cfg-diff'), left = (id) => Math.round(document.getElementById(id).getBoundingClientRect().left); return { min: s.min, max: s.max, step: s.step, lefts: ['cfg-phrase', 'cfg-doc', 'cfg-trash', 'cfg-diff'].map(left) }; })()`);
+    expect(form.min === "0" && form.max === "512" && form.step === "16", `슬라이더 ${JSON.stringify(form)}`);
+    expect(Math.max(...form.lefts) - Math.min(...form.lefts) <= 1, `입력 칸 시작 위치 ${form.lefts}`);
+    // 좁은 화면(400px)에서도 설정 창이 가로로 넘치지 않고 시작 위치가 같으며, 재생 막대도 넘치지 않는다
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: 400, height: 900, deviceScaleFactor: 1, mobile: false });
+    try {
+      await waitFor(`innerWidth === 400`);
+      const narrow = await evaluate(`(() => { const d = document.getElementById('settings'), b = document.getElementById('replay'), left = (id) => Math.round(document.getElementById(id).getBoundingClientRect().left); return { over: d.scrollWidth - d.clientWidth, bar: b.scrollWidth - b.clientWidth, lefts: ['cfg-phrase', 'cfg-doc', 'cfg-trash', 'cfg-diff'].map(left) }; })()`);
+      expect(narrow.over <= 0 && narrow.bar <= 0 && Math.max(...narrow.lefts) - Math.min(...narrow.lefts) <= 1, `400px ${JSON.stringify(narrow)}`);
+    } finally {
+      await cdp.send("Emulation.clearDeviceMetricsOverride");
+    }
+    await setDiff(208);
+    await waitFor(`!document.getElementById('settings').open`);
+    expect(board.config.diffKB === 208, `저장된 크기 ${board.config.diffKB}`);
+    await evaluate(`document.getElementById('settings-open').click()`);
+    await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-diff').value === '208' && document.getElementById('cfg-diff-val').textContent === '208KB'`);
+    await setDiff(0);
     await waitFor(`!document.getElementById('settings').open`);
     expect(board.config.diffKB === 0, `저장된 크기 ${board.config.diffKB}`);
     await evaluate(`document.getElementById('settings-open').click()`);
     await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-diff').value === '0' && document.getElementById('cfg-diff-val').textContent === '끔'`);
-    await evaluate(`(() => { const s = document.getElementById('cfg-diff'); s.value = '1'; s.dispatchEvent(new Event('input')); document.getElementById('settings-form').requestSubmit(); })()`);
+    // 512KB 로 두고 큰 수정 셋(각 40만 자)을 잇달아 하면, 창은 최근 것부터 100만 자까지만(둘) 그리고 알린다
+    await evaluate(`document.getElementById('settings-open').click()`);
+    await waitFor(`document.getElementById('settings').open`);
+    await setDiff(512);
+    await waitFor(`!document.getElementById('settings').open`);
+    expect(board.config.diffKB === 512, `저장된 크기 ${board.config.diffKB}`);
+    const huge = (tag) => `@@ -0,0 +1,4000 @@\n` + Array.from({ length: 4000 }, (_, i) => `+${tag} ${i} ${"y".repeat(90)}`).join("\n");
+    for (const tag of ["첫째", "둘째", "셋째"]) await post("/api/hook", { sid, fact: { f: "edit", tool: "Write", path: "/tmp/작업/huge.js", lines: "1-4000", add: 4000, del: 0, diff: huge(tag) } });
+    const hrow = `[...document.querySelectorAll('#tl-body li.diff')].find((li) => li.dataset.path === '/tmp/작업/huge.js')`;
+    await waitFor(`${hrow}?.textContent.includes('×3')`);
+    await evaluate(`${hrow}.click()`);
+    await waitFor(`document.getElementById('tl-full').open && document.querySelectorAll('#tl-full pre.diff').length === 2`, 15000);
+    const capped = await evaluate(`({ note: document.querySelector('#tl-full .dnote')?.textContent, first: document.querySelector('#tl-full pre.diff').textContent.slice(0, 40) })`);
+    expect(capped.note === "고친 3번 가운데 최근 2번만 보입니다." && capped.first.includes("둘째"), JSON.stringify(capped));
+    await key("Escape", 27);
+    await waitFor(`!document.getElementById('tl-full').open`);
+    await evaluate(`document.getElementById('settings-open').click()`);
+    await waitFor(`document.getElementById('settings').open`);
+    await setDiff(16);
     await waitFor(`!document.getElementById('settings').open`);
     expect(board.config.diffKB === 16, `되돌린 크기 ${board.config.diffKB}`);
     return r.kinds.length + "줄";

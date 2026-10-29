@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Claude Code·Codex 훅: stdin 의 사건을 짧은 사실로 줄여 화판에 보낸다.
 // 세션을 막지 않도록 언제나 0 으로 끝나고 800ms 를 넘기지 않는다. 화판이 꺼져 있으면 아무것도 하지 않는다.
-// 도구 출력은 보내지 않는다. 명령·경로·짧은 앞부분, 사용자 입력·답(4,000자까지), 파일 수정의 바뀐 줄(diff, 128KB 까지)만 보내고,
+// 도구 출력은 보내지 않는다. 명령·경로·짧은 앞부분, 사용자 입력·답(4,000자까지), 파일 수정의 바뀐 줄(diff, 512KB 까지)만 보내고,
 // 비밀 모양은 가린다. 답에는 에이전트가 옮겨 적은 파일 내용·명령 출력이 들어갈 수 있다.
 import fs from "node:fs";
 import os from "node:os";
@@ -63,9 +63,9 @@ function editLines(resp) {
 }
 
 // 수정의 바뀐 줄(diff). 화판 서버가 설정한 크기(기본 16KB)로 다시 잘라 남긴다
-const DIFF_MAX = 128 * 1024;
+const DIFF_MAX = 512 * 1024; // 설정의 최대(lib/scene.js DIFF_KB_MAX)와 같다
 const DIFF_LINE = 2_000; // 한 줄 상한(압축한 코드 따위)
-const DIFF_MS = 200;     // 가리기에 쓰는 시간 상한. 「key-key-…」 처럼 생긴 긴 줄은 128KB 에 수 초가 걸린다
+const DIFF_MS = 200;     // 가리기에 쓰는 시간 상한. 「key-key-…」 처럼 생긴 긴 줄은 128KB 에도 수 초가 걸린다
 const CTRL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 const KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/, KEY_END = /-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/;
 // 개인 키 파일은 바뀐 줄을 싣지 않는다(키 가운데만 고치면 diff 에 BEGIN·END 가 들어오지 않아 가릴 길이 없다)
@@ -84,7 +84,7 @@ function patchLines(resp) {
 
 // diff 줄 → 사실 필드: 전체 더하기·빼기 줄 수(add·del)와 가린 글(diff). 줄마다 가리고, 개인 키는 덩어리(@@) 안에서
 // BEGIN~END 줄을 모두 가린다. 덩어리가 키 가운데서 시작해 END 만 보이면 그 덩어리의 앞줄을 거슬러 가린다.
-// 128KB 나 시간 상한(until)에 닿으면 거기서 자르고 cut 을 붙인다
+// 512KB 나 시간 상한(until)에 닿으면 거기서 자르고 cut 을 붙인다
 function diffFields(lines, until, file = "") {
   if (!lines.length) return {};
   let add = 0, del = 0;
