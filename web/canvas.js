@@ -393,7 +393,7 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     const badges = e.querySelector(":scope > .badges");
     if (badges) {
       badges.replaceChildren();
-      if (p.edited) badges.append(el("span", "badge edited", "수정됨"));
+      if (p.edited) { const b = el("span", "badge edited", "수정됨"); b.title = "누르면 바뀐 줄을 봅니다(남아 있지 않으면 경로 복사)"; badges.append(b); }
       const notes = notesFor(p.id);
       if (notes.length) badges.append(el("span", "badge", `이유 ${notes.length}`));
       const mb = mailFor(p.id);

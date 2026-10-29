@@ -1,7 +1,7 @@
 // 화면: 세션 목록, 맨 위 한 줄, 주의 띠, 가운데 그림, 계획 나무, 타임라인, 재생 막대.
 // 서버가 SSE 로 보내는 결과(res)를 lib/scene.js 의 applyRes 로 적용한다. 재생도 같은 함수로 처음부터 다시 적용한다.
 // 패널 폭·접힘·배율·거르기처럼 이 브라우저에만 남는 값은 localStorage 에 두고, 읽을 때 범위로 자른다.
-import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK } from "/lib/scene.js";
+import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK, refPath, normPath } from "/lib/scene.js";
 import { createCanvas, safeRef, groupSummary, inFinishedGroup } from "/canvas.js";
 
 const ST_KO = { todo: "할 일", doing: "진행", done: "끝", fail: "실패", blocked: "막힘", wait: "승인 대기" };
@@ -102,7 +102,7 @@ function theme() {
 }
 
 const canvas = createCanvas($("canvas"), {
-  onCopy: copyRef,
+  onCopy: openRef,
   notesFor: (id) => { const scene = viewScene(), from = bornT(scene, id); return scene.timeline.filter((e) => e.type === "note" && e.on === id && !(e.t < from)); },
   mailFor: (id) => { const ms = msgsTo(viewScene(), id); return ms.length ? mailBadge(ms) : null; },
   onMail: (id) => { const e = canvas.elementOf(id); if (e) askAbout(e); },
@@ -1616,12 +1616,12 @@ function openFull(li) {
   tlFull.showModal();
   tlFull.scrollTop = 0;
 }
-// 수정 줄(li.diff)의 바뀐 줄: 한 줄로 묶인 수정을 옛것부터 차례로(최근 50번까지). 글은 서버에서 그때 받는다
+// 바뀐 줄 창: 수정(seq)들을 옛것부터 차례로(최근 50번까지). 타임라인의 수정 줄(li.diff)과 그림의 파일 표시가 연다. 글은 서버에서 그때 받는다
 let diffAsk = 0;
 const DIFF_SEQS = 50; // 서버가 한 번에 주는 수
-async function openDiff(li) {
-  const all = li.dataset.seqs.split(",").map(Number), seqs = all.slice(-DIFF_SEQS);
-  const sid = state.sid, path = li.dataset.path, ask = ++diffAsk;
+async function openDiff(all, path) {
+  const seqs = all.slice(-DIFF_SEQS);
+  const sid = state.sid, ask = ++diffAsk;
   const body = $("tl-full-body"), copy = $("tl-full-copy");
   $("tl-full-title").textContent = `수정 · ${base(path)}`;
   body.classList.add("diffs");
@@ -1639,7 +1639,7 @@ async function openDiff(li) {
   if (ask !== diffAsk || !tlFull.open) return;
   if (!got) return body.replaceChildren(el("p", "dnote", "바뀐 줄을 받지 못했습니다. 화판 서버가 떠 있는지 확인하세요."));
   const byseq = new Map(viewScene().timeline.filter((x) => x.type === "fact" && x.f === "edit").map((x) => [x.seq, x]));
-  const parts = all.length > seqs.length ? [el("p", "dnote", `잇달아 고친 ${all.length}번 가운데 최근 ${seqs.length}번만 보입니다.`)] : [];
+  const parts = all.length > seqs.length ? [el("p", "dnote", `고친 ${all.length}번 가운데 최근 ${seqs.length}번만 보입니다.`)] : [];
   for (const q of seqs) {
     const e = byseq.get(q) || {}, text = got[q];
     parts.push(el("div", "dhead", `${e.t ? fmtClock(e.t) : ""}${e.lines ? " · " + e.lines : ""} · +${e.add || 0} −${e.del || 0}`));
@@ -1651,18 +1651,27 @@ async function openDiff(li) {
   }
   body.replaceChildren(...parts);
 }
+const openRow = (li) => (li.classList.contains("diff") ? openDiff(li.dataset.seqs.split(",").map(Number), li.dataset.path) : openFull(li));
+// 그림의 파일 표시(상자·목록 항목의 ref): 이 세션에서 그 파일을 고친 바뀐 줄이 남아 있으면 그 창을, 없으면 경로 복사.
+// 경로는 「수정됨」 표시와 같은 규칙으로 맞춘다(lib/scene.js). 다시 보기 중이면 그 시점까지의 수정만
+function openRef(ref) {
+  const scene = viewScene(), cwd = scene.meta.cwd, target = normPath(refPath(ref), cwd);
+  const edits = target ? scene.timeline.filter((e) => e.type === "fact" && e.f === "edit" && e.diff && normPath(e.path, cwd) === target) : [];
+  if (!edits.length) return copyRef(ref);
+  openDiff(edits.map((e) => e.seq), edits.at(-1).path);
+}
 // 글자를 끌어 고른 끝의 클릭은 열지 않는다. 이미 골라 둔 글자를 누른 클릭은 연다(누를 때 선택이 있었는지로 가른다)
 let tlSelDown = true;
 $("tl-body").addEventListener("pointerdown", () => { tlSelDown = getSelection().isCollapsed; }, true);
 $("tl-body").addEventListener("click", (ev) => {
   const li = ev.target.closest("li.full, li.diff");
   if (!li || !(getSelection().isCollapsed || !tlSelDown)) return;
-  if (li.classList.contains("diff")) openDiff(li); else openFull(li);
+  openRow(li);
 });
 $("tl-body").addEventListener("keydown", (ev) => {
   if (ev.key !== "Enter" || !ev.target.matches("li.full, li.diff")) return;
   ev.preventDefault();
-  if (ev.target.classList.contains("diff")) openDiff(ev.target); else openFull(ev.target);
+  openRow(ev.target);
 });
 $("tl-full-close").addEventListener("click", () => tlFull.close());
 $("tl-full-copy").addEventListener("click", (ev) => copyRef(ev.currentTarget.dataset.path));

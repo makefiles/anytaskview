@@ -1553,7 +1553,7 @@ async function main() {
     expect(await evaluate(`[...document.querySelectorAll('#tl-body li.prompt')].every((li) => li.classList.contains('full') && li.title.length < 20)`), "사용자 입력 줄이 전체 보기가 아니거나 긴 말풍선을 붙임");
     return `${answer.length}자`;
   });
-  await check("바뀐 줄(diff) 보기: 수정 줄에 +·− 줄 수가 붙고, 누르거나 Enter 로 창에 색칠한 diff 가 열리며, 잇달아 고친 것은 옛것부터, 경로 복사는 창의 단추로, 보관 크기는 설정 슬라이더로", async () => {
+  await check("바뀐 줄(diff) 보기: 수정 줄에 +·− 줄 수가 붙고, 누르거나 Enter 로 창에 색칠한 diff 가 열리며, 잇달아 고친 것은 옛것부터, 경로 복사는 창의 단추로, 그림의 파일 표시를 누르면 같은 창(바뀐 줄이 없으면 경로 복사), 보관 크기는 설정 슬라이더로", async () => {
     await post("/api/hook", { sid, fact: { f: "edit", tool: "Edit", path: "/tmp/작업/diff.js", lines: "3", add: 1, del: 1, diff: "@@ -3,1 +3,1 @@\n-const a = 1;\n+const a = 2;" } });
     await post("/api/hook", { sid, fact: { f: "edit", tool: "Edit", path: "/tmp/작업/diff.js", lines: "9-10", add: 2, del: 0, cut: true, diff: "@@ -9,0 +9,2 @@\n+둘째 수정\n+<img src=x onerror=alert(1)>" } });
     const row = `document.querySelector('#tl-body li.diff')`;
@@ -1583,6 +1583,23 @@ async function main() {
     await waitFor(`document.getElementById('tl-full').open && document.getElementById('tl-full-copy').hidden && !document.querySelector('#tl-full pre.diff')`);
     await key("Escape", 27);
     await waitFor(`!document.getElementById('tl-full').open`);
+    // 그림의 파일 표시: 고친 파일을 가리키는 상자는 같은 창(옛것부터), 고쳤어도 바뀐 줄이 남지 않은 파일(보관 끔 따위)의 상자는 경로 복사
+    await mcp("draw", { ops: [{ id: "dref", kind: "box", label: "고친 파일", ref: "/tmp/작업/diff.js:3" }, { id: "nref", kind: "box", label: "바뀐 줄 없는 파일", ref: "/tmp/작업/none.js:1" }] });
+    await waitFor(`document.querySelector('[data-id="dref"]')?.dataset.ref && document.querySelector('[data-id="nref"]')?.dataset.ref`);
+    await post("/api/hook", { sid, fact: { f: "edit", tool: "Edit", path: "/tmp/작업/diff.js", lines: "5", add: 1, del: 0, diff: "@@ -5,0 +5,1 @@\n+셋째 수정" } });
+    await post("/api/hook", { sid, fact: { f: "edit", tool: "Edit", path: "/tmp/작업/none.js", lines: "1", add: 1, del: 0 } });
+    await waitFor(`document.querySelector('[data-id="dref"] .badge.edited')?.title.includes('바뀐 줄') && document.querySelector('[data-id="nref"] .badge.edited')`);
+    await evaluate(`window.__copied = []; navigator.clipboard.writeText = async (t) => { window.__copied.push(t); };`);
+    await evaluate(`document.querySelector('[data-id="dref"]').click()`);
+    await waitFor(`document.getElementById('tl-full').open && document.querySelectorAll('#tl-full pre.diff').length === 3`);
+    const box = await evaluate(`({ title: document.getElementById('tl-full-title').textContent, first: document.querySelector('#tl-full pre.diff').textContent, last: [...document.querySelectorAll('#tl-full pre.diff')].pop().textContent, copied: window.__copied.length })`);
+    expect(box.title === "수정 · diff.js" && box.first.includes("const a = 1;") && box.last.includes("셋째 수정") && box.copied === 0, JSON.stringify(box));
+    await key("Escape", 27);
+    await waitFor(`!document.getElementById('tl-full').open`);
+    await evaluate(`document.querySelector('[data-id="nref"]').click()`);
+    await waitFor(`window.__copied.length === 1`);
+    expect(await evaluate(`window.__copied[0] === '/tmp/작업/none.js:1' && !document.getElementById('tl-full').open`), `안 고친 파일 상자: ${await evaluate(`JSON.stringify(window.__copied)`)}`);
+    await mcp("draw", { ops: [{ id: "dref", del: true }, { id: "nref", del: true }] });
     // 설정: 기본 16KB, 「끔」 으로 바꾸면 서버에 저장되고 다시 열면 그대로
     await evaluate(`document.getElementById('settings-open').click()`);
     await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-diff').value === '1' && document.getElementById('cfg-diff-val').textContent === '16KB(기본)'`);
