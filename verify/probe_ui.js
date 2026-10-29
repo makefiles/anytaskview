@@ -1613,6 +1613,39 @@ async function main() {
     expect(board.config.diffKB === 16, `되돌린 크기 ${board.config.diffKB}`);
     return r.kinds.length + "줄";
   });
+
+  await check("재생 단추: 실시간에서 누르면 처음부터 흘러 누른 때의 끝에서 멈추고(뒤에 온 기록은 ▶ 로 이어 보며 끝에서 ↻, 이어 쌓은 장면은 실시간과 같음), 다시 누르면 처음부터, 슬라이더를 움직이면 멈추며, 빠르기는 1×·4×·16× 를 돌고 기억됨", async () => {
+    const btn = `document.getElementById('play')`, rp = `window.__atv.replay`, speed = `document.getElementById('speed')`;
+    expect(await evaluate(`${btn}?.getAttribute('aria-label') === '처음부터 재생' && ${speed}?.getAttribute('aria-label') === '재생 빠르기 1×'`), "재생·빠르기 단추가 없음");
+    await evaluate(`${speed}.click(); ${speed}.click()`);
+    expect(await evaluate(`${speed}.textContent === '16×' && ${speed}.getAttribute('aria-label') === '재생 빠르기 16×' && localStorage.getItem('atv.replaySpeed') === '16'`), "빠르기 순환·기억");
+    // 누른 바로 뒤에 온 기록(기록을 받는 사이일 수도 있다)은 이번 재생의 끝에 넣지 않는다
+    const seq0 = await evaluate(`window.__atv.seq`);
+    await evaluate(`${btn}.click()`);
+    await hook({ f: "todo", tool: "TodoWrite", text: "재생 뒤에 온 기록" });
+    await waitFor(`window.__atv.seq > ${seq0}`);
+    await waitFor(`${rp} && window.__atv.play && ${btn}.getAttribute('aria-label') === '멈춤'`);
+    await waitFor(`!window.__atv.play && ${btn}.getAttribute('aria-label') !== '멈춤'`, 60000); // 단추는 다음 그리기에서 바뀐다
+    const first = await evaluate(`({ idx: ${rp}.idx, seq: ${rp}.records[${rp}.idx].seq, last: ${rp}.records.length - 1, name: ${btn}.getAttribute('aria-label') })`);
+    expect(first.seq === seq0 && first.idx === first.last - 1 && first.name === "재생", `누른 때의 끝: ${JSON.stringify(first)} (누를 때 사건 ${seq0})`);
+    await evaluate(`${btn}.click()`);
+    await waitFor(`${btn}.getAttribute('aria-label') === '처음부터 다시 재생'`, 60000);
+    const end = await evaluate(`(() => {
+      const r = window.__atv.replay, live = window.__atv.scene, norm = (s) => JSON.stringify({ items: Object.keys(s.items).sort().map((k) => s.items[k]), runs: Object.keys(s.runs).sort().map((k) => s.runs[k]), tl: s.timeline.length });
+      return { idx: r.idx, last: r.records.length - 1, same: norm(r.scene) === norm(live), slider: document.getElementById('slider').value };
+    })()`);
+    expect(end.idx === end.last && end.same && end.slider === String(end.last), JSON.stringify(end));
+    // 끝에서 다시 누르면 처음부터, 슬라이더를 직접 움직이면 멈춘다
+    await evaluate(`${btn}.click()`);
+    await waitFor(`${btn}.getAttribute('aria-label') === '멈춤' && ${rp}.idx < ${end.last}`);
+    await evaluate(`(() => { const s = document.getElementById('slider'); s.value = '3'; s.dispatchEvent(new Event('input')); })()`);
+    await waitFor(`${btn}.getAttribute('aria-label') === '재생' && ${rp}.idx === 3`);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await evaluate(`${rp}.idx === 3`), "슬라이더를 움직인 뒤에도 흘러감");
+    await evaluate(`document.getElementById('speed').click(); document.getElementById('live').click()`);
+    await waitFor(`!${rp} && ${btn}.getAttribute('aria-label') === '처음부터 재생' && document.getElementById('speed').textContent === '1×'`);
+    return `기록 ${end.last + 1}개`;
+  });
   await check("그림 글자 복사: 칸보다 큰 그림에서 글자 위를 끌면 화면을 옮기지 않고 글자를 고르며, 그 끝의 클릭은 경로를 복사하지 않음", async () => {
     const pick = `pick-${process.pid}`;
     await post("/api/hook", { sid: pick, pid: process.pid + 41, fact: { f: "start", cwd: "/tmp/고르기", source: "startup" } });

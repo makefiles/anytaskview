@@ -341,8 +341,10 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #tl-body .copy { cursor: copy; text-decoration: underline dotted; }
 
 #replay { display: flex; align-items: center; gap: 10px; padding: 6px 14px; background: var(--panel); border-top: 1px solid var(--line); }
+#speed { min-width: 3.4em; font-variant-numeric: tabular-nums; } /* 1× 와 16× 사이에 폭이 흔들리지 않게 */
 #slider { flex: 1; accent-color: var(--accent); background: transparent; border: 0; }
 #replay-label { color: var(--muted); font-size: 13px; min-width: 170px; }
+@media (max-width: 700px) { #replay { gap: 6px; padding: 6px 10px; } #slider { min-width: 40px; } #replay-label { min-width: 0; white-space: nowrap; } } /* 좁은 화면: 슬라이더·위치 글이 줄어 「실시간」 이 잘리지 않게 */
 #toast { position: fixed; z-index: 16; right: 16px; bottom: 56px; background: var(--fg); color: var(--bg); padding: 6px 12px; border-radius: 6px; font-size: 13px; }
 #measure { position: absolute; left: -10000px; top: 0; visibility: hidden; }
 

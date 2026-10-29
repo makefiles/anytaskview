@@ -86,6 +86,7 @@ const state = {
   replay: null,          // { records, idx, scene } 재생 중일 때만
   replayLoading: null,   // 재생 기록을 받는 동안 온 변경
   replayToken: 0,        // 기록 요청 번호. 세션을 바꾸면 늘려 늦게 온 옛 응답을 버린다
+  play: null,            // { end, timer } 재생 단추로 흘려 보는 중일 때만. end 는 누른 때의 마지막 기록
   markerSeq: null,       // 「여기부터 새것」 표시 기준
   renderQueued: false,
   tlTopSeq: 0,           // 타임라인을 맨 위(최신)에서 마지막으로 본 사건 번호
@@ -391,6 +392,7 @@ function connect(sid) {
   state.scene = newScene();
   state.seq = 0;
   state.snapped = false;
+  stopPlay();
   state.replay = null;
   state.replayLoading = null;
   state.replayToken++; // 받는 중이던 다른 세션의 기록은 버린다
@@ -456,6 +458,7 @@ function connect(sid) {
     state.scene = d.scene;
     state.seq = d.seq;
     state.snapped = true;
+    stopPlay();
     state.replay = null;
     state.replayLoading = null;
     state.replayToken++;
@@ -1459,6 +1462,16 @@ function renderReplay() {
     label.textContent = `실시간 · 사건 ${state.seq}`;
   }
   $("live").disabled = !state.replay;
+  const rp = state.replay, atEnd = !!rp && rp.idx >= rp.records.length - 1;
+  const [ico, name] = state.play ? ["i-pause", "멈춤"] : atEnd ? ["i-replay", "처음부터 다시 재생"] : rp ? ["i-play", "재생"] : ["i-play", "처음부터 재생"];
+  const btn = $("play");
+  setIcon(btn.querySelector("svg"), ico);
+  btn.setAttribute("aria-label", name);
+  btn.title = name;
+  const next = REPLAY_SPEEDS[(REPLAY_SPEEDS.indexOf(replaySpeed) + 1) % REPLAY_SPEEDS.length];
+  $("speed").textContent = `${replaySpeed}×`;
+  $("speed").setAttribute("aria-label", `재생 빠르기 ${replaySpeed}×`);
+  $("speed").title = `재생 빠르기 ${replaySpeed}× · 누르면 ${next}×`;
 }
 
 // 이 브라우저가 마지막으로 본 사건 번호를 기억한다(보이는 동안만)
@@ -1504,14 +1517,66 @@ async function enterReplay(idx) {
 }
 $("slider").addEventListener("input", (ev) => {
   const v = Number(ev.target.value);
+  stopPlay(); // 손으로 옮기면 흘려 보기를 멈춘다
   if (!state.replay && v >= Number(ev.target.max)) return;
   enterReplay(v);
 });
 $("live").addEventListener("click", () => {
+  stopPlay();
   state.replay = null;
   canvas.invalidate();
   queueRender();
 });
+
+// ---- 재생 단추: 기록을 차례로 흘려 본다 ----
+// 한 걸음은 다음 기록까지의 실제 시간을 0.1~1초로 자른 뒤 빠르기로 나눈 만큼(몰려 온 기록은 빨리, 긴 멈춤은 1초로)
+const REPLAY_SPEEDS = [1, 4, 16], STEP_MIN = 100, STEP_MAX = 1000;
+let replaySpeed = REPLAY_SPEEDS.includes(Number(store.get("atv.replaySpeed"))) ? Number(store.get("atv.replaySpeed")) : 1;
+const stepWait = (rp) => Math.min(STEP_MAX, Math.max(STEP_MIN, rp.records[rp.idx + 1].t - rp.records[rp.idx].t)) / replaySpeed;
+async function startPlay() {
+  const sid = state.sid, rp = state.replay;
+  // 끝은 누른 때의 마지막 기록이다(기록을 받는 사이에 온 것은 넣지 않는다)
+  const upto = rp ? rp.records[rp.records.length - 1]?.seq ?? 0 : state.seq;
+  // 기록을 받는 동안에도 흘려 보는 중으로 둔다(단추는 ❚❚). 그래야 멈춤·슬라이더·탭 숨김·세션 바꿈이 이 재생을 거둔다
+  const p = state.play = { end: -1, timer: 0 };
+  queueRender();
+  if (!rp || rp.idx >= rp.records.length - 1) await enterReplay(0); // 실시간이거나 끝이면 처음부터
+  if (state.play !== p) return; // 기다리는 사이 멈췄다
+  const now = state.replay;
+  if (!now || state.sid !== sid) return stopPlay(); // 기록을 받지 못했거나 그사이 세션을 바꿨다
+  let end = now.records.length - 1;
+  while (end > 0 && now.records[end].seq > upto) end--;
+  p.end = end;
+  if (now.idx >= end) stopPlay();
+  else playStep(stepWait(now));
+}
+function playStep(delay) {
+  const p = state.play;
+  p.timer = setTimeout(() => {
+    const rp = state.replay;
+    if (state.play !== p || !rp) return;
+    if (canvas.busy()) return playStep(50); // 화판이 배치를 재는 동안에는 기다린다(그림이 자리 잡기 전에 넘어가지 않게)
+    // 앞으로 한 걸음은 지금 장면에 다음 기록만 쌓는다(슬라이더처럼 처음부터 다시 쌓지 않는다)
+    rp.idx++;
+    applyRes(rp.scene, rp.records[rp.idx].res);
+    queueRender();
+    if (rp.idx >= p.end) stopPlay();
+    else playStep(stepWait(rp));
+  }, delay);
+}
+function stopPlay() {
+  if (!state.play) return;
+  clearTimeout(state.play.timer);
+  state.play = null;
+  queueRender();
+}
+$("play").addEventListener("click", () => (state.play ? stopPlay() : startPlay()));
+$("speed").addEventListener("click", () => {
+  replaySpeed = REPLAY_SPEEDS[(REPLAY_SPEEDS.indexOf(replaySpeed) + 1) % REPLAY_SPEEDS.length];
+  store.set("atv.replaySpeed", String(replaySpeed));
+  renderReplay();
+});
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") stopPlay(); }); // 안 보는 동안 흘러가 버리지 않게
 
 // ---- 테마 ----
 const THEMES = ["", "light", "dark"], THEME_KO = { "": "자동", light: "밝게", dark: "어둡게" }, THEME_ICO = { "": "i-auto", light: "i-sun", dark: "i-moon" };

@@ -18,6 +18,9 @@
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
   <symbol id="i-sliders" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h9M19 7h1M4 17h3M13 17h7"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="17" r="2.5"/></g></symbol>
   <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.6 2.3c-.7.4-1.2 1-1.2 1.8v.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17.2" r="1.2" fill="currentColor"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5Z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3.5v14H7ZM13.5 5H17v14h-3.5Z" fill="currentColor"/></symbol>
+  <symbol id="i-replay" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M5 3.5V8h4.5"/></g></symbol>
   <symbol id="ic-server" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></g></symbol>
   <symbol id="ic-db" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/></g></symbol>
   <symbol id="ic-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></g></symbol>
@@ -112,6 +115,8 @@
   </aside>
 </main>
 <footer id="replay">
+  <button id="play" class="icon" type="button" aria-label="처음부터 재생" title="처음부터 재생"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg></button>
+  <button id="speed" class="mini" type="button" aria-label="재생 빠르기 1×" title="재생 빠르기 1× · 누르면 4×">1×</button>
   <label for="slider">재생</label>
   <input id="slider" type="range" min="0" max="0" value="0">
   <span id="replay-label">실시간</span>
@@ -145,6 +150,7 @@
     <dt>여러 글 한 번에</dt><dd>보내기 창에서 「모아 두기」 를 누른 뒤, 화면 아래 띠의 「한꺼번에 보내기」 를 누릅니다.</dd>
     <dt>프로젝트로 묶기</dt><dd>세션 목록 위 「+ 프로젝트」 로 만들고, 세션 줄을 끌어다 놓습니다. 프로젝트 이름을 끌어 같은 쪽(진행 중·끝남) 다른 프로젝트의 위·아래에 놓으면 순서가 바뀝니다(⋯ 메뉴의 「위로 옮기기」 · 「아래로 옮기기」 도 같습니다).</dd>
     <dt>지난 화면 보기</dt><dd>맨 아래 재생 막대를 끕니다. 「실시간」 을 누르면 돌아옵니다.</dd>
+    <dt>작업 흐름 다시 보기</dt><dd>재생 막대 왼쪽 ▶ 를 누르면 기록이 차례로 흘러갑니다. 실시간 화면이나 끝에서 누르면 처음부터, 멈춘 자리에서 누르면 그 자리부터입니다. 몰려 온 기록은 빨리, 긴 멈춤은 1초(1× 기준)로 줄여 보이고, 옆 단추로 빠르기(1× · 4× · 16×)를 바꿉니다. 누른 때의 마지막 기록에 닿으면 멈추고(↻ 를 누르면 처음부터), 그 뒤에 온 기록이 있으면 ▶ 로 이어 봅니다. 재생 막대를 끌거나 「실시간」 을 누르면 멈춥니다.</dd>
     <dt>찾기</dt><dd>맨 위 「찾기」(또는 <kbd>/</kbd> · <kbd>Ctrl</kbd> + <kbd>K</kbd>)에 낱말을 씁니다. 이 화판의 그림·계획, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트, 다른 세션의 기록에서 찾고, 고르면 그 자리로 갑니다.</dd>
     <dt>도형 옮기기</dt><dd><kbd>Ctrl</kbd> 을 누른 채 도형을 끌어 원하는 자리에 놓습니다. 놓은 자리는 다른 브라우저·다시 보기에서도 같고, 에이전트가 그림을 고쳐도 그대로입니다. 그림 위 「자동 배치로」 를 누르면 모두 처음 자리로 돌아갑니다.</dd>
     <dt>그림 화면 옮기기</dt><dd>그림이 칸보다 크면 빈 곳을 마우스로 잡고 끌어 상하좌우로 봅니다. 「맞춤」 을 누르면 그림 전체가 칸에 들어갑니다.</dd>
