@@ -97,14 +97,33 @@
       <div id="zoom-sizer"><div id="canvas"></div></div>
       <p id="empty">아직 그림이 없습니다. Claude 가 draw 로 그리면 여기에 나타납니다.</p>
     </div>
+    <section id="doc-view" hidden aria-label="문서">
+      <div class="dv-bar">
+        <button id="dv-canvas" class="mini" type="button" title="문서를 닫고 그림으로 돌아갑니다(Esc)">← 그림으로<span id="dv-canvas-dot" class="udot" hidden title="문서를 여는 동안 그림이 바뀌었습니다"></span></button>
+        <button id="dv-back" class="mini" type="button" hidden title="링크로 옮겨 오기 전 문서로">◀ 뒤로</button>
+        <div class="dv-head"><strong id="dv-title"></strong><span id="dv-path" class="muted"></span></div>
+        <button id="dv-toc" class="mini" type="button" aria-controls="dv-tocbox" aria-expanded="false" hidden>목차</button>
+        <button id="dv-diff" class="mini" type="button" hidden title="이 문서를 고친 바뀐 줄(diff)">바뀐 줄</button>
+        <button id="dv-copy" class="mini" type="button">경로 복사</button>
+        <button id="dv-pop" class="mini" type="button" title="문서만 새 창으로 넓게 봅니다">↗ 새 창</button>
+        <button id="dv-close" class="mini" type="button" aria-label="문서 닫기" title="닫기(Esc)">✕</button>
+      </div>
+      <p id="dv-replay" class="dv-note" hidden>지금 파일입니다. 재생 시점의 내용이 아닙니다.</p>
+      <p id="dv-note" class="dv-note" role="status" hidden></p>
+      <div id="dv-main">
+        <nav id="dv-tocbox" aria-label="목차" hidden></nav>
+        <div id="dv-scroll" tabindex="0" aria-label="문서 본문"><article id="dv-article" class="md"></article><iframe id="dv-frame" title="html 문서" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" hidden></iframe></div>
+      </div>
+    </section>
   </section>
   <div class="split v" id="split-right" role="separator" aria-orientation="vertical" aria-label="오른쪽 패널 폭" tabindex="0"></div>
   <aside id="side">
     <section id="plan" aria-label="계획">
-      <div class="phead"><h2>계획</h2><span class="grow"></span><button id="toggle-done" class="mini" type="button"></button><button id="fold-plan" class="mini" type="button" title="계획 접기">▾</button></div>
+      <div class="phead"><div id="plan-tabs" class="ptabs" role="tablist" aria-label="계획과 문서"><button id="tab-plan" class="ptab" role="tab" type="button" aria-selected="true" aria-controls="plan-body">계획</button><button id="tab-docs" class="ptab" role="tab" type="button" aria-selected="false" aria-controls="docs-body" tabindex="-1">문서<span id="docs-n"></span><span id="docs-dot" class="udot" hidden></span></button></div><span class="grow"></span><button id="toggle-done" class="mini" type="button"></button><button id="fold-plan" class="mini" type="button" title="계획·문서 접기">▾</button></div>
       <div id="plan-now" hidden></div>
       <div id="plan-agents" role="group" aria-label="도는 하위 에이전트" hidden></div>
-      <div id="plan-body"></div>
+      <div id="plan-body" role="tabpanel" aria-labelledby="tab-plan"></div>
+      <div id="docs-body" role="tabpanel" aria-labelledby="tab-docs" hidden></div>
     </section>
     <div class="split h" id="split-side" role="separator" aria-orientation="horizontal" aria-label="계획과 타임라인 높이" tabindex="0"></div>
     <section id="timeline" aria-label="타임라인">
@@ -157,7 +176,8 @@
     <dt>그림 화면 옮기기</dt><dd>그림이 칸보다 크면 빈 곳을 마우스로 잡고 끌어 상하좌우로 봅니다. 「맞춤」 을 누르면 그림 전체가 칸에 들어갑니다.</dd>
     <dt>그림 글자 복사</dt><dd>상자·표·선 이름·Mermaid 의 글자 위에서 끌어 고른 뒤 <kbd>Ctrl</kbd> + <kbd>C</kbd> 로 복사합니다. 글자를 고른 끝의 클릭은 상자를 누른 것으로 치지 않습니다.</dd>
     <dt>긴 글 전체 보기</dt><dd>타임라인에서 3줄로 접힌 사용자 입력·차례 끝 답·화판 글을 누르면(<kbd>Enter</kbd> 도) 전체가 창으로 열립니다.</dd>
-    <dt>바뀐 줄(diff) 보기</dt><dd>타임라인의 「수정」 줄에 <code>+3 −1</code> 처럼 줄 수가 붙어 있으면, 누르면(<kbd>Enter</kbd> 도) 그 수정의 바뀐 줄이 창으로 열립니다. 같은 파일을 잇달아 고쳐 한 줄로 묶인 것은 옛것부터 차례로 보입니다. 그림에서 파일 위치가 붙은 상자·항목을 눌러도 이 세션에서 그 파일을 고친 바뀐 줄이 옛것부터 열립니다. 경로는 창 위의 「경로 복사」 로 복사합니다. 남기는 크기는 「설정」 에서 바꿉니다.</dd>
+    <dt>문서 보기</dt><dd>계획 칸 머리의 「문서」 탭에 에이전트가 만들거나 고친 md·html 과 그림 상자가 가리키는 문서가 모입니다(화판 프로젝트에 든 대화면 그 프로젝트 전체). 탭에는 중요 문서만 보입니다: 이름이나 제목에 설계·계획·매뉴얼·design·plan·spec·guide·README 같은 말이 든 문서, 그림 상자가 가리키는 문서, 📌 고정한 문서입니다. 나머지는 「모든 문서 N개」 에 있고 거르기 칸으로 찾습니다. 다른 문서도 타임라인의 수정 줄이나 문서 상자를 누르면 열립니다. 점은 아직 열어 보지 않은 변경입니다. 줄을 누르면 그림 자리에 문서가 열립니다: md 는 렌더된 화면(Mermaid 그림 포함)과 목차로, html 은 화판과 분리된 틀 안에서 그 모양 그대로 보입니다. 타임라인의 md·html 「수정」 줄을 누르면 그 수정이 바꾼 문단으로 옮겨 가 색 띠를 달고, 문서 상자(<span class="badge doc">문서</span>)를 누르면 그 문서가 열립니다. 문서 안 링크는 같은 저장소의 문서면 그 자리에서 열리고 「◀ 뒤로」 로 돌아옵니다. 열어 둔 문서는 고쳐지면 읽던 자리를 지켜 다시 그려집니다. 「← 그림으로」 나 <kbd>Esc</kbd> 로 닫고, 「↗ 새 창」 으로 문서만 넓게 봅니다. 줄에 마우스를 올리면 나오는 📌 로 맨 위에 고정하고, ✕ 로 목록에서 숨깁니다(맨 아래 「숨긴 문서」 에서 되살림).</dd>
+    <dt>바뀐 줄(diff) 보기</dt><dd>타임라인의 「수정」 줄에 <code>+3 −1</code> 처럼 줄 수가 붙어 있으면, 누르면(<kbd>Enter</kbd> 도) 그 수정의 바뀐 줄이 창으로 열립니다(md·html 은 문서가 열리고, 바뀐 줄은 문서 창 위 「바뀐 줄」 로 봅니다). 같은 파일을 잇달아 고쳐 한 줄로 묶인 것은 옛것부터 차례로 보입니다. 그림에서 파일 위치가 붙은 상자·항목을 눌러도 이 세션에서 그 파일을 고친 바뀐 줄이 옛것부터 열리고, 상자의 「수정됨」 표를 누르면 문서 상자에서도 바뀐 줄이 열립니다. 경로는 창 위의 「경로 복사」 로 복사합니다. 남기는 크기는 「설정」 에서 바꿉니다.</dd>
     <dt>하위 에이전트 따라 보기</dt><dd>하위 에이전트가 도는 동안 계획 칸 위에 그 이름표(색 점 · 맡은 일 · 걸린 시간)가 보이고, 타임라인의 그 에이전트 줄 앞에도 같은 이름표가 붙습니다. 이름표를 누르면 타임라인이 그 에이전트의 줄만 보이고, 다시 누르거나 거르기 줄의 「✕」 를 누르면 풀립니다. 하위 에이전트는 화판에 직접 그리지 않고, 결과를 받은 상위 에이전트가 그립니다.</dd>
     <dt>묶음 접기</dt><dd>에이전트는 같은 일의 뒤 작업을 그림에 새 묶음으로 이어 그립니다. 끝난 묶음은 상자 하나로 접혀 보이고, 누르면 펼쳐집니다. 묶음 제목 앞 ▸ · ▾ 로도 접고 폅니다.</dd>
   </dl>
@@ -168,7 +188,8 @@
     <dt><span class="st-doing">▶</span> <span class="st-done">✓</span> <span class="st-fail">✗</span></dt><dd>진행 중 · 끝 · 실패</dd>
     <dt><span class="st-wait">…</span> <span class="st-blocked">‼</span> <span class="st-todo">○</span></dt><dd>승인 대기 · 막힘 · 할 일(세션 목록에서는 ○ 가 쉬는 중)</dd>
     <dt><span class="st-wait">?</span></dt><dd>세션이 사용자 입력을 기다림</dd>
-    <dt><span class="badge edited">수정됨</span></dt><dd>에이전트가 그 상자의 파일을 고쳤음</dd>
+    <dt><span class="badge edited">수정됨</span></dt><dd>에이전트가 그 상자의 파일을 고쳤음. 누르면 바뀐 줄</dd>
+    <dt><span class="badge doc">문서</span></dt><dd>그 상자가 md·html 문서를 가리킴. 상자를 누르면 문서가 열립니다</dd>
     <dt><span class="chip stale">지난 작업 때 그린 그림</span></dt><dd>그림 위 막대에 이 표시가 있으면, 화면의 그림은 지금 작업의 계획보다 먼저 그린 것입니다. 에이전트가 이 작업의 그림을 그리면 사라집니다.</dd>
     <dt><span class="atag ac0"><span class="adot"></span><span class="aname">review:bugs</span></span></dt><dd>하위 에이전트의 이름표. 세션 목록의 「에이전트 2」 는 지금 도는 하위 에이전트 수</dd>
     <dt><span class="badge">이유 1</span></dt><dd>그 상자에 붙은 메모 수</dd>
@@ -179,7 +200,7 @@
   <dl class="keys">
     <dt><kbd>?</kbd></dt><dd>도움말 열기·닫기</dd>
     <dt><kbd>/</kbd> · <kbd>Ctrl</kbd> + <kbd>K</kbd></dt><dd>찾기 열기. 찾기 창에서 <kbd>↑</kbd> <kbd>↓</kbd> 고르기, <kbd>Enter</kbd> 열기</dd>
-    <dt><kbd>Esc</kbd></dt><dd>도움말·찾기 창·보내기 창·전체 보기 창·이름 입력 닫기</dd>
+    <dt><kbd>Esc</kbd></dt><dd>도움말·찾기 창·보내기 창·전체 보기 창·이름 입력·문서 창 닫기</dd>
     <dt><kbd>Enter</kbd></dt><dd>보내기 창에서 보내기, 이름 저장</dd>
     <dt><kbd>Shift</kbd> + <kbd>Enter</kbd></dt><dd>보내기 창에서 줄 바꾸기</dd>
     <dt>상자·단계에서 <kbd>Enter</kbd></dt><dd>그 상자·단계에 대해 보내기(<kbd>Tab</kbd> 으로 상자·단계에 갑니다)</dd>

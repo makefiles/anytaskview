@@ -2,11 +2,14 @@
 // 상태만 바뀌면 다시 배치하지 않는다. 크기나 구조가 바뀔 때만 이전 순서를 넣어 다시 배치하고, 가장 최근 배치 결과만 그린다.
 // 받은 글은 textContent 로만 넣는다. HTML 을 넣는 곳은 Mermaid 가 strict 로 그린 SVG 하나뿐이다(표 칸도 글로만 넣는다).
 
-import { own } from "/lib/scene.js";
+import { own, refPath } from "/lib/scene.js";
 import { crossLines, pickRoute, midPoint } from "/route.js";
 
 // 복사해도 되는 자리인가(제어 문자가 있으면 터미널에 붙였을 때 명령이 될 수 있다)
 export const safeRef = (ref) => typeof ref === "string" && ref !== "" && !/[\x00-\x1f\x7f]/.test(ref);
+// 문서 창으로 여는 파일(lib/docs.js 의 DOC_RE 와 같음)
+export const DOC_RE = /\.(md|markdown|html?)$/i;
+export const isDocRef = (ref) => safeRef(ref) && DOC_RE.test(refPath(ref));
 
 const ST_KO = { todo: "할 일", doing: "진행", done: "끝", fail: "실패", blocked: "막힘", wait: "승인 대기" };
 const ST_ICO = { todo: "○", doing: "▶", done: "✓", fail: "✗", blocked: "‼", wait: "…" };
@@ -106,7 +109,7 @@ const LAYERED = {
 // mailFor: 그 부품에 보낸 글 수 표시({ text, queued, title }, 없으면 null), onMail: 그 표시를 눌렀을 때(부품 id)
 // 도형 옮기기: canMove() 는 옮길 수 없으면 까닭(글), onMove(id, pos|null) 은 옮긴 자리를 기록하고 성공 여부를 돌려준다(Promise),
 // onRefuse(까닭) 은 옮기지 않을 때 알린다, getZoom() 은 그림 배율. onFold() 는 묶음을 접거나 펼쳤을 때 다시 그리게 한다
-export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onMail = () => {}, getTheme, getViewport,
+export function createCanvas(root, { onCopy, onDiff = onCopy, notesFor, mailFor = () => null, onMail = () => {}, getTheme, getViewport,
   canMove = () => null, onMove = async () => false, onRefuse = () => {}, getZoom = () => 1, onPlaced = () => {}, onFold = null }) {
   const elk = new window.ELK();
   const groupLayer = el("div", "layer groups"), partLayer = el("div", "layer parts");
@@ -393,6 +396,13 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
     const badges = e.querySelector(":scope > .badges");
     if (badges) {
       badges.replaceChildren();
+      if (isDocRef(p.ref)) { // 단추라 키보드로도 연다(상자의 Enter 는 보내기 창)
+        const b = el("button", "badge doc", "문서");
+        b.type = "button";
+        b.title = "누르면 문서를 엽니다";
+        b.setAttribute("aria-label", `${p.label || p.id} 문서 열기`);
+        badges.append(b);
+      }
       if (p.edited) { const b = el("span", "badge edited", "수정됨"); b.title = "누르면 바뀐 줄을 봅니다(남아 있지 않으면 경로 복사)"; badges.append(b); }
       const notes = notesFor(p.id);
       if (notes.length) badges.append(el("span", "badge", `이유 ${notes.length}`));
@@ -757,11 +767,14 @@ export function createCanvas(root, { onCopy, notesFor, mailFor = () => null, onM
       return;
     }
     const hit = ev.target.closest("[data-ref]");
-    if (hit && root.contains(hit)) onCopy(hit.dataset.ref);
+    if (!hit || !root.contains(hit)) return;
+    // 「수정됨」 표는 바뀐 줄, 그 밖은 ref 열기(문서면 문서 창, 아니면 바뀐 줄·경로 복사)
+    if (ev.target.closest(".badge.edited")) onDiff(hit.dataset.ref); else onCopy(hit.dataset.ref);
   });
 
   return {
     render,
+    mermaidSvg, // 문서 창의 mermaid 덩어리도 같은 설정·캐시로 그린다
     // 재고 있던 배치도 버린다(rev). 그대로 두면 끝난 뒤 lastKey 를 채워 다시 배치하라는 요청을 지운다
     reset() {
       rev++; lastKey = pendingKey = null; prevJson = new Map(); mermaidCache.clear(); layout = null; pending.clear(); foldPick.clear();

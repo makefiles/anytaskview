@@ -1,6 +1,6 @@
 {
   "name": "anytaskview",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "description": "LLM 이 일하는 동안 지금 하는 일을 로컬 브라우저 화판에 그려 올리는 도구",
   "type": "module",
@@ -11,11 +11,13 @@
   "scripts": {
     "start": "node scripts/board.js",
     "test": "node --test test/*.test.js",
-    "vendor": "cp node_modules/elkjs/lib/elk.bundled.js web/vendor/elk.js && cp node_modules/elkjs/LICENSE.md web/vendor/elk.LICENSE.md && cp node_modules/mermaid/dist/mermaid.min.js web/vendor/mermaid.js && cp node_modules/mermaid/LICENSE web/vendor/mermaid.LICENSE"
+    "vendor": "cp node_modules/elkjs/lib/elk.bundled.js web/vendor/elk.js && cp node_modules/elkjs/LICENSE.md web/vendor/elk.LICENSE.md && cp node_modules/mermaid/dist/mermaid.min.js web/vendor/mermaid.js && cp node_modules/mermaid/LICENSE web/vendor/mermaid.LICENSE && cp node_modules/markdown-it/dist/browser/markdown-it.umd.min.js web/vendor/markdown-it.js && cp node_modules/markdown-it/LICENSE web/vendor/markdown-it.LICENSE && cp node_modules/dompurify/dist/purify.min.js web/vendor/purify.js && cp node_modules/dompurify/LICENSE web/vendor/purify.LICENSE"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
+    "dompurify": "3.4.17",
     "elkjs": "0.12.0",
+    "markdown-it": "15.0.3",
     "mermaid": "12.1.0"
   }
 }

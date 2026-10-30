@@ -48,6 +48,7 @@ function connectEvents() {
   });
   es.addEventListener("projects", (ev) => { projects = ev.data; toAll("projects", ev.data); });
   es.addEventListener("config", (ev) => { config = ev.data; toAll("config", ev.data); });
+  es.addEventListener("docs", (ev) => toAll("docs", ev.data)); // 문서 고정·숨김이 바뀜(탭마다 목록을 다시 받는다)
   es.addEventListener("snap", (ev) => {
     const id = JSON.parse(ev.data).id;
     for (const [port, p] of ports) if (p.want === id && p.waiting) { p.waiting = false; port.postMessage({ ev: "snap", data: ev.data }); }

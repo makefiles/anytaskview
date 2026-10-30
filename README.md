@@ -7,7 +7,7 @@
   <img src="docs/images/hero-light.png" alt="AnyTaskView board. Left: session list grouped by project, with Claude and Codex logos and a 'past sessions' group (expanded here). Middle: a diagram the agent drew, with a rounded screen box, a decision diamond, a server box and a database cylinder joined by labelled arrows, a results table, a document box and a hexagon waiting for approval. Right: the plan with the current step pinned on top, and a timeline of commands, file edits, notes and the user's prompt. Top: the session name, the current step and a one-line approval banner with 'show more' and 'close' buttons.">
 </picture>
 
-**English summary.** anytaskview is a Linux plugin for coding agents (Claude Code and OpenAI Codex) that shows what the agent is doing on a live board in your local browser: the plan and its current step, a diagram the agent keeps extending while it works (finished groups fold into one box you can click open), notes and decisions, and facts collected automatically by hooks (file edits with their diffs, commands, subagents with a colored name tag you can click to follow one of them). Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to the agent, search the board and past records, and drag shapes with Ctrl held to rearrange them. The board UI and agent-facing texts are in Korean, and so are the screenshots in this README.
+**English summary.** anytaskview is a Linux plugin for coding agents (Claude Code and OpenAI Codex) that shows what the agent is doing on a live board in your local browser: the plan and its current step, a diagram the agent keeps extending while it works (finished groups fold into one box you can click open), notes and decisions, and facts collected automatically by hooks (file edits with their diffs, commands, subagents with a colored name tag you can click to follow one of them). Markdown and HTML documents the agent writes (plans, designs, manuals) gather in a Docs tab next to the plan and open rendered, Mermaid included, in place of the diagram; clicking a document box or an edit line opens the document at the changed paragraph. Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to the agent, search the board and past records, and drag shapes with Ctrl held to rearrange them. The board UI and agent-facing texts are in Korean, and so are the screenshots in this README.
 
 - Supported agents: Claude Code (tested in the terminal `claude`) and OpenAI Codex (terminal `codex`, ChatGPT desktop app, VS Code). Other agents are not supported yet.
 - Requirements: Linux (macOS untested, Windows through WSL), Node.js 22.12 or later, a recent browser, and Claude Code or Codex with plugin support.
@@ -23,6 +23,7 @@
 
 - 에이전트가 계획(단계)과 문제 구조 그림, 이유·결정 메모를 짧은 도구 호출로 올립니다.
 - 파일 수정, 명령, 하위 에이전트, 입력 필요 같은 사실은 에이전트의 훅이 자동으로 올립니다. 사실은 그때의 단계에 붙고, 그림 속 상자의 파일이 수정되면 그 상자에 「수정됨」 이 붙습니다.
+- 에이전트가 만들거나 고친 md·html 문서(계획서·설계서·매뉴얼)는 계획 칸의 「문서」 탭에 모이고, 누르면 그림 자리에 렌더된 화면(Mermaid 그림 포함)으로 열립니다. 문서 상자나 타임라인의 수정 줄을 누르면 그 문서의 바뀐 문단으로 갑니다.
 - 하위 에이전트마다 맡은 일과 색 점으로 된 이름표가 계획 칸 위와 타임라인 줄 앞에 붙고, 누르면 그 에이전트의 줄만 보입니다. 하위 에이전트는 화판에 직접 그리지 않고, 결과를 받은 상위 에이전트가 그립니다.
 - 여러 대화에 걸친 일은 프로젝트로 묶이고, 프로젝트마다 끝날 때까지 이어지는 큰 그림 화판이 있습니다.
 - 화판의 상자나 단계를 가리켜 그 자리에서 에이전트에 의견·지시를 보낼 수 있습니다.
@@ -151,8 +152,8 @@ Codex 로만 설치했다면 플러그인 폴더가 `~/.codex/plugins/cache/anyt
 ### 화면 구성
 
 - 왼쪽: 세션 목록. 프로젝트별로 묶이고, 목록 위 정렬 단추(처음에는 「시작순 ▾」)에서 시작순·활동순·이름순을 고르거나 끝난 세션을 숨깁니다. 끝난 지 하루가 지난 대화는 「지난 세션」 에 접혀 들어갑니다. 프로젝트 이름을 누르면 큰 그림이 열립니다.
-- 가운데: 에이전트가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 파일 위치가 붙은 상자를 누르면 이 세션에서 그 파일을 고친 바뀐 줄(diff)이 창으로 열리고, 바뀐 줄이 남은 수정이 없으면 파일 경로를 복사합니다. `Ctrl` 을 누른 채 도형을 끌면 원하는 자리로 옮기고, 놓은 자리는 기록에 남습니다(그림 위 「자동 배치로」 로 모두 되돌림). 그림이 지금 작업의 계획보다 먼저 그린 것이면 그림 위에 「지난 작업 때 그린 그림」 이 붙습니다. 같은 일의 뒤 작업은 그림을 지우지 않고 새 묶음으로 덧붙이고, 끝난 묶음은 상자 하나로 접혀 누르면 펼쳐집니다.
-- 오른쪽: 계획(지금 단계는 위에 고정)과 타임라인(사실·메모·보낸 글). 타임라인은 「새 창」 으로 떼어 볼 수 있습니다. 「수정」 줄을 누르면 그 수정의 바뀐 줄(diff)이 창으로 열립니다.
+- 가운데: 에이전트가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 파일 위치가 붙은 상자를 누르면 이 세션에서 그 파일을 고친 바뀐 줄(diff)이 창으로 열리고, 바뀐 줄이 남은 수정이 없으면 파일 경로를 복사합니다. md·html 을 가리키는 상자(「문서」 표)는 누르면 문서가 열리고, 「수정됨」 표를 누르면 바뀐 줄이 열립니다. `Ctrl` 을 누른 채 도형을 끌면 원하는 자리로 옮기고, 놓은 자리는 기록에 남습니다(그림 위 「자동 배치로」 로 모두 되돌림). 그림이 지금 작업의 계획보다 먼저 그린 것이면 그림 위에 「지난 작업 때 그린 그림」 이 붙습니다. 같은 일의 뒤 작업은 그림을 지우지 않고 새 묶음으로 덧붙이고, 끝난 묶음은 상자 하나로 접혀 누르면 펼쳐집니다.
+- 오른쪽: [계획 | 문서] 탭(지금 단계는 위에 고정)과 타임라인(사실·메모·보낸 글). 「문서」 탭에는 이 작업(화판 프로젝트면 그 프로젝트 전체)에서 만들거나 고친 md·html 이 모입니다. 탭에는 중요 문서(이름·제목에 설계·계획·매뉴얼·design·plan·spec·guide·README 같은 말이 든 문서, 그림에 걸린 문서, 📌 고정)만 보이고 나머지는 「모든 문서」 에 있으며, 아직 열어 보지 않은 변경에는 점이 붙습니다. 문서는 그림 자리에 열리고(목차, 문서 안 링크 따라가기, 고쳐지면 읽던 자리를 지켜 다시 그림), 「← 그림으로」 나 `Esc` 로 닫으며, 「↗ 새 창」 으로 문서만 넓게 봅니다. html 은 화판과 분리된 틀 안에서 그 모양 그대로 보입니다. 타임라인은 「새 창」 으로 떼어 볼 수 있습니다. 「수정」 줄을 누르면 그 수정의 바뀐 줄(diff)이 창으로 열리고, md·html 의 수정 줄은 문서가 열려 그 수정이 바꾼 문단에 색 띠가 붙습니다.
 - 아래: 재생 막대. 지난 상태를 처음부터 다시 봅니다. ▶ 를 누르면 기록이 차례로 흘러가고(빠르기 1×·4×·16×), 끝에서 멈춥니다.
 - 맨 위 주의 띠(입력 필요·승인 대기·막힘·실패, 끝난 묶음 안의 실패는 빼고)는 한 줄로 접혀 「외 N개」 로 펴고, 「닫기」 로 숨깁니다(새 알림이 오면 다시 보임). 그림이 칸보다 크면 마우스로 잡아 끌어 옮깁니다.
 - 맨 위 「찾기」(`/` 또는 `Ctrl+K`)는 이 화판의 그림·계획, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트, 다른 세션의 기록에서 찾고, 고르면 그 자리로 갑니다.
@@ -163,7 +164,8 @@ Codex 로만 설치했다면 플러그인 폴더가 `~/.codex/plugins/cache/anyt
 
 ## 데이터와 보안
 
-- 화판 서버는 127.0.0.1 에만 묶이고, 모든 요청에 토큰이 필요합니다. 이 PC 밖으로 보내는 것은 없습니다.
+- 화판 서버는 127.0.0.1 에만 묶이고, 모든 요청에 토큰이 필요합니다. 이 PC 밖으로 보내는 것은 없습니다. 예외로, 문서 창에서 연 html 이 공개 CDN(cdnjs·jsDelivr·unpkg)·Google 글꼴을 부르면 그 요청은 나갑니다.
+- 문서 보기는 목록에 오른 문서와, 그 문서가 든 git 저장소(저장소가 아니면 그 폴더) 안의 md·html·그림만 읽습니다(읽기 전용).
 - 기록은 `~/.local/state/anytaskview/` 에 이 사용자만 읽을 수 있게 둡니다(`ANYTASKVIEW_HOME` 으로 바꿀 수 있습니다). 사용자 입력과 명령 줄, 파일 경로, 에이전트의 차례 끝 답(4,000자까지), 파일 수정의 바뀐 줄(수정 한 번에 16KB까지, 설정에서 끔~512KB 를 16KB 단위로)이 들어가며 흔한 비밀 모양은 가립니다.
 - 여러 사용자 계정이 함께 쓰는 컴퓨터에서는 권하지 않습니다(화판 서버가 꺼진 사이 다른 사용자가 포트를 잡으면 브라우저의 열쇠를 가로챌 수 있습니다).
 - 남은 한계와 신고 방법은 [SECURITY.md](SECURITY.md) 에 있습니다.

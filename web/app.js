@@ -2,7 +2,8 @@
 // 서버가 SSE 로 보내는 결과(res)를 lib/scene.js 의 applyRes 로 적용한다. 재생도 같은 함수로 처음부터 다시 적용한다.
 // 패널 폭·접힘·배율·거르기처럼 이 브라우저에만 남는 값은 localStorage 에 두고, 읽을 때 범위로 자른다.
 import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK, refPath, normPath, agentsRunning } from "/lib/scene.js";
-import { createCanvas, safeRef, groupSummary, inFinishedGroup } from "/canvas.js";
+import { createCanvas, safeRef, groupSummary, inFinishedGroup, DOC_RE, isDocRef } from "/canvas.js";
+import { renderMd, changedLines, blocksAt } from "/doc.js";
 
 const ST_KO = { todo: "할 일", doing: "진행", done: "끝", fail: "실패", blocked: "막힘", wait: "승인 대기" };
 const ST_ICO = { todo: "○", doing: "▶", done: "✓", fail: "✗", blocked: "‼", wait: "…" };
@@ -15,6 +16,7 @@ const MSG_STATE_KO = { queued: "대기", sent: "보냄", expired: "만료" };
 const WHY_KO = { thread: "앞 대화에서 이어짐", claude: "Claude 가 고름", phrase: "이어받기 문구", hand: "사용자가 넣음" };
 const STALL_MS = 5 * 60_000;
 const ONLY_TL = new URLSearchParams(location.search).get("only") === "tl";
+const ONLY_DOC = new URLSearchParams(location.search).get("only") === "doc"; // 문서 창의 ↗ 새 창: 문서만 넓게
 // 화판 쓰기 열쇠: scripts/atv board --url 주소의 #w= 로 온다. localStorage 는 포트까지 갈라 두므로 다른 포트의 페이지가 읽지 못한다
 (() => {
   const m = location.hash.match(/[#&]w=([A-Za-z0-9_-]{32,})/);
@@ -105,6 +107,7 @@ function theme() {
 
 const canvas = createCanvas($("canvas"), {
   onCopy: openRef,
+  onDiff: openRefDiff, // 상자의 「수정됨」 표
   notesFor: (id) => { const scene = viewScene(), from = bornT(scene, id); return scene.timeline.filter((e) => e.type === "note" && e.on === id && !(e.t < from)); },
   mailFor: (id) => { const ms = msgsTo(viewScene(), id); return ms.length ? mailBadge(ms) : null; },
   onMail: (id) => { const e = canvas.elementOf(id); if (e) askAbout(e); },
@@ -387,7 +390,7 @@ function openEvents(sid) {
 }
 function connect(sid) {
   if (state.es) state.es.close();
-  if (sid !== state.sid) leaveSession();
+  if (sid !== state.sid) { leaveSession(); closeDoc(false); Object.assign(docs, { sid: null, key: null, list: [], total: 0, all: false, showHidden: false, filter: "", renderKey: null }); }
   $("plan-now").classList.remove("live"); // 새 세션의 상태를 받기 전까지 앞 세션의 반짝임을 남기지 않는다
   state.sid = sid;
   state.scene = newScene();
@@ -408,6 +411,7 @@ function connect(sid) {
   if (sid) history.replaceState(null, "", `${location.search}#s=${encodeURIComponent(sid)}`);
   const es = openEvents(sid);
   state.es = es;
+  queueDocs(0);
   es.addEventListener("list", (ev) => {
     state.sessions = new Map(JSON.parse(ev.data).map((s) => [s.id, s]));
     if (!state.sid || !known(state.sid)) { const pick = defaultSession(); if (pick && pick !== state.sid) return connect(pick); }
@@ -425,14 +429,18 @@ function connect(sid) {
     }
     // 보는 화면이 이 세션의 요약을 쓰는 경우(같은 줄의 대화, 프로젝트의 대화 이력, 이 세션을 받는 쪽으로 연 보내기 창·모은 글)만
     // 화면 전체를, 아니면 목록만 다시 그린다
+    if (old && old.edits !== s.edits && inDocScope(s.id)) queueDocs(800); // 같은 범위의 다른 대화가 파일을 고쳤다
     const uses = isProj(state.sid) || rootOf(s.id) === rootOf(state.sid) || ask?.sid === s.id || compose.basket.sid === s.id;
     queueRender(uses ? "all" : "list");
   });
   // 서버는 프로젝트를 목록보다 먼저 보낸다(보던 id 가 프로젝트인지 목록을 받을 때 알아야 한다)
   es.addEventListener("projects", (ev) => {
     state.projects = JSON.parse(ev.data);
+    queueDocs(); // 보는 대화의 프로젝트 소속이 바뀌면 문서 범위도 바뀐다
     queueRender();
   });
+  // 다른 탭에서 문서를 고정·숨겼다
+  es.addEventListener("docs", (ev) => { if (JSON.parse(ev.data).key === docs.key) queueDocs(0); });
   es.addEventListener("config", (ev) => {
     state.config = JSON.parse(ev.data);
     // 다시 붙은 서버가 다른 코드(새 판으로 갈아 끼운 서버)면 이 페이지도 새 판으로 다시 읽는다. 쓰던 글은 초안으로 남아 있다
@@ -479,6 +487,7 @@ function connect(sid) {
     const rec = { seq: d.seq, t: d.t, res: d.res };
     if (state.replay) state.replay.records.push(rec);
     else if (state.replayLoading) state.replayLoading.push(rec); // 기록을 받는 사이에 온 변경은 받은 뒤에 이어 붙인다
+    docOnRes(d.res);
     queueRender("view"); // 세션 목록은 요약(sess)이 올 때 그린다
   });
 }
@@ -615,6 +624,8 @@ function render({ list = true, view = true } = {}) {
   if (!view) { placeComposer(); return; } // 목록을 다시 만들면 세션 줄에 붙은 보내기 창의 자리도 다시 맞춘다
   renderTop(scene, now);
   renderPlan(scene, now);
+  renderDocs();
+  if (docView) $("dv-replay").hidden = !state.replay;
   renderTimeline(scene, now);
   renderReplay();
   $("auto-place").hidden = !(canWrite() && !state.replay && !state.replayLoading && Object.values(scene.items).some((p) => p.pos)); // 옮긴 도형이 있을 때만
@@ -1095,6 +1106,7 @@ function bandRows(band) {
 function reveal(id, isStep) {
   if (isStep) {
     if (layout.foldPlan) { layout.foldPlan = false; applyLayout(); saveLayout(); }
+    if (planTab() === "docs") setPlanTab("plan"); // 문서 탭을 보던 중이면 계획 탭으로
     const st = own(viewScene().items, id);
     if (st && st.status === "done" && !showDone()) setShowDone(true);
     render();
@@ -1103,6 +1115,7 @@ function reveal(id, isStep) {
     return;
   }
   setFollow(false);
+  closeDoc(false); // 문서 창이 그림을 덮고 있으면 걷는다
   let p = own(viewScene().items, id);
   for (let i = 0; p && p.kind === "item" && i < 10; i++) p = own(viewScene().items, p.in);
   if (p) revealPart(p.id);
@@ -1173,7 +1186,7 @@ function renderPlan(scene, now) {
   const reveal = new Set();
   for (let id = state.planReveal, i = 0; id && ids.has(id) && i < 10; id = parentOf(own(scene.items, id)), i++) reveal.add(id);
   const doneCount = steps.filter((s) => s.status === "done").length;
-  toggle.hidden = !doneCount;
+  toggle.hidden = !doneCount || planTab() === "docs";
   toggle.textContent = hideDone ? `끝난 단계 ${doneCount}개 보기` : "끝난 단계 숨기기";
   // 1초마다 불리므로 구조가 같으면 걸린 시간 글자만 고친다(다시 만들면 「보기」 강조와 대상 표시가 지워진다)
   const noteCount = (id) => { const from = bornT(scene, id); return scene.timeline.reduce((n, e) => n + (e.type === "note" && e.on === id && !(e.t < from) ? 1 : 0), 0); };
@@ -1410,7 +1423,15 @@ function tlRow(scene, { mark, e, n, edits }, now) {
       t.append(el("span", "times", n > 1 ? `×${n}` : ""));
       // 바뀐 줄이 남은 수정은 더하기·빼기 수를 붙이고, 누르면(Enter 도) diff 창을 연다. 경로 복사는 그 창의 단추로
       const sum = (k) => edits.reduce((s, x) => s + (x[k] || 0), 0);
-      if (edits.some((x) => x.diff)) {
+      if (DOC_RE.test(e.path || "")) {
+        // md·html: 누르면 문서 창이 열리고 이 수정이 바꾼 문단으로 옮겨 간다. diff 는 문서 창의 「바뀐 줄」
+        if (edits.some((x) => x.diff)) t.append(" ", el("span", "dadd", `+${sum("add")}`), " ", el("span", "ddel", `−${sum("del")}`));
+        li.classList.add("doc");
+        li.tabIndex = 0;
+        li.dataset.path = e.path;
+        li.dataset.dseqs = edits.filter((x) => x.diff).map((x) => x.seq).join(",");
+        li.title = `${e.path}\n누르면 문서를 엽니다(바뀐 문단 표시) · diff 는 문서 창의 「바뀐 줄」`;
+      } else if (edits.some((x) => x.diff)) {
         t.append(" ", el("span", "dadd", `+${sum("add")}`), " ", el("span", "ddel", `−${sum("del")}`));
         li.classList.add("diff");
         li.tabIndex = 0;
@@ -1812,10 +1833,16 @@ async function openDiff(all, path) {
   }
   body.replaceChildren(...parts);
 }
-const openRow = (li) => (li.classList.contains("diff") ? openDiff(li.dataset.seqs.split(",").map(Number), li.dataset.path) : openFull(li));
-// 그림의 파일 표시(상자·목록 항목의 ref): 이 세션에서 그 파일을 고친 바뀐 줄이 남아 있으면 그 창을, 없으면 경로 복사.
-// 경로는 「수정됨」 표시와 같은 규칙으로 맞춘다(lib/scene.js). 다시 보기 중이면 그 시점까지의 수정만
+const openRow = (li) => (li.classList.contains("doc") ? openDocPath(li.dataset.path, { seqs: li.dataset.dseqs ? li.dataset.dseqs.split(",").map(Number) : [] }) : li.classList.contains("diff") ? openDiff(li.dataset.seqs.split(",").map(Number), li.dataset.path) : openFull(li));
+// 그림의 파일 표시(상자·목록 항목의 ref): md·html 이면 문서 창(ref 의 줄이 있으면 그 문단으로), 아니면 바뀐 줄
 function openRef(ref) {
+  if (!isDocRef(ref)) return openRefDiff(ref);
+  const line = Number((/^:(\d+)/.exec(ref.slice(refPath(ref).length)) || [])[1]) || 0;
+  return openDocPath(refPath(ref), { line });
+}
+// 이 세션에서 그 파일을 고친 바뀐 줄이 남아 있으면 그 창을, 없으면 경로 복사.
+// 경로는 「수정됨」 표시와 같은 규칙으로 맞춘다(lib/scene.js). 다시 보기 중이면 그 시점까지의 수정만
+function openRefDiff(ref) {
   const scene = viewScene(), cwd = scene.meta.cwd, target = normPath(refPath(ref), cwd);
   const edits = target ? scene.timeline.filter((e) => e.type === "fact" && e.f === "edit" && e.diff && normPath(e.path, cwd) === target) : [];
   if (!edits.length) return copyRef(ref);
@@ -1826,12 +1853,12 @@ let tlSelDown = true;
 $("tl-body").addEventListener("pointerdown", () => { tlSelDown = getSelection().isCollapsed; }, true);
 $("tl-body").addEventListener("click", (ev) => {
   if (ev.target.closest("button.atag")) return; // 이름표는 거르기(아래 side 의 처리)이고 줄의 창은 열지 않는다
-  const li = ev.target.closest("li.full, li.diff");
+  const li = ev.target.closest("li.full, li.diff, li.doc");
   if (!li || !(getSelection().isCollapsed || !tlSelDown)) return;
   openRow(li);
 });
 $("tl-body").addEventListener("keydown", (ev) => {
-  if (ev.key !== "Enter" || !ev.target.matches("li.full, li.diff")) return;
+  if (ev.key !== "Enter" || !ev.target.matches("li.full, li.diff, li.doc")) return;
   ev.preventDefault();
   openRow(ev.target);
 });
@@ -1842,6 +1869,459 @@ tlFull.addEventListener("click", (ev) => {
   const r = tlFull.getBoundingClientRect();
   if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) tlFull.close();
 });
+
+// ---- 문서: [계획 | 문서] 탭의 목록과 그림 자리의 문서 창 ----
+// 목록은 서버가 범위(화판 프로젝트, 아니면 이어진 대화)의 수정 사실·그림 ref 에서 모은다(lib/docs.js). 문서는 /doc/<열쇠>/… 로 읽는다.
+// 문서 창은 그림 위를 덮기만 한다(그림은 지우지 않아 닫으면 보던 배율·자리 그대로다)
+const DOCS_TOP = 5;
+const docs = { sid: null, key: null, list: [], total: 0, all: false, showHidden: false, filter: "", timer: 0, job: null, renderKey: null, req: 0, composing: false };
+let docView = null; // 연 문서 { doc, stack, opener, openerDoc, text, heads, dirty }
+let docAsk = 0; // 문서 창 요청 번호. 닫았다 다시 열어도 이어서 세어 늦게 온 앞 문서의 응답을 버린다
+const planTab = () => (store.get("atv.planTab") === "docs" ? "docs" : "plan");
+// 아직 열어 보지 않은 변경(점): 문서마다 마지막으로 연 시각. 처음 쓰는 브라우저는 그때부터 바뀐 것만 점을 단다
+const SEEN_MAX = 500;
+function docSeen() {
+  const m = store.json("atv.docSeen", {});
+  if (typeof m.since !== "number") { m.since = Date.now(); store.set("atv.docSeen", JSON.stringify(m)); }
+  if (!isObj(m.ids)) m.ids = {};
+  return m;
+}
+const unread = (d, seen) => d.state === "ok" && (d.t || 0) > (num(seen.ids[d.id], seen.since));
+function markDocSeen(d) {
+  if (!d.id) return;
+  const m = docSeen();
+  m.ids[d.id] = Math.max(Date.now(), d.t || 0);
+  const ids = Object.keys(m.ids);
+  if (ids.length > SEEN_MAX) for (const k of ids.sort((a, b) => m.ids[a] - m.ids[b]).slice(0, ids.length - SEEN_MAX)) delete m.ids[k];
+  store.set("atv.docSeen", JSON.stringify(m));
+}
+const docState = (d) => (d.state === "missing" ? "없어진 파일" : d.state === "big" ? "2MB 가 넘어 열지 않음" : d.state === "bad" ? "읽을 수 없음" : "");
+
+function queueDocs(delay = 300) {
+  clearTimeout(docs.timer);
+  docs.timer = setTimeout(fetchDocs, delay);
+}
+function fetchDocs() {
+  clearTimeout(docs.timer);
+  const sid = state.sid, n = ++docs.req; // 겹친 요청은 마지막 것만 쓴다
+  if (!sid) return Promise.resolve();
+  const job = (async () => {
+    try {
+      const r = await fetch(`/api/docs?id=${encodeURIComponent(sid)}`);
+      if (!r.ok || sid !== state.sid || n !== docs.req) return;
+      const j = await r.json();
+      if (sid !== state.sid || n !== docs.req) return;
+      Object.assign(docs, { sid, key: j.key, list: j.docs, total: j.total });
+      renderDocs();
+    } catch { /* 서버가 다시 뜨면 다음 사건에 다시 받는다 */ }
+  })();
+  docs.job = job;
+  return job;
+}
+// 이 변경이 문서 목록을 바꿀 수 있나(md·html 수정, 문서를 가리키는 그림 부품)
+const docRes = (res) => res.some((r) => (r.k === "tl" && r.v?.f === "edit" && DOC_RE.test(r.v.path || "")) || (r.k === "put" && isDocRef(r.v?.ref)));
+// 다른 대화의 고친 파일 수가 바뀌었을 때 목록을 다시 받을지(같은 범위의 대화)
+const inDocScope = (sid) => sid !== state.sid && (docs.key?.startsWith("p:") ? projOf(sid) === docs.key.slice(2) : rootOf(sid) === rootOf(state.sid));
+
+function setPlanTab(tab, focus = false) {
+  store.set("atv.planTab", tab);
+  renderDocTabs();
+  if (tab === "docs") renderDocs();
+  if (focus) $(tab === "docs" ? "tab-docs" : "tab-plan").focus();
+}
+function renderDocTabs() {
+  const on = planTab() === "docs", seen = docSeen();
+  for (const [id, sel] of [["tab-plan", !on], ["tab-docs", on]]) { $(id).setAttribute("aria-selected", String(sel)); $(id).tabIndex = sel ? 0 : -1; }
+  $("plan-body").hidden = on;
+  $("docs-body").hidden = !on;
+  if (on) $("toggle-done").hidden = true;
+  const shown = docs.list.filter((d) => !d.hidden && d.main);
+  $("docs-n").textContent = shown.length ? ` ${shown.length}` : "";
+  const fresh = shown.some((d) => unread(d, seen));
+  $("docs-dot").hidden = !fresh;
+  $("tab-docs").title = fresh ? "문서: 아직 열어 보지 않은 변경이 있습니다" : "문서: 이 작업의 중요 문서(설계·계획·매뉴얼, 그림에 걸린 문서, 📌 고정)";
+}
+function docRow(d, seen) {
+  const row = el("div", "drow" + (d.state !== "ok" ? " dim" : "") + (d.pin ? " pinned" : "") + (docView?.doc.id === d.id ? " open" : ""));
+  row.dataset.doc = d.id;
+  const open = el("button", "dopen");
+  open.type = "button";
+  open.title = d.path + (d.state === "ok" ? "\n누르면 문서를 엽니다" : `\n${docState(d)}`);
+  const main = el("span", "dmain");
+  main.append(el("span", "dtitle", (d.pin ? "📌 " : "") + (d.title || d.name)), el("span", "dsub", `${d.name} · ${docState(d) || d.dir}`));
+  open.append(el("span", `dkind ${d.kind}`, d.kind === "html" ? "HTML" : "MD"), main, el("span", "dwhen", d.t || d.mtime ? fmtAgo(d.t || d.mtime, Date.now()) : ""));
+  if (unread(d, seen)) { const dot = el("span", "udot"); dot.setAttribute("aria-label", "새 변경"); open.append(dot); }
+  row.append(open);
+  if (canWrite()) {
+    const pin = el("button", "mini dpin", "📌");
+    pin.type = "button";
+    pin.setAttribute("aria-pressed", String(!!d.pin));
+    pin.setAttribute("aria-label", d.pin ? `${d.title || d.name} 고정 풀기` : `${d.title || d.name} 맨 위에 고정`);
+    pin.title = d.pin ? "고정 풀기" : "맨 위에 고정";
+    const hide = el("button", "mini dhide", d.hidden ? "되살리기" : "✕");
+    hide.type = "button";
+    hide.setAttribute("aria-label", d.hidden ? `${d.title || d.name} 되살리기` : `${d.title || d.name} 목록에서 숨기기`);
+    hide.title = d.hidden ? "목록에 되살립니다" : "목록에서 숨깁니다(맨 아래 「숨긴 문서」 에서 되살림)";
+    row.append(pin, hide);
+  }
+  return row;
+}
+// 바뀐 것이 있을 때만 다시 만들고, 만들기 전 초점(문서 줄·단추)을 되돌린다. 걸러 찾기 칸은 한 번만 만들고 목록만 다시 채운다
+// (칸을 새로 만들면 한글 조합이 끊긴다)
+function renderDocs() {
+  renderDocTabs();
+  const body = $("docs-body");
+  if (planTab() !== "docs" || docs.composing) return;
+  const seen = docSeen(), minute = Math.floor(Date.now() / 60_000);
+  const key = JSON.stringify([docs.sid, docs.list, docs.all, docs.showHidden, seen, minute, docView?.doc.id, canWrite()]);
+  if (key === docs.renderKey && body.firstChild) return;
+  docs.renderKey = key;
+  const act = document.activeElement, back = body.contains(act) && act.id !== "docs-filter" ? { doc: act.closest(".drow")?.dataset.doc, cls: [...act.classList].find((c) => /^d(open|pin|hide|more|hid)$/.test(c)) } : null;
+  const shown = docs.list.filter((d) => !d.hidden), hidden = docs.list.filter((d) => d.hidden);
+  let q = $("docs-filter");
+  if (!q) {
+    q = el("input", "dfilter");
+    q.id = "docs-filter";
+    q.type = "search";
+    q.placeholder = "제목·파일 이름으로 거르기";
+    q.setAttribute("aria-label", "문서 거르기");
+    body.append(q);
+  }
+  q.hidden = !(docs.all && shown.length > DOCS_TOP);
+  q.value = docs.filter;
+  for (const x of [...body.children]) if (x !== q) x.remove();
+  if (!docs.all && !shown.some((d) => d.main)) body.append(el("p", "row2", docs.sid !== state.sid ? "불러오는 중…" : "이름에 설계·계획·매뉴얼 같은 말이 든 문서, 그림 상자가 가리키는 문서, 📌 고정한 문서가 여기에 모입니다." + (shown.length ? " 다른 문서는 아래 「모든 문서」 에 있습니다." : "")));
+  body.append(el("div", "dlist main"));
+  fillDocList(seen);
+  if (shown.some((d) => !d.main)) {
+    const more = el("button", "mini dmore", docs.all ? "중요 문서만 보기" : `모든 문서 ${shown.length}${docs.total > docs.list.length ? "+" : ""}개 ›`);
+    more.type = "button";
+    body.append(more);
+  }
+  if (hidden.length) {
+    const hid = el("button", "mini dhid", docs.showHidden ? `숨긴 문서 ${hidden.length}개 접기` : `숨긴 문서 ${hidden.length}개`);
+    hid.type = "button";
+    hid.setAttribute("aria-expanded", String(docs.showHidden));
+    body.append(hid);
+    if (docs.showHidden) { const hl = el("div", "dlist hidden-docs"); hl.append(...hidden.map((d) => docRow(d, seen))); body.append(hl); }
+  }
+  if (back) {
+    // 같은 줄의 같은 단추로. 그 줄이 없어졌으면(숨김) 첫 문서 줄이나 「숨긴 문서」 단추로
+    const at = (back.doc && back.cls && body.querySelector(`.drow[data-doc="${CSS.escape(back.doc)}"] .${back.cls}`)) || (back.cls && !back.doc && body.querySelector(`.${back.cls}`)) || body.querySelector(".dopen, .dhid");
+    at?.focus();
+  }
+}
+// 중요 문서, 또는 「모든 문서」 에서 걸러 찾기에 맞는 문서
+function fillDocList(seen = docSeen()) {
+  const list = $("docs-body").querySelector(".dlist.main");
+  if (!list) return;
+  const shown = docs.list.filter((d) => !d.hidden), terms = docs.all ? searchTerms(docs.filter) : [];
+  const pick = docs.all ? shown.filter((d) => !terms.length || matchAll(`${d.title} ${d.name} ${d.dir}`, terms)) : shown.filter((d) => d.main);
+  list.replaceChildren(...pick.map((d) => docRow(d, seen)));
+  if (docs.all && terms.length && !pick.length) list.append(el("p", "row2", "맞는 문서가 없습니다."));
+}
+async function docMark(d, which, on) {
+  const out = await boardOp({ op: "doc-mark", id: state.sid, doc: d.id, [which]: on });
+  if (out.msg) toast(out.msg);
+  await fetchDocs();
+}
+$("tab-plan").addEventListener("click", () => setPlanTab("plan"));
+$("tab-docs").addEventListener("click", () => setPlanTab("docs"));
+$("plan-tabs").addEventListener("keydown", (ev) => {
+  if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+  ev.preventDefault();
+  setPlanTab(planTab() === "docs" ? "plan" : "docs", true);
+});
+$("docs-body").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button");
+  if (!b) return;
+  if (b.classList.contains("dmore")) { docs.all = !docs.all; docs.filter = ""; return renderDocs(); }
+  if (b.classList.contains("dhid")) { docs.showHidden = !docs.showHidden; return renderDocs(); }
+  const d = docs.list.find((x) => x.id === b.closest(".drow")?.dataset.doc);
+  if (!d) return;
+  if (b.classList.contains("dopen")) return openDoc(d);
+  if (b.classList.contains("dpin")) return docMark(d, "pin", !d.pin);
+  if (b.classList.contains("dhide")) return docMark(d, "hide", !d.hidden);
+});
+$("docs-body").addEventListener("input", (ev) => { if (ev.target.id === "docs-filter") { docs.filter = ev.target.value; fillDocList(); } });
+$("docs-body").addEventListener("compositionstart", () => { docs.composing = true; });
+$("docs-body").addEventListener("compositionend", () => { docs.composing = false; });
+
+// 경로(그림 ref·타임라인 수정 줄)로 열기: 목록에서 찾는다. 목록이 아직 없으면 받고 나서
+async function openDocPath(p, opts = {}) {
+  const target = normPath(p, viewScene().meta.cwd);
+  if (docs.sid !== state.sid) await fetchDocs();
+  else if (!docs.list.some((d) => d.path === target)) await fetchDocs(); // 방금 생긴 문서
+  const d = docs.list.find((x) => x.path === target);
+  if (!d) { await copyRef(p); toast("문서 목록에 없는 파일이라 경로를 복사했습니다"); return; }
+  return openDoc(d, opts);
+}
+// 문서 창의 링크로 옮겨 간 문서(목록에 없을 수 있다): 같은 열쇠의 목록 문서로 절대 경로를 맞춘다
+function linkedDoc(pathname) {
+  const known = docs.list.find((d) => d.url === pathname);
+  if (known) return known;
+  const cap = pathname.split("/")[2], rel = (u) => u.split("/").slice(3).map(decodeURIComponent).join("/");
+  const sib = docs.list.find((d) => d.url?.split("/")[2] === cap);
+  const root = sib ? sib.path.slice(0, sib.path.length - rel(sib.url).length - 1) : "";
+  const name = decodeURIComponent(pathname.split("/").pop());
+  return { id: "", url: pathname, path: root ? `${root}/${rel(pathname)}` : rel(pathname), name, dir: "", title: "", kind: /\.html?$/i.test(pathname) ? "html" : "md", state: "ok" };
+}
+
+async function openDoc(d, { line = 0, seqs = [], push = false, hash = "" } = {}) {
+  if (d.state !== "ok" || !d.url) { toast(`열 수 없습니다: ${docState(d) || "주소 없음"}`); return; }
+  if (ONLY_TL) { // 뗀 타임라인 창에는 그림 자리가 없다: 문서만 새 창으로
+    popDoc(d, { line, seqs });
+    return;
+  }
+  if (!docView) { const act = document.activeElement; docView = { stack: [], opener: act, openerDoc: act?.closest?.("#docs-body .drow")?.dataset.doc }; }
+  else if (push && docView.doc) docView.stack.push({ doc: docView.doc, top: $("dv-scroll").scrollTop });
+  else if (!push) docView.stack = [];
+  docView.doc = d;
+  docView.text = null;
+  docView.dirty = false;
+  $("doc-view").hidden = false;
+  $("canvas-wrap").classList.add("doc-open");
+  $("canvas-scroll").inert = true; // 덮인 그림 상자로 Tab 이 가지 않게
+  fillDocBar();
+  markDocSeen(d);
+  renderDocs();
+  // 초점: 처음 열면 머리 줄(새 창에서는 본문), 링크로 옮겨 가면 본문(눌렀던 링크는 다시 그리면 사라진다)
+  (push || ONLY_DOC ? $("dv-scroll") : $("dv-canvas")).focus({ preventScroll: true });
+  await loadDoc({ line, seqs, hash, ask: ++docAsk });
+}
+// 문서만 띄운 새 창. 같은 창을 다시 쓰고(해시가 바뀌면 그 창이 다시 연다) 앞으로 가져온다
+function popDoc(d, { line = 0, seqs = [] } = {}) {
+  const w = window.open(`/?only=doc#s=${encodeURIComponent(state.sid)}&u=${encodeURIComponent(d.url)}${line ? `&line=${line}` : ""}${seqs.length ? `&seqs=${seqs.join(",")}` : ""}`, `atv-doc-${state.sid}`, "popup,width=960,height=1000");
+  w?.focus();
+}
+function fillDocBar() {
+  const d = docView.doc;
+  $("dv-title").textContent = d.title || d.name;
+  $("dv-path").textContent = d.path;
+  $("dv-path").title = d.path;
+  $("dv-back").hidden = !docView.stack.length;
+  $("dv-canvas-dot").hidden = !docView.dirty;
+  $("dv-replay").hidden = !state.replay;
+  const scene = viewScene(), cwd = scene.meta.cwd;
+  const seqs = scene.timeline.filter((e) => e.type === "fact" && e.f === "edit" && e.diff && normPath(e.path, cwd) === d.path).map((e) => e.seq);
+  $("dv-diff").hidden = !seqs.length;
+  $("dv-diff").dataset.seqs = seqs.join(",");
+  $("dv-pop").hidden = ONLY_DOC;
+}
+function docNote(text) {
+  $("dv-note").textContent = text || "";
+  $("dv-note").hidden = !text;
+}
+// 다시 그려도 읽던 자리를 지킨다: 화면 맨 위보다 위에 있는 가장 가까운 제목과 그 아래로 내려온 거리
+const offTop = (e) => e.getBoundingClientRect().top - $("dv-scroll").getBoundingClientRect().top + $("dv-scroll").scrollTop;
+function scrollAnchor() {
+  const sc = $("dv-scroll");
+  let at = null;
+  for (const h of $("dv-article").querySelectorAll("[data-slug]")) { if (offTop(h) <= sc.scrollTop + 4) at = h; else break; }
+  return { top: sc.scrollTop, ...(at && { slug: at.dataset.slug, delta: sc.scrollTop - offTop(at) }) }; // 제목이 바뀌면 같은 높이로
+}
+function restoreAnchor(a) {
+  const sc = $("dv-scroll"), h = a.slug && $("dv-article").querySelector(`[data-slug="${CSS.escape(a.slug)}"]`);
+  sc.scrollTop = h ? offTop(h) + a.delta : a.top || 0;
+}
+// keep: 같은 문서를 다시 읽는다(고쳐졌을 때·창으로 돌아왔을 때). 글이 같으면 그대로 둔다
+async function loadDoc({ line = 0, seqs = [], hash = "", ask, keep = false }) {
+  const d = docView.doc, art = $("dv-article"), frame = $("dv-frame"), sc = $("dv-scroll");
+  if (!keep) docNote("");
+  if (d.kind === "html") {
+    art.hidden = true;
+    art.replaceChildren();
+    frame.hidden = false;
+    $("dv-toc").hidden = true;
+    $("dv-tocbox").hidden = true;
+    // 다시 읽기는 글이 바뀌었을 때만(다시 읽으면 html 은 처음 자리로 간다. 격리 틀 안의 스크롤은 화판이 읽지 못한다)
+    let text = null;
+    try { const r = await fetch(d.url, { cache: "no-store" }); if (r.ok) text = await r.text(); } catch { /* 틀이 알아서 오류를 보인다 */ }
+    if (ask !== docAsk || (keep && text !== null && text === docView.text)) return;
+    docView.text = text;
+    frame.src = d.url + (hash || "");
+    return;
+  }
+  frame.hidden = true;
+  frame.removeAttribute("src");
+  art.hidden = false;
+  let text;
+  try {
+    const r = await fetch(d.url, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status === 413 ? "파일이 2MB 가 넘어 열지 않습니다" : r.status === 404 ? "파일을 찾지 못했습니다(지웠거나 옮겼을 수 있습니다)" : `읽지 못했습니다(${r.status})`);
+    text = await r.text();
+  } catch (e) {
+    if (ask !== docAsk) return;
+    docNote(e.message);
+    if (!keep) art.replaceChildren();
+    return;
+  }
+  if (ask !== docAsk || (keep && text === docView.text)) return;
+  // 따로 그린 뒤 이 요청이 아직 마지막일 때만 바꿔 넣는다(늦게 끝난 앞 그리기가 새 문서를 덮지 않게)
+  const box = document.createElement("article");
+  let heads;
+  try {
+    heads = await renderMd(box, text, { docUrl: d.url, mermaidSvg: canvas.mermaidSvg });
+  } catch (e) {
+    box.replaceChildren(el("pre", "md-raw", text));
+    heads = [];
+    if (ask === docAsk) docNote(`md 를 그리지 못해 원문을 보입니다: ${e.message}`);
+  }
+  if (ask !== docAsk) return;
+  const anchor = keep ? scrollAnchor() : null;
+  docView.text = text;
+  art.replaceChildren(...box.childNodes);
+  docView.heads = heads;
+  if (!d.title && docView.heads[0]) $("dv-title").textContent = docView.heads[0].text;
+  renderToc();
+  if (anchor) restoreAnchor(anchor); else sc.scrollTop = 0;
+  const h = hash && art.querySelector(`[data-slug="${CSS.escape(decodeHash(hash))}"]`);
+  if (h) sc.scrollTop = offTop(h) - 8;
+  if (line) {
+    const b = blocksAt(art, [line])[0];
+    if (b) { sc.scrollTop = offTop(b) - 8; b.classList.add("chg"); }
+  }
+  if (seqs.length) await markSeqs(seqs, { scroll: !keep, ask });
+}
+const decodeHash = (h) => { let s = h.replace(/^#/, ""); try { s = decodeURIComponent(s); } catch { /* 그대로 */ } return s.toLowerCase(); };
+// 그 수정들(seq, 타임라인에서 한 줄로 묶인 것)이 바꾼 문단에 색 띠를 달고, 처음 연 것이면 첫 문단으로 옮겨 간다.
+// 바뀐 줄은 서버가 기록 파일에서 준다. 묶인 수정의 줄 번호는 그때그때의 파일 기준이라 합친 것은 대강이다
+async function markSeqs(seqs, { scroll, ask }) {
+  let diffs = null;
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(state.sid)}/diff?seq=${seqs.join(",")}`);
+    if (r.ok) diffs = (await r.json()).diffs || null;
+  } catch { /* 아래에서 알린다 */ }
+  if (ask !== docAsk) return;
+  const got = seqs.map((q) => diffs?.[q]).filter((x) => typeof x === "string");
+  const lines = new Set();
+  for (const t of got) for (const n of changedLines(t) || []) lines.add(n);
+  const blocks = blocksAt($("dv-article"), lines);
+  if (!blocks.length) { if (scroll) docNote(!got.length ? "이 수정의 바뀐 줄이 남아 있지 않아 바뀐 곳을 표시하지 못했습니다." : "바뀐 곳을 문단에 맞추지 못했습니다. 「바뀐 줄」 로 보세요."); return; }
+  for (const b of blocks) b.classList.add("chg");
+  if (scroll) $("dv-scroll").scrollTop = offTop(blocks[0]) - 8;
+}
+function renderToc() {
+  const heads = docView.heads || [], box = $("dv-tocbox"), btn = $("dv-toc");
+  btn.hidden = heads.length < 3;
+  if (heads.length < 3) { box.hidden = true; return; }
+  const pref = store.get("atv.docToc");
+  const on = pref === null ? $("dv-main").clientWidth >= 860 : pref === "1";
+  box.hidden = !on;
+  btn.setAttribute("aria-expanded", String(on));
+  const top = Math.min(...heads.map((h) => h.level));
+  box.replaceChildren(...heads.map((h, i) => {
+    const b = el("button", `toc l${h.level - top}`, h.text);
+    b.type = "button";
+    b.dataset.i = i;
+    return b;
+  }));
+  markToc();
+}
+// 읽는 자리의 제목을 목차에서 굵게
+function markToc() {
+  const heads = docView?.heads || [], sc = $("dv-scroll");
+  let cur = 0;
+  heads.forEach((h, i) => { if (offTop(h.el) <= sc.scrollTop + 24) cur = i; });
+  for (const b of $("dv-tocbox").children) b.classList.toggle("cur", Number(b.dataset.i) === cur);
+}
+let tocRaf = 0;
+$("dv-scroll").addEventListener("scroll", () => { if (!tocRaf) tocRaf = requestAnimationFrame(() => { tocRaf = 0; if (docView) markToc(); }); });
+$("dv-tocbox").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button.toc");
+  const h = b && docView?.heads?.[Number(b.dataset.i)];
+  if (h) $("dv-scroll").scrollTop = offTop(h.el) - 8;
+});
+$("dv-toc").addEventListener("click", () => {
+  const on = $("dv-tocbox").hidden;
+  store.set("atv.docToc", on ? "1" : "0");
+  renderToc();
+});
+// 문서 안 링크: 같은 저장소의 md·html 은 문서 창 안에서(◀ 뒤로), 바깥 주소는 새 탭, 제목 앵커는 그 자리로
+// (SVG 안의 링크는 xlink:href 일 수 있고 target 을 바꿀 수 없으므로, 기본 이동을 먼저 막고 새 탭은 직접 연다)
+$("dv-article").addEventListener("click", (ev) => {
+  const a = ev.target.closest("a");
+  if (!a || !docView) return;
+  const href = a.getAttribute("href") ?? a.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+  if (href === null) return;
+  ev.preventDefault();
+  if (href.startsWith("#")) {
+    const h = $("dv-article").querySelector(`[data-slug="${CSS.escape(decodeHash(href))}"]`);
+    if (h) $("dv-scroll").scrollTop = offTop(h) - 8;
+    return;
+  }
+  let u;
+  try { u = new URL(href, new URL(docView.doc.url, location.origin)); } catch { return; }
+  if ((u.protocol === "http:" || u.protocol === "https:") && u.origin !== location.origin) { window.open(u.href, "_blank", "noopener,noreferrer"); return; }
+  openLinkedPath(u.origin === location.origin ? u.pathname : "", u.hash);
+});
+// 문서 창 안의 링크(md 본문, html 의 중계 알림): 같은 열쇠 아래의 md·html 만 문서 창 안에서 연다
+function openLinkedPath(pathname, hash = "") {
+  const scope = docView.doc.url.split("/").slice(0, 3).join("/") + "/";
+  if (pathname.startsWith(scope) && DOC_RE.test(pathname)) return openDoc(linkedDoc(pathname), { push: true, hash });
+  toast("이 문서의 저장소 밖이거나 문서 창에서 열 수 없는 파일입니다");
+}
+// html 격리 틀의 중계(lib/docs.js RELAY): 그 틀이 보낸 것만 받는다
+addEventListener("message", (ev) => {
+  if (!docView || ev.source !== $("dv-frame").contentWindow || !isObj(ev.data)) return;
+  if (ev.data.atv === "esc") closeDoc();
+  else if (ev.data.atv === "open" && typeof ev.data.path === "string") openLinkedPath(ev.data.path, typeof ev.data.hash === "string" ? ev.data.hash : "");
+});
+function closeDoc(restore = true) {
+  if (!docView) return;
+  const back = docView.opener, backDoc = docView.openerDoc;
+  docAsk++;
+  docView = null;
+  $("doc-view").hidden = true;
+  $("canvas-wrap").classList.remove("doc-open");
+  $("canvas-scroll").inert = false;
+  $("dv-frame").removeAttribute("src");
+  $("dv-article").replaceChildren();
+  docNote("");
+  if (ONLY_DOC) { window.close(); return; }
+  renderDocs();
+  // 문서 줄은 다시 만들어지므로 같은 문서의 줄을 찾아 돌아간다
+  const row = backDoc && $("docs-body").querySelector(`.drow[data-doc="${CSS.escape(backDoc)}"] .dopen`);
+  if (restore) (row || (back?.isConnected && back !== document.body ? back : $("canvas-scroll"))).focus?.();
+}
+$("dv-canvas").addEventListener("click", () => closeDoc());
+$("dv-close").addEventListener("click", () => closeDoc());
+$("dv-back").addEventListener("click", () => {
+  const prev = docView?.stack.pop();
+  if (!prev) return;
+  docView.doc = prev.doc;
+  docView.text = null;
+  fillDocBar();
+  $("dv-scroll").focus({ preventScroll: true });
+  loadDoc({ ask: ++docAsk }).then(() => { if (docView?.doc === prev.doc) $("dv-scroll").scrollTop = prev.top; });
+});
+$("dv-diff").addEventListener("click", (ev) => openDiff(ev.currentTarget.dataset.seqs.split(",").map(Number), docView.doc.path));
+$("dv-copy").addEventListener("click", () => copyRef(docView.doc.path));
+$("dv-pop").addEventListener("click", () => popDoc(docView.doc));
+$("doc-view").addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape" || document.querySelector("dialog[open]")) return;
+  ev.preventDefault();
+  closeDoc();
+});
+// 창으로 돌아오면 연 문서와 목록을 다시 본다(화판 밖에서 고친 파일)
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !state.sid) return;
+  queueDocs(0);
+  if (docView) loadDoc({ ask: ++docAsk, keep: true });
+});
+// 실시간 변경 하나: 연 문서를 고쳤으면 읽던 자리를 지켜 다시 그리고, 그림이 바뀌었으면 「← 그림으로」 에 점을 단다
+function docOnRes(res) {
+  if (docRes(res)) queueDocs();
+  if (!docView) return;
+  const cwd = state.scene.meta.cwd;
+  const hit = res.find((r) => r.k === "tl" && r.v?.f === "edit" && normPath(r.v.path || "", cwd) === docView.doc.path);
+  if (hit) {
+    markDocSeen({ id: docView.doc.id, t: Date.now() }); // 보고 있는 문서의 새 변경은 읽은 것으로
+    fillDocBar();
+    loadDoc({ ask: ++docAsk, keep: true, seqs: hit.v.diff ? [hit.v.seq] : [] });
+  }
+  if (res.some((r) => (r.k === "put" && r.v?.kind !== "step") || r.k === "del")) { docView.dirty = true; $("dv-canvas-dot").hidden = false; }
+}
 
 // ---- 설정: 이어받기 문구, 지난 세션 정리, 수정 diff 보관 크기 ----
 const settings = $("settings");
@@ -2592,6 +3072,18 @@ if (ONLY_TL) {
   document.body.classList.add("only-tl");
   layout.foldTl = false;
 }
+// 문서만 띄운 새 창(#s=세션&u=문서 주소): 목록을 받은 뒤 연다
+if (ONLY_DOC) {
+  document.body.classList.add("only-doc");
+  const h = new URLSearchParams(location.hash.slice(1));
+  const fromHash = (h) => ({ u: h.get("u") || "", line: Number(h.get("line")) || 0, seqs: (h.get("seqs") || "").split(",").map(Number).filter((n) => n > 0) });
+  const show = ({ u: url, line, seqs }) => { if (url.startsWith("/doc/")) openDoc(linkedDoc(url), { line, seqs }); };
+  const first = fromHash(h);
+  const wait = () => (docs.sid && docs.sid === state.sid ? show(first) : setTimeout(wait, 100));
+  setTimeout(wait, 100);
+  // 큰 창이 같은 이름의 이 창에 다른 문서를 열면 주소의 해시만 바뀐다
+  addEventListener("hashchange", () => { const x = fromHash(new URLSearchParams(location.hash.slice(1))); if (x.u) show(x); });
+}
 // 쓰기 열쇠가 없으면 쓰기 단추를 끄고 위에 알린다(눌러도 1초 남짓 뜨는 알림만으로는 이유를 알기 어렵다)
 if (!store.get("atv.w")) {
   $("nokey").hidden = false;
@@ -2805,12 +3297,14 @@ function applyFocus(afterCanvas) {
     if (li) { state.focus = null; state.tlJumpT = performance.now(); li.scrollIntoView({ block: "center" }); flashIt(li); if (!li.hasAttribute("tabindex")) li.tabIndex = -1; li.focus({ preventScroll: true }); } // 전체 보기 줄은 Tab 자리를 지킨다
     else if (afterCanvas) state.focus = null; // 그 줄이 없다(지워진 세션 따위)
   } else if (f.step) {
+    if (planTab() === "docs") setPlanTab("plan");
     const li = $("plan-body").querySelector(`li[data-id="${CSS.escape(f.step)}"]`);
     if (li) { state.focus = null; li.scrollIntoView({ block: "center" }); flashIt(li); li.focus({ preventScroll: true }); }
     else if (afterCanvas) state.focus = null;
   } else if (f.part && afterCanvas && !canvas.busy()) {
     if (canvas.unfold(f.part)) return; // 접힌 묶음 안: 펼쳐 다시 그린 뒤에 고른다
     state.focus = null;
+    closeDoc(false);
     if (revealPart(f.part)) canvas.elementOf(f.part)?.focus({ preventScroll: true });
   } else if (!f.part) { state.focus = null; $("sess-name").focus({ preventScroll: true }); } // 세션·프로젝트만 골랐다
 }

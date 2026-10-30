@@ -42,7 +42,7 @@ test("Codex 사건 → 사실: apply_patch 는 고친 파일마다, 실패는 �
     tool_response: "Exit code: 0\nWall time: 0.4 seconds\nOutput:\nSuccess. Updated the following files:\nA /w/a.txt\nM /w/b.js\n",
   }, { codex: true });
   assert.deepEqual(ok, [
-    { f: "edit", tool: "apply_patch", path: "/w/a.txt", add: 1, del: 0, diff: "+x" },
+    { f: "edit", tool: "apply_patch", path: "/w/a.txt", create: true, add: 1, del: 0, diff: "+x" },
     { f: "edit", tool: "apply_patch", path: "/w/b.js", add: 1, del: 1, diff: "@@\n-y\n+z" },
   ]);
   // 결과 글의 경로가 상대 경로여도 패치 머리의 절대 경로와 짝짓는다

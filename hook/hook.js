@@ -194,9 +194,10 @@ function patchFacts(input, resp, who, until, cwd) {
   const out = typeof resp === "string" ? resp : JSON.stringify(resp ?? "");
   const done = out.split("Success. Updated the following files:")[1];
   if (done !== undefined) {
-    const paths = [...done.matchAll(/^[AMD] (.+)$/gm)].map((m) => m[1].trim()).slice(0, PATCH_MAX);
+    const changed = [...done.matchAll(/^([AMD]) (.+)$/gm)].map((m) => [m[1], m[2].trim()]).slice(0, PATCH_MAX);
     const files = patchBodies(input.command);
-    return paths.map((p) => ({ f: "edit", tool: "apply_patch", path: p, ...diffFields(bodyOf(files, p, cwd), until, p), ...who }));
+    // A: 새로 만든 파일(문서 목록이 「새로 만든 문서」 를 앞에 둔다)
+    return changed.map(([how, p]) => ({ f: "edit", tool: "apply_patch", path: p, ...(how === "A" && { create: true }), ...diffFields(bodyOf(files, p, cwd), until, p), ...who }));
   }
   const heads = [...String(input.command || "").matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => m[1].trim()).slice(0, PATCH_MAX);
   return heads.map((p) => ({ f: "edit-fail", tool: "apply_patch", path: p, error: clip(out, 200), ...who }));
@@ -228,7 +229,7 @@ export function toFact(ev, { codex = false } = {}) {
         const bg = !!(input.run_in_background || (resp && resp.backgroundTaskId));
         return { f: "run-end", id: ev.tool_use_id, cmd: clip(input.command || "", 200), desc: clip(input.description || "", 120), bg, ...(typeof ev.duration_ms === "number" && { dur: ev.duration_ms }), ...who };
       }
-      if (EDIT_TOOLS.has(tool)) return { f: "edit", tool, path: input.file_path || input.notebook_path || "", lines: editLines(resp), ...diffFields(patchLines(resp), until, input.file_path || input.notebook_path || ""), ...who };
+      if (EDIT_TOOLS.has(tool)) return { f: "edit", tool, path: input.file_path || input.notebook_path || "", lines: editLines(resp), ...(resp?.type === "create" && { create: true }), ...diffFields(patchLines(resp), until, input.file_path || input.notebook_path || ""), ...who };
       if (TODO_TOOLS.has(tool)) return { f: "todo", tool, text: todoText(tool, input), ...who };
       if (tool === "apply_patch") return patchFacts(input, resp, who, until, ev.cwd);
       // Agent 도구(옛 이름 Task): 설명과 하위 에이전트 id(문서에 있는 길). 백그라운드로 띄우면 곧바로 온다

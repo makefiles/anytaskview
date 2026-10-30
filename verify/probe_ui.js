@@ -1435,7 +1435,7 @@ async function main() {
   await check("역할별 색: 패널 제목·보조 단추·지금 세션 이름이 각자의 색을 씀", async () => {
     const r = await evaluate(`(() => {
       const color = (v, prop = 'color') => { const i = document.createElement('i'); i.style[prop] = v; document.body.append(i); const c = getComputedStyle(i)[prop]; i.remove(); return c; };
-      const h2 = getComputedStyle(document.querySelector('#plan h2')), btn = getComputedStyle(document.getElementById('zoom-fit'));
+      const h2 = getComputedStyle(document.querySelector('#plan .ptab[aria-selected="true"]')), btn = getComputedStyle(document.getElementById('zoom-fit'));
       return { h2: h2.color, title: color('var(--title)'), head: getComputedStyle(document.querySelector('#plan > .phead')).backgroundColor, titleBg: color('var(--title-bg)', 'backgroundColor'),
         btnBg: btn.backgroundColor, wantBg: color('var(--btn-bg)', 'backgroundColor'), btnFg: btn.color, wantFg: color('var(--btn-fg)'),
         name: getComputedStyle(document.getElementById('sess-name')).color, key: color('var(--key)') };
@@ -1588,9 +1588,91 @@ async function main() {
     await open(sid);
     return `칸 ${r.chips.length}개, 색 ${mine.color}`;
   });
+  await check("문서 보기: [계획 | 문서] 탭의 목록·점, 눌러서 그림 자리에 md(목차·mermaid·그림·링크·뒤로)·html(격리 틀), 수정 줄은 바뀐 문단, 고치면 갱신, Esc·초점, 고정", async () => {
+    const dir = path.join(temp, "docs-probe");
+    fs.mkdirSync(dir, { recursive: true });
+    const plan = path.join(dir, "plan.md"), other = path.join(dir, "other.md"), page = path.join(dir, "page.html");
+    const planText = (last) => ["# 작업 계획서", "", "## 1. 목적", "", "문서 보기 점검.", "", "## 2. 흐름", "", "```mermaid", "flowchart LR", "  A --> B", "```", "", "## 3. 화면", "", last, "", "![그림](pic.png)", "", "[다른 문서](other.md)", "", "```bash", "echo hi", "```", ""].join("\n");
+    fs.writeFileSync(plan, planText("처음 문단."));
+    fs.writeFileSync(other, "# 다른 문서\n\n링크로 옮겨 온 문서.\n");
+    fs.writeFileSync(page, "<!doctype html><title>격리 페이지</title><p>html</p><script>document.body.dataset.ran = '1'</script>");
+    fs.writeFileSync(path.join(dir, "pic.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"));
+    await open(sid);
+    const lines = planText("처음 문단.").split("\n");
+    await hook({ f: "edit", tool: "Write", path: plan, create: true, add: lines.length, del: 0, diff: [`@@ -0,0 +1,${lines.length} @@`, ...lines.map((l) => "+" + l)].join("\n") });
+    await hook({ f: "edit", tool: "Edit", path: page, add: 1, del: 0, diff: "@@ -1,0 +1,1 @@\n+<p>html</p>" });
+    await mcp("draw", { ops: [{ id: "doc-box", kind: "box", label: "다른 문서", ref: `${other}:1` }] });
+    // 탭: 중요 문서(제목에 「계획」, 그림에 걸림)만 보이고 수와 아직 열어 보지 않은 변경의 점, 나머지는 「모든 문서」 뒤
+    await evaluate(`document.getElementById('tab-docs').click()`);
+    const rows = `[...document.querySelectorAll('#docs-body .drow')]`;
+    await waitFor(`${rows}.length === 2 && !document.getElementById('docs-body').hidden && document.getElementById('plan-body').hidden`);
+    const tab = await evaluate(`(() => ({ sel: document.getElementById('tab-docs').getAttribute('aria-selected'), text: document.getElementById('tab-docs').textContent, dot: !document.getElementById('docs-dot').hidden,
+      order: ${rows}.map((r) => r.querySelector('.dtitle').textContent), more: document.querySelector('#docs-body .dmore')?.textContent }))()`);
+    expect(tab.sel === "true" && tab.text.startsWith("문서 2") && tab.dot && tab.more === "모든 문서 3개 ›", `탭: ${JSON.stringify(tab)}`);
+    expect(JSON.stringify(tab.order) === JSON.stringify(["작업 계획서", "다른 문서"]), `중요 문서: ${JSON.stringify(tab)}`);
+    await evaluate(`document.querySelector('#docs-body .dmore').click()`);
+    await waitFor(`${rows}.length === 3`);
+    const all = await evaluate(`(() => ({ order: ${rows}.map((r) => r.querySelector('.dtitle').textContent), kinds: ${rows}.map((r) => r.querySelector('.dkind').textContent) }))()`);
+    expect(JSON.stringify(all.order) === JSON.stringify(["작업 계획서", "다른 문서", "격리 페이지"]) && all.kinds.join() === "MD,MD,HTML", `모든 문서: ${JSON.stringify(all)}`);
+    // 목록에서 열기: 그림 자리에 문서, 목차·mermaid·그림, 그 줄의 점이 사라짐
+    await evaluate(`${rows}[0].querySelector('.dopen').focus(); ${rows}[0].querySelector('.dopen').click()`);
+    await waitFor(`!document.getElementById('doc-view').hidden && document.querySelector('#dv-article h1')?.textContent === '작업 계획서' && document.querySelector('#dv-article .mmd svg')`, 15000);
+    const md = await evaluate(`(() => ({ title: document.getElementById('dv-title').textContent, toc: document.querySelectorAll('#dv-tocbox button.toc').length, tocShown: !document.getElementById('dv-tocbox').hidden,
+      img: document.querySelector('#dv-article img')?.getAttribute('src'), imgOk: document.querySelector('#dv-article img')?.naturalWidth, zoom: getComputedStyle(document.getElementById('zoombar')).visibility,
+      rowDot: !!document.querySelector('#docs-body .drow.open .udot'), focus: document.activeElement?.id, inert: document.getElementById('canvas-scroll').inert }))()`);
+    expect(md.title === "작업 계획서" && md.toc >= 3 && md.tocShown && /^\/doc\/[0-9a-f]{32}\/(.+\/)?pic\.png$/.test(md.img || "") && !md.rowDot && md.zoom === "hidden", `md: ${JSON.stringify(md)}`);
+    await waitFor(`document.querySelector('#dv-article img')?.naturalWidth === 1`);
+    expect(md.focus === "dv-canvas" && md.inert, `연 뒤 초점·덮인 그림: ${md.focus} ${md.inert}`);
+    fs.writeFileSync(path.join(out, "probe-doc.png"), Buffer.from((await cdp.send("Page.captureScreenshot", { format: "png" })).data, "base64"));
+    // 링크로 옮겨 가고 ◀ 뒤로 돌아온다
+    await evaluate(`[...document.querySelectorAll('#dv-article a')].find((a) => a.textContent === '다른 문서').click()`);
+    await waitFor(`document.querySelector('#dv-article h1')?.textContent === '다른 문서' && !document.getElementById('dv-back').hidden`);
+    await evaluate(`document.getElementById('dv-back').click()`);
+    await waitFor(`document.querySelector('#dv-article h1')?.textContent === '작업 계획서' && document.getElementById('dv-back').hidden`);
+    // 그림이 바뀌면 「← 그림으로」 에 점, Esc 로 닫으면 연 줄로 초점이 돌아온다
+    await mcp("draw", { ops: [{ id: "doc-box2", kind: "box", label: "새 상자" }] });
+    await waitFor(`!document.getElementById('dv-canvas-dot').hidden`);
+    await evaluate(`document.getElementById('dv-scroll').focus(); document.getElementById('dv-scroll').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+    await waitFor(`document.getElementById('doc-view').hidden && document.activeElement?.matches('#docs-body .dopen')`);
+    // 수정 줄을 누르면 문서가 열리고 그 수정이 바꾼 문단에 색 띠
+    fs.writeFileSync(plan, planText("고친 문단."));
+    await hook({ f: "edit", tool: "Edit", path: plan, add: 1, del: 1, diff: "@@ -16,1 +16,1 @@\n-처음 문단.\n+고친 문단." });
+    const docLine = `[...document.querySelectorAll('#tl-body li.doc')].filter((li) => li.textContent.includes('plan.md')).sort((a, b) => b.dataset.dseq - a.dataset.dseq)[0]`;
+    await waitFor(`${docLine}?.textContent.includes('+1')`);
+    await evaluate(`${docLine}.click()`);
+    const chg = `[...document.querySelectorAll('#dv-article > .chg')].map((b) => b.textContent).join('|')`;
+    try { await waitFor(`!document.getElementById('doc-view').hidden && ${chg} === '고친 문단.'`, 15000); }
+    catch (e) { throw new Error(`바뀐 문단: ${await evaluate(chg)} · 알림: ${await evaluate(`document.getElementById('dv-note').textContent`)} · ${e.message}`); }
+    // 연 채로 파일이 고쳐지면 다시 그린다
+    fs.writeFileSync(plan, planText("또 고친 문단."));
+    await hook({ f: "edit", tool: "Edit", path: plan, add: 2, del: 2, diff: "@@ -16,1 +16,1 @@\n-고친 문단.\n+또 고친 문단.\n@@ -23,1 +23,1 @@\n-echo hi\n+echo hi" });
+    // 코드 덩어리 안의 줄도 그 덩어리에 띠가 붙는다
+    await waitFor(`[...document.querySelectorAll('#dv-article > .chg')].some((b) => b.textContent === '또 고친 문단.') && document.querySelector('#dv-article > pre.chg') && !document.getElementById('dv-diff').hidden`, 15000);
+    // 그림 상자의 문서 표: 누르면 그 문서
+    await evaluate(`document.getElementById('dv-close').click()`);
+    await waitFor(`document.getElementById('doc-view').hidden && document.querySelector('#canvas .part[data-id="doc-box"] .badge.doc')`);
+    // 「문서」 표는 단추라 키보드로도 연다
+    await evaluate(`document.querySelector('#canvas .part[data-id="doc-box"] button.badge.doc').click()`);
+    await waitFor(`!document.getElementById('doc-view').hidden && document.querySelector('#dv-article h1')?.textContent === '다른 문서'`);
+    // html: 화판과 출처가 다른 격리 틀(allow-same-origin 없음)에 연다
+    await evaluate(`[...document.querySelectorAll('#docs-body .drow')].find((r) => r.textContent.includes('격리 페이지')).querySelector('.dopen').click()`);
+    await waitFor(`!document.getElementById('dv-frame').hidden && document.getElementById('dv-frame').getAttribute('src')?.startsWith('/doc/') && document.getElementById('dv-article').hidden`);
+    const sandbox = await evaluate(`document.getElementById('dv-frame').getAttribute('sandbox')`);
+    expect(!sandbox.includes("allow-same-origin") && sandbox.includes("allow-scripts"), `sandbox: ${sandbox}`);
+    await evaluate(`document.getElementById('dv-close').click()`);
+    // 고정: 맨 위로, 📌
+    await evaluate(`[...document.querySelectorAll('#docs-body .drow')].find((r) => r.textContent.includes('격리 페이지')).querySelector('.dpin').click()`);
+    await waitFor(`document.querySelector('#docs-body .drow .dtitle')?.textContent === '📌 격리 페이지'`);
+    const csp = await evaluate(`JSON.stringify(window.__cspViolations.filter((v) => v.directive.startsWith('frame') || v.blocked.includes('/doc/')))`);
+    expect(csp === "[]", `CSP 위반: ${csp}`);
+    await evaluate(`document.getElementById('tab-plan').click()`);
+    await waitFor(`!document.getElementById('plan-body').hidden && document.getElementById('docs-body').hidden`);
+    return `중요 ${tab.order.join(" · ")} · 모두 ${all.order.length}`;
+  });
   await check("한국어 줄바꿈: 넘어간 줄은 낱말 중간이 아니라 띄어쓰기 자리에서 바뀜", async () => {
     const r = await evaluate(`(() => {
       const note = [...document.querySelectorAll('#tl-body li')].find((li) => li.textContent.includes('아주 긴 결정 메모')).querySelector('.tl-t');
+      note.scrollIntoView({ block: 'center' }); // 앞 점검이 줄을 더해 화면 밖에 있으면 그 자리의 글자를 잡지 못한다
       const g = document.createRange(); g.selectNodeContents(note);
       const tops = [...new Map([...g.getClientRects()].filter((x) => x.width > 0).map((x) => [Math.round(x.top), x])).values()];
       // 둘째 줄부터 줄 첫 글자 바로 앞이 띄어쓰기인지 본다

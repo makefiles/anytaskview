@@ -129,6 +129,10 @@ test("수정 diff: 바뀐 줄과 더하기·빼기 수를 싣고, 비밀 모양�
   assert.deepEqual([edit.add, edit.del, edit.cut], [2, 1, undefined]);
   // 새 파일은 덩어리 없이 내용이 온다
   assert.equal(post("Write", { type: "create", content: "x\ny\n", structuredPatch: [] }).diff, "@@ -0,0 +1,2 @@\n+x\n+y");
+  // 새로 만든 파일이라는 표시(문서 목록이 「새로 만든 문서」 를 앞에 둔다). 고친 파일에는 없다
+  assert.equal(post("Write", { type: "create", content: "x\n" }).create, true);
+  assert.equal(post("Write", { type: "update", content: "x\n" }).create, undefined);
+  assert.equal(edit.create, undefined);
   const secret = post("Edit", { structuredPatch: [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 5, lines: [
     "+API_TOKEN=abcd1234efgh5678", "+-----BEGIN RSA PRIVATE KEY-----", "+MIIEowIBAAKCAQEA7", "+-----END RSA PRIVATE KEY-----", "+ok",
   ] }] });
