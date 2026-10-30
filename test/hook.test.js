@@ -352,3 +352,124 @@ test("하위 에이전트의 화판 호출은 막고, 그린 적 있는 대화�
   assert.equal(nudge("prompt", "201", note('Agent "찾기" finished')), "");
 });
 
+
+test("다른 LLM 호출 판별: 표의 명령이 명령 자리에 있을 때만, 전체 명령에서 찾고, 프롬프트 글·주석·검색·관리 명령은 치지 않는다", () => {
+  const run = (command) => toFact({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "r", tool_input: { command } }).llm;
+  const long = `S=/tmp/x; cat > $S/p.txt <<'EOF'\n${"긴 프롬프트 ".repeat(100)}\nEOF\ncodex exec -s read-only - < $S/p.txt > $S/out.md`;
+  for (const [c, name] of [
+    ["codex exec -s read-only 검토", "Codex"],
+    ["cd /tmp && timeout 600 codex exec - < p.txt > out.md", "Codex"],
+    [long, "Codex"],
+    ["cat p.txt | codex exec -", "Codex"],
+    ["out=\"$(codex review --uncommitted)\"", "Codex"],
+    ["CODEX_HOME=/x /usr/local/bin/codex -c a=b -m gpt --full-auto exec x", "Codex"],
+    ["nohup codex e x &", "Codex"],
+    ["env -i HOME=$HOME PATH=$NB:/bin LANG=ko_KR.UTF-8 timeout 200 codex exec x", "Codex"],
+    ["for f in a; do codex exec \"$f\"; done", "Codex"],
+    ["{ codex exec x; } > out", "Codex"],
+    ["if timeout 600 codex exec - < p > o; then cat o; fi", "Codex"],
+    ["if ! codex exec x; then echo no; fi", "Codex"],
+    ["until codex exec x; do sleep 1; done", "Codex"],
+    ["! codex review", "Codex"],
+    ["timeout -k 5 600 codex exec x", "Codex"],
+    ["timeout -s KILL 600 codex exec x", "Codex"],
+    ["nice -n 5 codex exec x", "Codex"],
+    ["sudo -u bob codex exec x", "Codex"],
+    ["P=\"a b\" codex exec x", "Codex"],
+    ["codex -m \"gpt 5\" exec x", "Codex"],
+    ["cat p | xargs -0 codex exec", "Codex"],
+    ["xargs -I {} codex exec {} < p", "Codex"],
+    ["env -u env codex exec x", "Codex"],
+    ["PROMPT=\"$(cat p)\" codex exec x", "Codex"],
+    ["echo \"<<EOF\"\ncodex exec x", "Codex"],
+    ["echo $((1 << 2))\ncodex exec x", "Codex"],
+    ["case $a in x) codex exec y ;; esac", "Codex"],
+    ["cat <<-EOF\n\tbody\n\tEOF\ncodex exec x", "Codex"],
+    ["\"$HOME/bin/codex\" exec x", "Codex"],
+    ["codex \\\n  exec x", "Codex"],
+    ["cat <<EOF | codex exec -\nbody\nEOF", "Codex"],
+    ["node \"${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs\" task --write x", "Codex"],
+    ["node /p/codex-companion.mjs adversarial-review", "Codex"],
+    // 앞에 짝 없는 아포스트로피가 있어도 놓치지 않는다
+    ["echo \"don't\"; codex exec x; sed -n '1p' out", "Codex"],
+    ["# don't run twice\ncodex exec x > out; sed -n '1,5p' out", "Codex"],
+    ["P=\"review this, don't edit\"\ncodex exec \"$P\" > out; sed -n '1,20p' out", "Codex"],
+    ["claude -p 검토", "Claude"],
+    ["timeout 60 claude --model x --print \"요약해\" > o", "Claude"],
+    ["gemini -p 'x'", "Gemini"],
+    ["gemini --skip-trust --prompt=x", "Gemini"],
+    ["opencode run 고쳐", "opencode"],
+    ["opencode -m a/b run 고쳐", "opencode"],
+    ["copilot -p x", "Copilot"],
+    ["aider --yes --message \"고쳐\" a.py", "Aider"],
+    ["ollama run llama3 \"x\"", "ollama"],
+  ]) assert.equal(run(c), name, c);
+  for (const c of [
+    "codex plugin marketplace upgrade anytaskview",
+    "codex --version",
+    "command -v codex && codex --version",
+    "grep -n \"codex exec\" a.md",
+    "rg codex exec",
+    "pgrep -af 'codex exec'",
+    "ls ~/.codex",
+    "cat codex-exec.md",
+    "cat > p.txt <<'EOF'\ncodex exec 로 검토\nEOF",
+    "echo 'a; codex exec b'",
+    "echo \"a; codex exec b\"",
+    "# codex exec 는 쓰지 않는다\nls",
+    "git log --grep=codex",
+    "node /p/codex-companion.mjs status",
+    "my-codex exec x",
+    "claude plugin update x",
+    "claude --version",
+    "claude --help | grep -- -p",
+    "gemini --version",
+    "opencode --help",
+    "ollama list",
+    "ollama serve; ls -p",
+    "aider --version; ls -m",
+    "git commit -m \"docs: claude -p 쓰는 법\"",
+    "git commit -m \"fix: a; codex review 표시\"",
+    "echo 준비 # 다음; codex exec 는 나중",
+    "codex exec --help",
+    "codex review --help",
+    "cat <<\\EOF > p\ncodex exec 로 검토\nEOF",
+    "cat > a <<'A' && cat > b <<'B'\nx\nA\ncodex exec 로 검토\nB",
+    "cat <<'EOF'\ncodex exec 끝 표시가 없는 본문",
+    "grep x <<< \"a b\"; ls",
+    "echo if codex exec x",
+    "echo ! codex exec x",
+    "echo /tmp/codex-companion.mjs task",
+    "rg codex-companion.mjs task",
+    "codex exec -s read-only --help",
+    "claude --help -p",
+    "cat <<EOF\nEOF   \ncodex exec y\nEOF",
+    "git commit -m \"$(cat <<'EOF'\nfix: x\n\ncodex exec 표시\nEOF\n)\"",
+    "command -v codex",
+    "node script.js codex exec",
+    "sudo rm codex exec",
+    "time grep codex exec a",
+  ]) assert.equal(run(c), undefined, c);
+  // 끝·실패 사실에도 실린다(시작을 잃어도 표시가 남게)
+  assert.equal(toFact({ hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "r", tool_input: { command: "codex exec x" }, tool_response: {} }).llm, "Codex");
+  assert.equal(toFact({ hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_use_id: "r", tool_input: { command: "codex exec x" }, error: "e" }).llm, "Codex");
+  // 긴 명령도 금방 끝난다(훅은 시간 제한이 짧다)
+  const t0 = performance.now();
+  run(`${"a ".repeat(100000)}<<EOF ${"'x' \"y z\" ".repeat(20000)}`);
+  run(`codex ${"-a ".repeat(5000)}`);
+  run("\n".repeat(100000));
+  run("   \n".repeat(30000));
+  run("cat <<E\nx\n".repeat(30000));
+  run(`${"env -u env ".repeat(5000)}true`);
+  assert.ok(performance.now() - t0 < 500, "느림");
+});
+
+test("뒤에서 실행: 끝 알림은 실행 번호와 끝 모양을 싣고, 띄운 결과는 작업 번호를, 멈춤은 그 번호를 싣는다", () => {
+  const note = (status) => toFact({ hook_event_name: "UserPromptSubmit", prompt: `<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>${status}</status>\n<summary>끝</summary>\n</task-notification>` });
+  assert.deepEqual(note("completed"), { f: "prompt", sys: true, text: "끝", run: "toolu_1", end: "done" });
+  assert.equal(note("failed").end, "fail");
+  assert.equal(note("killed").end, "stopped");
+  assert.equal(note("stopped").end, "stopped");
+  assert.equal(toFact({ hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "r", tool_input: { command: "ls", run_in_background: true }, tool_response: { backgroundTaskId: "b1" } }).task, "b1");
+  assert.deepEqual(toFact({ hook_event_name: "PostToolUse", tool_name: "TaskStop", tool_use_id: "s", tool_input: { task_id: "b1" }, tool_response: {} }), { f: "run-stop", task: "b1" });
+});

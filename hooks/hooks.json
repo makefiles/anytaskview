@@ -81,7 +81,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|TaskCreate|TaskUpdate|TodoWrite|Agent|Task",
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit|TaskCreate|TaskUpdate|TodoWrite|Agent|Task|TaskStop|KillShell",
         "hooks": [
           {
             "type": "command",

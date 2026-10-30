@@ -121,7 +121,7 @@
     <section id="plan" aria-label="계획">
       <div class="phead"><div id="plan-tabs" class="ptabs" role="tablist" aria-label="계획과 문서"><button id="tab-plan" class="ptab" role="tab" type="button" aria-selected="true" aria-controls="plan-body">계획</button><button id="tab-docs" class="ptab" role="tab" type="button" aria-selected="false" aria-controls="docs-body" tabindex="-1">문서<span id="docs-n"></span><span id="docs-dot" class="udot" hidden></span></button></div><span class="grow"></span><button id="toggle-done" class="mini" type="button"></button><button id="fold-plan" class="mini" type="button" title="계획·문서 접기">▾</button></div>
       <div id="plan-now" hidden></div>
-      <div id="plan-agents" role="group" aria-label="도는 하위 에이전트" hidden></div>
+      <div id="plan-agents" role="group" aria-label="도는 다른 LLM 과 하위 에이전트" hidden></div>
       <div id="plan-body" role="tabpanel" aria-labelledby="tab-plan"></div>
       <div id="docs-body" role="tabpanel" aria-labelledby="tab-docs" hidden></div>
     </section>
@@ -192,6 +192,7 @@
     <dt><span class="badge doc">문서</span></dt><dd>그 상자가 md·html 문서를 가리킴. 상자를 누르면 문서가 열립니다</dd>
     <dt><span class="chip stale">지난 작업 때 그린 그림</span></dt><dd>그림 위 막대에 이 표시가 있으면, 화면의 그림은 지금 작업의 계획보다 먼저 그린 것입니다. 에이전트가 이 작업의 그림을 그리면 사라집니다.</dd>
     <dt><span class="atag ac0"><span class="adot"></span><span class="aname">review:bugs</span></span></dt><dd>하위 에이전트의 이름표. 세션 목록의 「에이전트 2」 는 지금 도는 하위 에이전트 수</dd>
+    <dt><span class="lltag">Codex</span></dt><dd>에이전트가 다른 LLM 에 일을 시킨 명령(<code>codex exec</code>·<code>codex review</code>·Codex 플러그인 작업, <code>claude -p</code>, <code>gemini -p</code>, <code>opencode run</code>, <code>copilot -p</code>, <code>aider --message</code>, <code>ollama run</code>). 도는 동안 계획 칸 위와 세션 목록에도 그 이름이 보이고, 뒤에서 실행한 명령은 끝나거나 멈출 때까지 보입니다</dd>
     <dt><span class="badge">이유 1</span></dt><dd>그 상자에 붙은 메모 수</dd>
     <dt><span class="badge mail queued">✉1</span></dt><dd>그 상자·단계에 보낸 글 수. 이 색이면 에이전트가 아직 받지 않은 글이 있습니다. 누르면 보내기 창이 열립니다.</dd>
   </dl>

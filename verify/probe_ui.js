@@ -1588,6 +1588,31 @@ async function main() {
     await open(sid);
     return `칸 ${r.chips.length}개, 색 ${mine.color}`;
   });
+  await check("다른 LLM 표시: 도는 동안 계획 칸 위·세션 줄·타임라인 줄에 이름이 보이고, 뒤에서 실행은 끝 알림·멈춤까지 남고, 끝나면 줄의 표만 남음", async () => {
+    await open(sid);
+    const tags = `[...document.querySelectorAll('#plan-agents .lltag')]`, selRow = `document.querySelector('#sessions .sess.sel')`;
+    const rowOf = (text) => `[...document.querySelectorAll('#tl-body li')].find((li) => li.textContent.includes('${text}'))`;
+    const row = rowOf("Codex 에 검토 묻기"), row2 = rowOf("Gemini 에 묻기");
+    await hook({ f: "run-start", id: "probe-cx", cmd: "S=/tmp/x; cat > p <<'EOF'", desc: "Codex 에 검토 묻기", llm: "Codex" });
+    await waitFor(`!document.getElementById('plan-agents').hidden && ${tags}[0]?.textContent.startsWith('Codex') && ${selRow}.textContent.includes('Codex 1') && ${row}?.querySelector('.tl-t .lltag')?.textContent === 'Codex'`);
+    const look = await evaluate(`(() => { const c = ${tags}[0], s = getComputedStyle(c); return { title: c.title, color: s.color, border: s.borderTopColor }; })()`);
+    expect(look.title === "Codex 에 검토 묻기" && look.color === look.border, `표: ${JSON.stringify(look)}`);
+    // 뒤에서 실행으로 넘어가도 남고, 걸린 시간이 간다
+    await hook({ f: "run-end", id: "probe-cx", cmd: "x", desc: "Codex 에 검토 묻기", bg: true, task: "probe-b1", dur: 3, llm: "Codex" });
+    await waitFor(`${row}?.textContent.includes('뒤에서 실행') && ${tags}[0]?.querySelector('.dur').textContent !== ''`);
+    // 다른 LLM 은 표가 따로다
+    await hook({ f: "run-start", id: "probe-gm", cmd: "gemini -p x", desc: "Gemini 에 묻기", llm: "Gemini" });
+    await waitFor(`${tags}.length === 2 && ${tags}[1].textContent.startsWith('Gemini') && ${selRow}.textContent.includes('Gemini 1') && ${row2}?.querySelector('.tl-t .lltag')?.textContent === 'Gemini'`);
+    fs.writeFileSync(path.join(out, "probe-llm.png"), Buffer.from((await cdp.send("Page.captureScreenshot", { format: "png" })).data, "base64"));
+    await hook({ f: "run-end", id: "probe-gm", cmd: "gemini -p x", desc: "Gemini 에 묻기", bg: true, task: "probe-b2", dur: 3, llm: "Gemini" });
+    // 끝 알림: 칸과 세션 줄에서 사라지고, 줄은 「끝」 과 표
+    await hook({ f: "prompt", sys: true, text: "Background command completed (exit code 0)", run: "probe-cx", end: "done" });
+    await waitFor(`${tags}.length === 1 && !${selRow}.textContent.includes('Codex') && ${row}?.textContent.includes('끝') && !${row}?.textContent.includes('뒤에서 실행') && ${row}?.querySelector('.tl-t .lltag')`);
+    // 멈춤: 작업 번호로 닫는다
+    await hook({ f: "run-stop", task: "probe-b2" });
+    await waitFor(`document.getElementById('plan-agents').hidden && !${selRow}.textContent.includes('Gemini') && ${row2}?.textContent.includes('멈춤')`);
+    return "표·세션 줄·줄 표지·멈춤";
+  });
   await check("문서 보기: [계획 | 문서] 탭의 목록·점, 눌러서 그림 자리에 md(목차·mermaid·그림·링크·뒤로)·html(격리 틀), 수정 줄은 바뀐 문단, 고치면 갱신, Esc·초점, 고정", async () => {
     const dir = path.join(temp, "docs-probe");
     fs.mkdirSync(dir, { recursive: true });

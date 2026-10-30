@@ -1,7 +1,7 @@
 // 장면 규칙 시험: 명령 검사, 지금 단계, 훅 사실의 순서 처리, 재생이 실시간과 같은지
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs, drawingStale, DRAW_SLACK, agentsRunning } from "../lib/scene.js";
+import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs, drawingStale, DRAW_SLACK, agentsRunning, llmRunning, llmCounts } from "../lib/scene.js";
 
 // 서버처럼: 검사 → 기록(JSON) → 기록을 되읽어 적용
 function harness(resume) {
@@ -509,6 +509,87 @@ test("하위 에이전트가 끝나면 그 에이전트가 열어 둔 실행을 
   h.fact({ f: "agent-stop", agent: "ag" }, 20);
   assert.equal(h.scene.runs.r1.state, "unknown");
   assert.equal(h.scene.runs.r2.state, "running");
+});
+
+test("다른 LLM 실행: 앞·뒤 실행 모두 도는 동안 세고, 뒤에서 실행은 끝 알림·멈춤·에이전트 끝·세션 끝으로 닫으며, 두 시간 지난 것은 세지 않는다", () => {
+  const h = harness(), H = 3600_000, ids = (now) => llmRunning(h.scene, now).map((r) => r.id);
+  h.fact({ f: "run-start", id: "c1", cmd: "codex exec a", llm: "Codex" }, 10);
+  h.fact({ f: "run-start", id: "p1", cmd: "ls" }, 11);
+  assert.deepEqual(ids(20), ["c1"]);
+  assert.equal(h.scene.runs.c1.llm, "Codex");
+  assert.equal(h.scene.runs.p1.llm, undefined);
+  // 차례 중에 온 작업 알림은 앞에서 도는 LLM 명령을 닫지 않는다(다른 앞 실행은 닫는다, 예전 그대로)
+  h.fact({ f: "prompt", sys: true, text: "다른 일 끝" }, 25);
+  assert.equal(h.scene.runs.c1.state, "running");
+  assert.equal(h.scene.runs.p1.state, "unknown");
+  // 뒤에서 실행으로 넘어가도 돈다
+  h.fact({ f: "run-end", id: "c1", cmd: "codex exec a", bg: true, task: "b1", dur: 5, llm: "Codex" }, 30);
+  assert.equal(h.scene.runs.c1.state, "background");
+  assert.deepEqual(ids(40), ["c1"]);
+  // 시작을 잃어도 끝 사실로 표시되고, 이름마다 센다
+  h.fact({ f: "run-end", id: "c2", cmd: "gemini -p b", bg: true, task: "b2", dur: 5, llm: "Gemini" }, 50);
+  assert.deepEqual(ids(60), ["c1", "c2"]);
+  assert.deepEqual(llmCounts(llmRunning(h.scene, 60)), [["Codex", 1], ["Gemini", 1]]);
+  assert.deepEqual(ids(50 + 2 * H + 1), [], "끝을 잃은 것은 두 시간 뒤");
+  // 끝 알림이 뒤로 넘긴 결과보다 먼저 와도 닫힌 채다(결과는 작업 번호만 더한다)
+  h.fact({ f: "run-start", id: "r1", llm: "Codex" }, 62);
+  h.fact({ f: "prompt", sys: true, text: "끝", run: "r1", end: "done" }, 64);
+  h.fact({ f: "run-end", id: "r1", bg: true, task: "br", dur: 1, llm: "Codex" }, 63);
+  assert.equal(h.scene.runs.r1.state, "done");
+  assert.equal(h.scene.runs.r1.task, "br");
+  // 시작 사실도 걸린 시간도 없으면 뒤로 넘긴 때부터 센다
+  h.fact({ f: "run-end", id: "n1", bg: true, llm: "Codex" }, 70);
+  assert.deepEqual(ids(71), ["c1", "c2", "n1"]);
+  h.fact({ f: "prompt", sys: true, text: "끝", run: "n1", end: "done" }, 72);
+  // 알림이 정리를 앞당긴 뒤 늦게 온 LLM 시작은 그래도 돈다(다른 명령은 「알 수 없음」)
+  h.fact({ f: "prompt", sys: true, text: "다른 일" }, 80);
+  h.fact({ f: "run-start", id: "l1", llm: "Codex" }, 75);
+  h.fact({ f: "run-start", id: "l2" }, 76);
+  assert.equal(h.scene.runs.l1.state, "running");
+  assert.equal(h.scene.runs.l2.state, "unknown");
+  h.fact({ f: "run-end", id: "l1", dur: 1, llm: "Codex" }, 81);
+  // 끝 알림: 그 실행만 닫고, 걸린 시간은 알림까지다
+  h.fact({ f: "prompt", sys: true, text: "끝", run: "c1", end: "done" }, 1000);
+  assert.equal(h.scene.runs.c1.state, "done");
+  assert.equal(h.scene.runs.c1.end, 1000);
+  assert.equal(h.scene.runs.c1.dur, 990);
+  assert.deepEqual(ids(1001), ["c2"]);
+  h.fact({ f: "prompt", sys: true, text: "실패", run: "c2", end: "fail" }, 1100);
+  assert.equal(h.scene.runs.c2.state, "fail");
+  assert.deepEqual(ids(1101), []);
+  // 이미 끝난 실행·없는 번호는 그대로
+  h.fact({ f: "prompt", sys: true, text: "또", run: "c1", end: "fail" }, 1200);
+  assert.equal(h.scene.runs.c1.state, "done");
+  h.fact({ f: "prompt", sys: true, text: "없음", run: "__proto__" }, 1300);
+  // 멈춤(TaskStop): 작업 번호로 찾아 닫는다. 끝난 실행과 다른 번호는 건드리지 않는다
+  h.fact({ f: "run-start", id: "s1", llm: "Codex" }, 1400);
+  h.fact({ f: "run-end", id: "s1", bg: true, task: "bs", llm: "Codex" }, 1410);
+  h.fact({ f: "run-stop", task: "다른 번호" }, 1420);
+  assert.deepEqual(ids(1421), ["s1"]);
+  h.fact({ f: "run-stop", task: "bs" }, 1500);
+  assert.equal(h.scene.runs.s1.state, "stopped");
+  assert.equal(h.scene.runs.s1.dur, 100);
+  assert.deepEqual(ids(1501), []);
+  h.fact({ f: "run-stop", task: "b1" }, 1510);
+  assert.equal(h.scene.runs.c1.state, "done");
+  // 하위 에이전트가 끝나면 그 에이전트의 뒤에서 실행만 닫는다
+  h.fact({ f: "run-start", id: "a1", llm: "Codex", agent: "ag" }, 1600);
+  h.fact({ f: "run-end", id: "a1", bg: true, llm: "Codex", agent: "ag" }, 1610);
+  h.fact({ f: "run-start", id: "a2", llm: "Claude", agent: "other" }, 1620);
+  h.fact({ f: "run-end", id: "a2", bg: true, llm: "Claude", agent: "other" }, 1630);
+  h.fact({ f: "agent-stop", agent: "ag" }, 1700);
+  assert.equal(h.scene.runs.a1.state, "unknown");
+  assert.equal(h.scene.runs.a1.dur, 100);
+  assert.deepEqual(ids(1701), ["a2"]);
+  // 세션이 끝나면 닫고, 같은 세션을 다시 열어도 되살아나지 않는다
+  h.fact({ f: "end" }, 1800);
+  assert.deepEqual(ids(1801), []);
+  assert.equal(h.scene.runs.a2.state, "unknown");
+  h.fact({ f: "start", source: "resume" }, 1900);
+  assert.deepEqual(ids(1901), []);
+  // 찾기로 찾을 수 있다(앞 200자에 이름이 없어도)
+  assert.match(entryText(h.scene, { type: "run", id: "a2" }), /Claude/);
+  assert.doesNotMatch(entryText(h.scene, { type: "run", id: "p1" }), /Codex|Claude/);
 });
 
 test("하위 에이전트 이름표: 시작·설명·끝을 도착 순서와 상관없이 합치고, 도는 것만 세며, 재생도 같다", () => {

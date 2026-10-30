@@ -322,6 +322,9 @@ button.atag[aria-pressed="true"] { border-color: var(--ac); box-shadow: inset 0 
 #tl-body .tl-t > .atag { margin-right: 6px; max-width: 12em; }
 #plan-agents { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 0 6px; font-size: 12px; }
 #plan-agents .alabel { color: var(--muted); margin-right: 2px; }
+.lltag { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--ag5); border-radius: 9px; color: var(--ag5); font-size: 12px; font-weight: 600; line-height: 18px; vertical-align: baseline; white-space: nowrap; }
+.lltag .dur { color: var(--muted); font-weight: 400; }
+#tl-body .tl-t > .lltag { margin-right: 6px; }
 #tl-new { position: sticky; top: -10px; z-index: 1; width: 100%; margin: 0 0 4px; font-size: 12px; line-height: 20px; padding: 0 8px; color: var(--accent); border-color: var(--accent); }
 #tl-body { list-style: none; margin: 0; padding: 0; }
 #tl-body li { padding: 2px 0; border-bottom: 1px solid var(--panel-2); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
@@ -348,7 +351,7 @@ button.atag[aria-pressed="true"] { border-color: var(--ac); box-shadow: inset 0 
 #tl-body .k.why, #tl-body .k.decision { color: var(--accent); }
 #tl-body .k.blocked, #tl-body .k.fail { color: var(--s-fail); }
 #tl-body .k.wait { color: var(--s-wait); } #tl-body .k.running { color: var(--s-doing); } #tl-body .k.done { color: var(--s-done); }
-#tl-body .k.unknown, #tl-body .k.background { color: var(--muted); }
+#tl-body .k.unknown, #tl-body .k.background, #tl-body .k.stopped { color: var(--muted); }
 #tl-body .times { color: var(--muted); font-size: 12px; margin-left: 4px; }
 #tl-body li.diff { cursor: pointer; }
 #tl-body .dadd, #tl-body .ddel { font-size: 12px; font-variant-numeric: tabular-nums; }

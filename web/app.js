@@ -1,7 +1,7 @@
 // 화면: 세션 목록, 맨 위 한 줄, 주의 띠, 가운데 그림, 계획 나무, 타임라인, 재생 막대.
 // 서버가 SSE 로 보내는 결과(res)를 lib/scene.js 의 applyRes 로 적용한다. 재생도 같은 함수로 처음부터 다시 적용한다.
 // 패널 폭·접힘·배율·거르기처럼 이 브라우저에만 남는 값은 localStorage 에 두고, 읽을 때 범위로 자른다.
-import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK, refPath, normPath, agentsRunning } from "/lib/scene.js";
+import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK, refPath, normPath, agentsRunning, llmRunning, llmSince } from "/lib/scene.js";
 import { createCanvas, safeRef, groupSummary, inFinishedGroup, DOC_RE, isDocRef } from "/canvas.js";
 import { renderMd, changedLines, blocksAt } from "/doc.js";
 
@@ -9,7 +9,7 @@ const ST_KO = { todo: "할 일", doing: "진행", done: "끝", fail: "실패", b
 const ST_ICO = { todo: "○", doing: "▶", done: "✓", fail: "✗", blocked: "‼", wait: "…" };
 const SESS_KO = { working: "작업 중", input: "입력 필요", idle: "쉼", ended: "끝" };
 const SESS_ICO = { working: "▶", input: "?", idle: "○", ended: "–" };
-const RUN_KO = { running: "실행 중", done: "끝", fail: "실패", wait: "승인 대기", unknown: "알 수 없음", background: "뒤에서 실행" };
+const RUN_KO = { running: "실행 중", done: "끝", fail: "실패", wait: "승인 대기", unknown: "알 수 없음", background: "뒤에서 실행", stopped: "멈춤" };
 const NOTE_KO = { why: "이유", decision: "결정", blocked: "막힘", wait: "승인 대기" };
 const MSG_KIND_KO = { comment: "의견", instruction: "지시" };
 const MSG_STATE_KO = { queued: "대기", sent: "보냄", expired: "만료" };
@@ -692,7 +692,7 @@ function sessRow(thread, now) {
   // 상태 글자는 따로 감싸 작업 중·입력 필요면 빛이 지나가게 한다(CSS .stw)
   const stw = el("span", `stw ${s.status}`, SESS_KO[s.status] || s.status);
   if (s.status === "working" || s.status === "input") addShine(stw);
-  r2.append(logo, stw, ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}${s.agents ? ` · 에이전트 ${s.agents}` : ""}`);
+  r2.append(logo, stw, ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}${s.agents ? ` · 에이전트 ${s.agents}` : ""}${(s.llms || []).map(([n, c]) => ` · ${n} ${c}`).join("")}`);
   b.title = `${sessName(s)}\n${agentName(s)} · ${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
   b.append(r1, r2);
   b.addEventListener("click", () => { if (s.id !== state.sid) connect(s.id); }); // 앞 대화를 보는 중이어도 줄이 보이는 대화로 간다
@@ -1126,17 +1126,26 @@ const showDone = () => store.get("atv.showDone") === "1";
 function setShowDone(on) { store.set("atv.showDone", on ? "1" : "0"); queueRender(); }
 $("toggle-done").addEventListener("click", () => { state.planReveal = null; setShowDone(!showDone()); });
 
-// 계획 칸 위 「도는 에이전트」: 지금 도는 하위 에이전트의 이름표와 걸린 시간. 1초마다 불리므로 바뀔 때만 다시 만든다
+// 계획 칸 위 「도는 에이전트」: 지금 도는 다른 LLM 명령(Codex 등)과 하위 에이전트의 이름표, 걸린 시간. 1초마다 불리므로 바뀔 때만 다시 만든다
 const AGENTS_SHOWN = 6;
 function renderAgents(scene, now) {
-  const box = $("plan-agents"), list = isProj(state.sid) ? [] : agentsRunning(scene, now);
-  box.hidden = !list.length;
+  const box = $("plan-agents"), list = isProj(state.sid) ? [] : agentsRunning(scene, now), llms = isProj(state.sid) ? [] : llmRunning(scene, now);
+  box.hidden = !list.length && !llms.length;
   const shown = list.slice(0, AGENTS_SHOWN), more = list.length - shown.length;
-  const key = JSON.stringify([more, shown.map((a) => [a.id, subInfo(scene, a.id).name])]);
+  const key = JSON.stringify([more, shown.map((a) => [a.id, subInfo(scene, a.id).name]), llms.map((r) => [r.id, r.llm, r.desc, llmSince(r)])]);
   if (key !== renderAgents.key) {
     renderAgents.key = key;
     const keep = document.activeElement?.closest?.("#plan-agents button.atag")?.dataset.agent; // 다시 만든 뒤 같은 이름표로 초점을 되돌린다
-    box.replaceChildren(...(list.length ? [el("span", "alabel", `에이전트 ${list.length}`)] : []),
+    const groups = new Map();
+    for (const r of llms) groups.set(r.llm, [...(groups.get(r.llm) || []), r]);
+    const tags = [...groups].map(([name, runs]) => {
+      const t = el("span", "lltag", runs.length > 1 ? `${name} ${runs.length}` : name);
+      t.append(el("span", "dur"));
+      t.dataset.start = llmSince(runs[0]); // 여럿이면 가장 오래 도는 것의 시간
+      t.title = runs.map((r) => r.desc || r.cmd).join("\n");
+      return t;
+    });
+    box.replaceChildren(...tags, ...(list.length ? [el("span", "alabel", `에이전트 ${list.length}`)] : []),
       ...shown.map((a) => { const b = agentTag(scene, a.id); b.append(el("span", "dur")); return b; }),
       ...(more ? [el("span", "muted", `외 ${more}`)] : []));
     if (keep) box.querySelector(`button.atag[data-agent="${CSS.escape(keep)}"]`)?.focus({ preventScroll: true });
@@ -1144,6 +1153,10 @@ function renderAgents(scene, now) {
   for (const b of box.querySelectorAll("button.atag")) {
     b.setAttribute("aria-pressed", String(state.tlAgent === b.dataset.agent));
     const a = own(scene.agents || {}, b.dataset.agent), d = b.querySelector(".dur"), text = a?.startT ? fmtDur(now - a.startT) : "";
+    if (d.textContent !== text) d.textContent = text;
+  }
+  for (const t of box.querySelectorAll(".lltag")) {
+    const d = t.querySelector(".dur"), text = fmtDur(now - Number(t.dataset.start));
     if (d.textContent !== text) d.textContent = text;
   }
 }
@@ -1409,6 +1422,7 @@ function tlRow(scene, { mark, e, n, edits }, now) {
     const t = body(r.desc || r.cmd);
     if (dur != null) t.append(el("span", "dur", ` · ${dur}`)); // 걸린 시간은 글 뒤에(표지를 짧게 두어 칸 폭을 맞춘다)
     li.title = r.cmd + (r.error ? `\n${r.error}` : "");
+    if (r.llm) t.prepend(el("span", "lltag", r.llm));
     if (r.agent) { li.classList.add("sub"); t.prepend(agentTag(scene, r.agent)); }
   } else {
     if (e.agent) li.classList.add("sub");

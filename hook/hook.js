@@ -204,8 +204,96 @@ function patchFacts(input, resp, who, until, cwd) {
 }
 
 // 훅 사건 → 화판 사실. 화판에 올리지 않는 사건이면 null. Codex 의 apply_patch 는 파일마다 하나씩 배열로 낸다
+// Bash 명령이 다른 LLM 에 일을 시키는지. 호출이 긴 프롬프트 파일 쓰기 뒤에 오는 일이 많아, 앞만 남기는 cmd 가 아니라 전체 명령에서 찾는다.
+// 표: [화면에 보일 이름, 실행 파일, 인자 검사]. 새 LLM 은 한 줄만 더하면 화면까지 보인다
+const subcmd = (...words) => (args) => { // 옵션과 그 값을 건너뛴 첫 낱말이 부명령이다
+  for (let i = 0; i < args.length; i++) {
+    if (args[i][0] === "-") continue;
+    if (words.includes(args[i])) return true;
+    if (args[i - 1]?.[0] !== "-") return false;
+  }
+  return false;
+};
+const flag = (...flags) => (args) => args.some((a) => flags.includes(a) || flags.some((f) => a.startsWith(`${f}=`)));
+const LLM_CALLS = [
+  ["Codex", "codex", subcmd("exec", "e", "review")],
+  ["Codex", "codex-companion.mjs", subcmd("task", "review", "adversarial-review")], // Codex 플러그인이 부르는 길
+  ["Claude", "claude", flag("-p", "--print")],
+  ["Gemini", "gemini", flag("-p", "--prompt")],
+  ["opencode", "opencode", subcmd("run")],
+  ["Copilot", "copilot", flag("-p", "--prompt")],
+  ["Aider", "aider", flag("-m", "--message", "-f", "--message-file")],
+  ["ollama", "ollama", subcmd("run")],
+];
+const LLM_BINS = new Set(LLM_CALLS.map((r) => r[1]));
+const CMD_WORDS = new Set(["if", "elif", "while", "until", "then", "do", "else", "time", "!", "{"]); // 명령 앞에 오는 제어 낱말
+const CMD_WRAPPERS = new Set(["timeout", "env", "nohup", "exec", "command", "sudo", "setsid", "nice", "stdbuf", "xargs", "node"]); // 뒤의 명령을 실행하는 앞말
+const baseName = (t) => t.slice(t.lastIndexOf("/") + 1);
+
+// 실행되지 않는 글을 뺀다: heredoc 본문, 주석, 작은따옴표 글, 공백이 든 큰따옴표 글(프롬프트·grep 인자).
+// 큰따옴표 안의 $(…)·`…` 와 경로처럼 공백 없는 값은 따옴표만 벗겨 남긴다. 한 번만 지나가므로 긴 명령도 금방 끝난다
+function shellCode(command) {
+  const c = String(command || "");
+  let out = "", heredocs = [];
+  for (let i = 0; i < c.length; i++) {
+    const ch = c[i];
+    if (ch === "\\") { i++; continue; }
+    if (ch === "'") { const e = c.indexOf("'", i + 1); if (e < 0) break; i = e; continue; }
+    if (ch === '"') {
+      let e = i + 1;
+      while (e < c.length && c[e] !== '"') e += c[e] === "\\" ? 2 : 1;
+      const s = c.slice(i + 1, e);
+      if (/\$\(|`/.test(s)) out += shellCode(s);
+      else if (!/\s/.test(s)) out += s;
+      i = e;
+      continue;
+    }
+    if (ch === "#" && (i === 0 || /\s/.test(c[i - 1]))) { const e = c.indexOf("\n", i); if (e < 0) break; i = e - 1; continue; }
+    if (ch === "<" && c[i + 1] === "<" && c[i - 1] !== "<" && c[i + 2] !== "<") {
+      // 끝 표시는 글자로 시작할 때만 친다($((1 << 2)) 는 heredoc 이 아니다)
+      const m = /^<<(-?)[ \t]*\\?(['"]?)([A-Za-z_][\w.-]*)\2/.exec(c.slice(i, i + 200));
+      if (m) { heredocs.push({ end: m[3], tabs: !!m[1] }); i += m[0].length - 1; continue; }
+    }
+    if (ch === "\n" && heredocs.length) {
+      // 본문은 다음 줄부터 끝 표시 줄까지. 끝 표시가 없으면 셸처럼 끝까지다
+      for (const h of heredocs) {
+        for (let p = i + 1; ;) {
+          const e = c.indexOf("\n", p), line = c.slice(p, e < 0 ? c.length : e);
+          i = e < 0 ? c.length : e;
+          if (e < 0 || (h.tabs ? line.replace(/^\t+/, "") : line) === h.end) break;
+          p = e + 1;
+        }
+      }
+      heredocs = [];
+    }
+    out += ch;
+  }
+  return out;
+}
+
+// 명령을 구분 기호로 나눈 뒤 낱말로 보고, 앞말을 건너뛴 자리의 실행 파일만 표와 맞춘다(인자로 나온 이름은 치지 않는다)
+function llmOf(command) {
+  for (const part of shellCode(command).split(/[\n;&|()`]/)) {
+    const t = part.split(/\s+/).filter(Boolean);
+    let i = 0;
+    while (i < t.length) {
+      if (CMD_WORDS.has(t[i]) || /^[A-Za-z_]\w*=/.test(t[i])) { i++; continue; }
+      if (!CMD_WRAPPERS.has(baseName(t[i]))) break;
+      // 앞말의 옵션과 그 값, timeout 의 시간을 건너뛴다
+      for (i++; i < t.length && !LLM_BINS.has(baseName(t[i])) && (t[i][0] === "-" || /^\d/.test(t[i]) || t[i - 1][0] === "-"); i++);
+    }
+    if (i >= t.length) continue;
+    const args = t.slice(i + 1);
+    if (args.some((a) => a === "--help" || a === "-h" || a === "--version")) continue;
+    const row = LLM_CALLS.find(([, bin, ok]) => bin === baseName(t[i]) && ok(args));
+    if (row) return row[0];
+  }
+  return undefined;
+}
+
 export function toFact(ev, { codex = false } = {}) {
   const tool = ev.tool_name, input = ev.tool_input || {}, resp = ev.tool_response;
+  const llm = tool === "Bash" ? llmOf(input.command) : undefined, viaLlm = llm ? { llm } : {};
   const who = ev.agent_id ? { agent: String(ev.agent_id), agentType: String(ev.agent_type || "") } : {};
   const until = performance.now() + DIFF_MS;
   switch (ev.hook_event_name) {
@@ -216,19 +304,23 @@ export function toFact(ev, { codex = false } = {}) {
       const p = ev.prompt || "";
       // 백그라운드 작업이 끝났다는 알림도 이 훅으로 온다. 사용자 입력이 아니므로 표시해 둔다
       if (/^\s*<task-notification>/.test(p)) {
-        const summary = (p.match(/<summary>([\s\S]*?)<\/summary>/) || [])[1] || "";
-        return { f: "prompt", sys: true, text: clip(summary || "백그라운드 작업 알림", 300) };
+        const tag = (name) => (p.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`)) || [])[1] || "";
+        const run = tag("tool-use-id").trim(), status = tag("status").trim();
+        // run: 끝난 뒤에서 실행의 번호(훅의 tool_use_id). status 는 completed 말고 failed·stopped·killed 가 있다
+        return { f: "prompt", sys: true, text: clip(tag("summary") || "백그라운드 작업 알림", 300), ...(run && { run, end: status === "failed" ? "fail" : !status || status === "completed" ? "done" : "stopped" }) };
       }
       return { f: "prompt", text: clip(p, TEXT_MAX), ...title(ev) };
     }
     case "PreToolUse":
       if (tool !== "Bash") return null;
-      return { f: "run-start", id: ev.tool_use_id, cmd: clip(input.command || "", 200), desc: clip(input.description || "", 120), ...who };
+      return { f: "run-start", id: ev.tool_use_id, cmd: clip(input.command || "", 200), desc: clip(input.description || "", 120), ...viaLlm, ...who };
     case "PostToolUse":
       if (tool === "Bash") {
         const bg = !!(input.run_in_background || (resp && resp.backgroundTaskId));
-        return { f: "run-end", id: ev.tool_use_id, cmd: clip(input.command || "", 200), desc: clip(input.description || "", 120), bg, ...(typeof ev.duration_ms === "number" && { dur: ev.duration_ms }), ...who };
+        return { f: "run-end", id: ev.tool_use_id, cmd: clip(input.command || "", 200), desc: clip(input.description || "", 120), bg, ...(resp?.backgroundTaskId && { task: String(resp.backgroundTaskId) }), ...(typeof ev.duration_ms === "number" && { dur: ev.duration_ms }), ...viaLlm, ...who };
       }
+      // 뒤에서 실행을 멈추면 끝 알림이 오지 않는다(Claude Code 기록 107건 모두)
+      if (tool === "TaskStop" || tool === "KillShell") return { f: "run-stop", task: String(input.task_id || input.shell_id || "") };
       if (EDIT_TOOLS.has(tool)) return { f: "edit", tool, path: input.file_path || input.notebook_path || "", lines: editLines(resp), ...(resp?.type === "create" && { create: true }), ...diffFields(patchLines(resp), until, input.file_path || input.notebook_path || ""), ...who };
       if (TODO_TOOLS.has(tool)) return { f: "todo", tool, text: todoText(tool, input), ...who };
       if (tool === "apply_patch") return patchFacts(input, resp, who, until, ev.cwd);
@@ -241,7 +333,7 @@ export function toFact(ev, { codex = false } = {}) {
       // Codex: 승인 창이 뜨기 직전이다. Claude 의 Notification(permission_prompt)처럼 「입력 필요」로 둔다
       return { f: "notify", ntype: "permission_prompt", text: clip(`${tool || ""} ${typeof input.description === "string" ? input.description : typeof input.command === "string" ? input.command : ""}`.trim(), 200) };
     case "PostToolUseFailure":
-      if (tool === "Bash") return { f: "run-fail", id: ev.tool_use_id, cmd: clip(input.command || "", 200), desc: clip(input.description || "", 120), error: clip(ev.error || "", 200), ...(typeof ev.duration_ms === "number" && { dur: ev.duration_ms }), ...who };
+      if (tool === "Bash") return { f: "run-fail", id: ev.tool_use_id, cmd: clip(input.command || "", 200), desc: clip(input.description || "", 120), error: clip(ev.error || "", 200), ...(typeof ev.duration_ms === "number" && { dur: ev.duration_ms }), ...viaLlm, ...who };
       if (EDIT_TOOLS.has(tool)) return { f: "edit-fail", tool, path: input.file_path || input.notebook_path || "", error: clip(ev.error || "", 200), ...who };
       return null;
     case "SubagentStart":
