@@ -551,3 +551,29 @@ test("보는 탭 알림: 탭이 없으면 대화마다 한 번 「탭 없음」,
     assert.ok(Date.now() - t0 < 1000, `${Date.now() - t0}ms`);
   }
 });
+
+test("그리기 알림: 큰 입력(그리기·Agent 입력 300KB, 사용자 입력 1MB)에서도 1초 안에 끝나고 판별은 같다(훅 제한 2초)", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "atv-nudge-big-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const big = "가".repeat(100_000);
+  const run = (arg, pid, input) => {
+    const t0 = Date.now();
+    const out = spawnSync(NUDGE, [arg], { input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, ANYTASKVIEW_HOME: home, CLAUDE_PID: pid } }).stdout;
+    assert.ok(Date.now() - t0 < 1000, `${arg} ${Date.now() - t0}ms`);
+    return out;
+  };
+  // 그리기: 입력 글에 「적용 1」 이 있어도 결과 글로만 판별한다
+  const draw = (text) => ({ session_id: "G1", hook_event_name: "PostToolUse", tool_name: "mcp__plugin_anytaskview_anytaskview__draw", tool_input: { ops: [{ id: "a", label: "적용 1 " + big }] }, tool_response: [{ type: "text", text }] });
+  assert.equal(run("tool", "501", draw("적용 0 · 거부 1: a: kind 필요")), "");
+  assert.ok(!fs.existsSync(path.join(home, "nudge", "501.drew")), "입력 글의 「적용 1」 은 치지 않는다");
+  assert.equal(run("tool", "501", draw("적용 2")), "");
+  assert.ok(fs.existsSync(path.join(home, "nudge", "501.drew")));
+  // Agent: 입력 글에 completed 모양이 있어도 결과로만 판별한다
+  const agent = (status) => ({ session_id: "G1", hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: { prompt: '"status":"completed" ' + big }, tool_response: { status, content: [{ type: "text", text: big }] } });
+  assert.equal(run("tool", "501", agent("async_launched")), "", "입력 글의 completed 는 치지 않는다");
+  assert.match(run("tool", "501", agent("completed")), /subagent result/);
+  // 긴 사용자 입력: 세기를 다시 시작한다
+  fs.writeFileSync(path.join(home, "nudge", "501.n"), "5");
+  assert.equal(run("prompt", "501", { session_id: "G1", hook_event_name: "UserPromptSubmit", prompt: big.repeat(3) }), "");
+  assert.ok(!fs.existsSync(path.join(home, "nudge", "501.n")));
+});
