@@ -473,3 +473,81 @@ test("뒤에서 실행: 끝 알림은 실행 번호와 끝 모양을 싣고, 띄
   assert.equal(toFact({ hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "r", tool_input: { command: "ls", run_in_background: true }, tool_response: { backgroundTaskId: "b1" } }).task, "b1");
   assert.deepEqual(toFact({ hook_event_name: "PostToolUse", tool_name: "TaskStop", tool_use_id: "s", tool_input: { task_id: "b1" }, tool_response: {} }), { f: "run-stop", task: "b1" });
 });
+
+test("보는 탭 알림: 탭이 없으면 대화마다 한 번 「탭 없음」, 다시 열리면 한 번 「다시 열림」(나란히 돌아도·재개해도), 그동안 그리기·결과 알림은 내지 않는다", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "atv-nudge-view-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const flag = path.join(home, "no-viewer");
+  const off = (pid = process.pid) => fs.writeFileSync(flag, `${pid}\n`);
+  const on = () => fs.rmSync(flag, { force: true });
+  const env = (pid) => ({ ...process.env, ANYTASKVIEW_HOME: home, CLAUDE_PID: pid });
+  const nudge = (arg, pid, input, extra = []) => spawnSync(NUDGE, [arg, ...extra], { input: JSON.stringify(input), encoding: "utf8", env: env(pid) }).stdout;
+  const ctx = (out, ev) => { const o = JSON.parse(out); assert.equal(o.hookSpecificOutput.hookEventName, ev); return o.hookSpecificOutput.additionalContext; };
+  const read = (sid, sub = {}) => ({ session_id: sid, ...sub, hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "/w/a" }, tool_response: { stdout: "x" } });
+  const prompt = (sid) => ({ session_id: sid, hook_event_name: "UserPromptSubmit", prompt: "다음" });
+  const note = (sid) => ({ session_id: sid, hook_event_name: "UserPromptSubmit", prompt: '<task-notification>\n<status>completed</status>\n<summary>Agent "찾기" finished</summary>\n</task-notification>' });
+  const agentDone = (sid) => ({ session_id: sid, hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: {}, tool_response: { status: "completed", agentId: "a1" } });
+  const draw = (sid) => ({ session_id: sid, hook_event_name: "PostToolUse", tool_name: "mcp__plugin_anytaskview_anytaskview__draw", tool_input: {}, tool_response: [{ type: "text", text: "적용 1" }] });
+  // 탭 없음: 첫 입력에 한 번, 그 뒤로는 조용하고 「그림 없음」 알림도 없다
+  off();
+  assert.match(ctx(nudge("prompt", "401", prompt("S1")), "UserPromptSubmit"), /no board tab has been open/);
+  assert.equal(nudge("prompt", "401", prompt("S1")), "", "대화마다 한 번");
+  for (let i = 0; i < 20; i++) assert.equal(nudge("tool", "401", read("S1")), "");
+  // 다시 열림: 나란히 돈 훅 가운데 하나만 알리고, 그다음 도구에서 미뤄 둔 「그림 없음」 알림
+  on();
+  const runs = await Promise.all(Array.from({ length: 4 }, () => new Promise((ok) => {
+    const p = spawn(NUDGE, ["tool"], { env: env("401") });
+    let o = "";
+    p.stdout.on("data", (c) => (o += c));
+    p.on("close", () => ok(o));
+    p.stdin.end(JSON.stringify(read("S1")));
+  })));
+  assert.equal(runs.filter((o) => /open again/.test(o)).length, 1);
+  assert.equal(runs.filter((o) => /no drawing yet/.test(o)).length, 1, "미뤄 둔 그리기 알림은 나머지 가운데 하나");
+  assert.equal(nudge("tool", "401", read("S1")), "");
+  // 재개: claude 번호가 바뀌어도 세션 id 로 이어 간다
+  off();
+  assert.match(ctx(nudge("tool", "402", read("S2")), "PostToolUse"), /no board tab/);
+  on();
+  assert.match(ctx(nudge("prompt", "403", prompt("S2")), "UserPromptSubmit"), /open again/);
+  // 죽은 서버가 남긴 파일은 믿지 않는다
+  const dead = spawnSync(process.execPath, ["-e", "0"]).pid;
+  off(dead);
+  assert.equal(nudge("prompt", "404", prompt("S3")), "");
+  assert.equal(Array.from({ length: 8 }, () => nudge("tool", "404", read("S3"))).join(""), "");
+  assert.match(ctx(nudge("tool", "404", read("S3")), "PostToolUse"), /no drawing yet/);
+  // 결과 알림: 탭이 없는 동안은 내지 않고, 다시 열림이 결과 알림보다 먼저다(작업 알림도 같다)
+  on();
+  nudge("tool", "405", draw("S4"));
+  off();
+  assert.match(ctx(nudge("tool", "405", agentDone("S4")), "PostToolUse"), /no board tab/);
+  assert.equal(nudge("tool", "405", agentDone("S4")), "");
+  assert.equal(nudge("prompt", "405", note("S4")), "");
+  on();
+  assert.match(ctx(nudge("tool", "405", agentDone("S4")), "PostToolUse"), /open again/);
+  assert.match(ctx(nudge("tool", "405", agentDone("S4")), "PostToolUse"), /subagent result/);
+  off();
+  assert.match(ctx(nudge("prompt", "405", note("S4")), "UserPromptSubmit"), /no board tab/);
+  on();
+  assert.match(ctx(nudge("prompt", "405", note("S4")), "UserPromptSubmit"), /open again/);
+  assert.match(ctx(nudge("prompt", "405", note("S4")), "UserPromptSubmit"), /subagent result/);
+  // 하위 에이전트의 도구에는 알리지 않고, 세션 id 가 없으면 알리지 않는다
+  off();
+  assert.equal(nudge("tool", "406", read("S5", { agent_id: "a1", agent_type: "Explore" })), "");
+  assert.ok(!fs.existsSync(path.join(home, "nudge", "S5.off")));
+  assert.equal(nudge("prompt", "406", { hook_event_name: "UserPromptSubmit", prompt: "다음" }), "");
+  // Codex: 세션 id 로 가르고, 하위 에이전트의 도구 사건을 가릴 수 없어 사용자 입력 때만 알린다
+  assert.equal(nudge("tool", "", read("C-1"), ["codex"]), "");
+  assert.match(ctx(nudge("prompt", "", prompt("C-1"), ["codex"]), "UserPromptSubmit"), /no board tab/);
+  on();
+  assert.equal(nudge("tool", "", read("C-1"), ["codex"]), "");
+  assert.match(ctx(nudge("prompt", "", prompt("C-1"), ["codex"]), "UserPromptSubmit"), /open again/);
+  // 큰 입력(tool_input·tool_response 에 200KB 씩)에서도 동기 훅이 오래 걸리지 않는다(시간 제한 2초)
+  const big = { session_id: "S6", hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/w/a", content: "가".repeat(200_000) }, tool_response: { content: "가".repeat(200_000) } };
+  for (const state of [off, on]) {
+    state();
+    const t0 = Date.now();
+    nudge("tool", "407", big);
+    assert.ok(Date.now() - t0 < 1000, `${Date.now() - t0}ms`);
+  }
+});

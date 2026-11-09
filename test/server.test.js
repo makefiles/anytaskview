@@ -1505,3 +1505,50 @@ test("수정 diff: 설정한 크기(기본 16KB)로 잘라 결과에만 남기�
   const sizes = hs.map((q) => (typeof hd.diffs[q] === "string" ? Buffer.byteLength(hd.diffs[q]) : 0));
   assert.ok(hs.length === 3 && sizes[0] === 0 && sizes.slice(1).every((n) => n > 500 * 1024 && n <= 512 * 1024) && hd.from === hs[0] + 1, `${sizes} from ${hd.from} seq ${hs}`);
 });
+
+test("보는 탭 없음: 탭 없이 유예가 지나면 no-viewer(서버 pid)를 두고, 탭이 붙거나 서버가 내려가면 지운다. 유예 안의 끊김은 넘기고, 뜰 때 남은 파일과 90일 지난 .off 표지를 지운다", async (t) => {
+  const { startBoard } = await import("../lib/server.js");
+  const os = await import("node:os");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atv-view-"));
+  const home = path.join(dir, "home"), flag = path.join(home, "no-viewer"), nd = path.join(home, "nudge");
+  fs.mkdirSync(nd, { recursive: true });
+  fs.writeFileSync(flag, "1\n");
+  fs.writeFileSync(path.join(nd, "old.off"), "");
+  fs.writeFileSync(path.join(nd, "new.off"), "");
+  const past = new Date(Date.now() - 91 * 86_400_000), recent = new Date(Date.now() - 60 * 86_400_000);
+  fs.utimesSync(path.join(nd, "old.off"), past, past);
+  fs.utimesSync(path.join(nd, "new.off"), recent, recent);
+  let b = await startBoard({ port: 0, home, viewGraceMs: 150 });
+  t.after(async () => { await b.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const keys = () => JSON.parse(fs.readFileSync(path.join(home, "key.json"), "utf8"));
+  const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const tab = () => new Promise((ok) => {
+    const req = http.get({ host: "127.0.0.1", port: b.port, path: "/events", headers: { host: `127.0.0.1:${b.port}`, cookie: `atv_r=${keys().read}` } }, () => ok(req));
+  });
+  assert.ok(!fs.existsSync(flag), "뜰 때 남은 파일은 지운다");
+  assert.ok(!fs.existsSync(path.join(nd, "old.off")), "90일 지난 표지");
+  assert.ok(fs.existsSync(path.join(nd, "new.off")));
+  await wait(350);
+  assert.equal(fs.readFileSync(flag, "utf8"), `${process.pid}\n`);
+  // 탭이 붙으면 바로 지운다
+  const r1 = await tab();
+  await wait(50);
+  assert.ok(!fs.existsSync(flag));
+  // 유예 안에 다시 붙으면(새로 고침) 그대로
+  r1.destroy();
+  await wait(50);
+  const r2 = await tab();
+  await wait(250);
+  assert.ok(!fs.existsSync(flag), "유예 안의 끊김은 넘긴다");
+  r2.destroy();
+  await wait(350);
+  assert.ok(fs.existsSync(flag));
+  // 내려가면 지우고, 닫으며 끊은 연결로 다시 세지 않는다
+  const r3 = await tab();
+  await wait(50);
+  await b.close();
+  r3.destroy();
+  await wait(350);
+  assert.ok(!fs.existsSync(flag), "내려간 서버는 파일을 남기지 않는다");
+  b = await startBoard({ port: 0, home, viewGraceMs: 150 });
+});

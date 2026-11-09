@@ -20,7 +20,7 @@ Rules: ids are yours and stable; resending an id updates only the fields you sen
 Keep each group small (about 8 boxes, short tables and diagrams). Draw problem-solving units (features, suspects, call paths), not folder layouts. The anytaskview skill has examples of each form and the command that opens the board in the user's browser (use it when the user asks to open the board).
 plan = the steps of your work. draw list + item = structure of a deliverable (document outline, checklist).
 Write labels, titles and notes in the user's language (Korean for this user).
-If a result says the board is off, skip drawing this time and continue your work.
+If a result or note says the board is off or no board tab is open, skip board calls as it says.
 Projects: work spanning several conversations can belong to a project with its own long-lived board (the big picture). If a [anytaskview 프로젝트] line lists candidates and the user's work matches one, call project {action:"join", id}. Create a project only when the user starts work meant to span conversations. While this conversation belongs to a project, also update its board by adding project:"<id>" to plan/draw/note, but only when a work unit starts or ends or a user decision is made or awaited: units as plan steps (the next planned units too, as todo), open decisions as wait notes, and one drawing of the units in order as boxes with status, extended as units change, never cleared. Keep session detail on the session board (no project argument).`;
 const project = { type: "string", description: "Project id: write to that project's long-lived board instead of this conversation's board" };
 

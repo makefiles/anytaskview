@@ -5,7 +5,11 @@
 # 파일은 Claude 면 claude 프로세스 번호로, Codex 면 세션 id 로 가른다(데스크톱 앱·VS Code 는 한 프로세스에 세션이 여럿).
 # 쓰는 법: nudge pre|prompt|tool [codex]. stdin 은 훅 입력(JSON)이다.
 # 대화가 새로 시작하거나 끝날 때 파일을 지우고, 이미 그림이 있는 대화(재개·압축)에 「끝」·「그림 있음」을 남기는 일은 hook/hook.js 가 한다.
-D=${ANYTASKVIEW_HOME:-$HOME/.local/state/anytaskview}/nudge
+# 보는 탭 알림: 화판 서버가 탭이 30초 넘게 없을 때 두는 no-viewer 파일(안의 pid 가 살아 있을 때만 믿는다)을 보고, 대화마다
+# 상태가 바뀔 때 한 번씩 「탭 없음」과 「다시 열림」을 알린다. 그 대화의 표지(<세션 id>.off)는 재개·압축에도 이어지도록 세션 id 로
+# 가르고, 화판 서버가 90일 지난 것을 지운다. 탭이 없는 동안은 그리기 알림과 결과 알림을 내지 않는다.
+S=${ANYTASKVIEW_HOME:-$HOME/.local/state/anytaskview}
+D=$S/nudge
 LIMIT=${ANYTASKVIEW_NUDGE_AFTER:-8}
 in=$(cat)
 # 최상위 키만 본다. 문자열 안의 따옴표는 \" 로 이스케이프되어 있어 아래 모양에 걸리지 않는다.
@@ -24,14 +28,49 @@ if [ "$2" = codex ]; then
   # Codex 는 session_id 를 맨 앞에 쓴다. Claude 세션 안에서 띄운 codex 에 물려 온 CLAUDE_PID 는 보지 않는다
   P=$(printf '%s\n' "$in" | grep -o '"session_id": *"[^"]*"' | head -n 1 | sed 's/^.*"\([^"]*\)"$/\1/')
   case "$P" in ''|*[!A-Za-z0-9_-]*) exit 0 ;; esac
+  K=$P
 else
   P=$CLAUDE_PID
   case "$P" in ''|*[!0-9]*) exit 0 ;; esac
+  # 보는 탭 알림의 키는 세션 id(재개하면 claude 번호가 바뀐다). Claude Code 는 session_id 를 tool_input 앞에 쓴다.
+  # dash 의 ${…#…} 는 맞지 않으면 글 길이의 제곱만큼 걸려(200KB 에 0.2초) 짧은 앞부분(head)에서 case 로 확인한 뒤 자른다
+  K=
+  case "$head" in
+    *'"session_id"'*)
+      t=${head#*\"session_id\"}
+      case "$t" in
+        ':"'*) t=${t#:\"}; K=${t%%\"*} ;;
+        ': "'*) t=${t#: \"}; K=${t%%\"*} ;;
+      esac ;;
+  esac
+  case "$K" in *[!A-Za-z0-9_-]*) K= ;; esac
+fi
+# 보는 탭이 없는가. 서버가 죽어 남은 파일은 pid 로 거른다(그때는 예전 동작)
+off=
+if [ -r "$S/no-viewer" ] && read -r vp <"$S/no-viewer"; then
+  case "$vp" in ''|*[!0-9]*) ;; *) kill -0 "$vp" 2>/dev/null && off=1 ;; esac
 fi
 # 결과 알림. 명령문이 아니라 사실로 쓴다(Claude Code 문서: 명령 모양의 글은 주입 방어에 걸릴 수 있다)
 result() {
   cat <<EOF
 {"hookSpecificOutput":{"hookEventName":"$1","additionalContext":"anytaskview: a subagent result just came back. The user follows the work on this conversation's board; the board's rule is to update the parts and steps this result settles in the same message as your next tool calls. This note appears once per result."}}
+EOF
+}
+# 보는 탭 알림: 이 대화에 알린 상태와 지금 상태가 다를 때만 한 번. 나란히 돈 훅 가운데 표지를 먼저 만들거나 옮긴 하나만 알린다
+tabnote() {
+  [ -n "$K" ] || return 1
+  if [ -n "$off" ]; then
+    mkdir -p -m 700 "$D" 2>/dev/null
+    ( set -C; : >"$D/$K.off" ) 2>/dev/null || return 1
+    msg="no board tab has been open for 30 seconds, so nobody is watching the board. The board's rule is to skip this conversation's board calls (calls with project still go) until a note says a tab is open again."
+  else
+    [ -e "$D/$K.off" ] || return 1
+    mv "$D/$K.off" "$D/$K.off.$$" 2>/dev/null || return 1
+    rm -f "$D/$K.off.$$"
+    msg="a board tab is open again. This conversation skipped its board calls while no tab was open; the board's rule is to send the current plan (every step with its status) and the current task's drawing once, in the same message as your next tool calls."
+  fi
+  cat <<EOF
+{"hookSpecificOutput":{"hookEventName":"$1","additionalContext":"anytaskview: $msg"}}
 EOF
 }
 case "$1" in
@@ -40,11 +79,14 @@ case "$1" in
     # 그린 적 있는 대화면 하위 에이전트·워크플로의 결과에만 알린다(백그라운드 명령·Monitor 는 빼고). 요약 글은 Claude Code 의 형식이다
     case "$in" in
       *'"prompt":"<task-notification>'*|*'"prompt": "<task-notification>'*)
-        [ -e "$D/$P.drew" ] || exit 0
+        tabnote UserPromptSubmit && exit 0
+        [ -e "$D/$P.drew" ] && [ -z "$off" ] || exit 0
         case "$in" in *'<summary>Agent \"'*|*'<summary>Dynamic workflow \"'*) result UserPromptSubmit ;; esac
         exit 0 ;;
     esac
-    rm -f "$D/$P.n"; exit 0 ;;
+    rm -f "$D/$P.n"
+    tabnote UserPromptSubmit
+    exit 0 ;;
   tool) ;;
   *) exit 0 ;;
 esac
@@ -57,11 +99,16 @@ case "$name" in
   # 실제로 적용된 그리기만 그림으로 친다(결과 글이 「적용 N」, N≥1). 모두 거부됐거나 화판이 꺼져 있었으면 도구로 센다.
   # 같은 호출을 세는 훅이 따로 없어 「끝」과 세기가 엇갈리지 않는다
   mcp__*anytaskview*__draw)
-    case "${in#*\"tool_response\"}" in *"적용 "[1-9]*) mkdir -p -m 700 "$D" && : >"$D/$P.drew" && : >"$D/$P.done"; exit 0 ;; esac ;;
+    case "${in#*\"tool_response\"}" in *"적용 "[1-9]*) mkdir -p -m 700 "$D" && : >"$D/$P.drew" && : >"$D/$P.done" ;; esac ;;
+esac
+# 보는 탭 알림이 먼저다(결과 알림에 가려 「다시 열림」이 늦지 않게). 출력은 한 번에 하나다.
+# Codex 는 하위 에이전트의 도구 사건을 가릴 수 없어(같은 키) 사용자 입력 때만 알린다(하위 에이전트가 알림을 가져가지 않게)
+[ "$2" != codex ] && tabnote PostToolUse && exit 0
+case "$name" in
   # 바로 끝난 하위 에이전트의 결과만(상태 completed). 백그라운드·클라우드로 띄운 것과 팀원 띄우기(async_launched·
   # remote_launched·teammate_spawned)는 아직 결과가 아니다. 백그라운드 결과는 끝날 때 작업 알림으로 온다
   Agent|Task)
-    if [ -e "$D/$P.drew" ]; then
+    if [ -e "$D/$P.drew" ] && [ -z "$off" ]; then
       case "${in#*\"tool_response\"}" in *'"status":"completed"'*|*'"status": "completed"'*) result PostToolUse; exit 0 ;; esac
     fi ;;
 esac
@@ -75,6 +122,8 @@ if [ "$n" -le "$LIMIT" ]; then
   echo "$n" >"$D/$P.n.$$" && mv -f "$D/$P.n.$$" "$D/$P.n"
   exit 0
 fi
+# 보는 탭이 없으면 알리지 않고 「끝」도 남기지 않는다(탭이 열린 뒤 다음 도구에서 알린다)
+[ -n "$off" ] && exit 0
 # 나란히 돈 도구들의 훅이 함께 문턱을 넘어도 「끝」을 먼저 만든 하나만 알린다(noclobber 로 만들기는 원자적이다)
 ( set -C; : >"$D/$P.done" ) 2>/dev/null || exit 0
 cat <<EOF
