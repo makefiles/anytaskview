@@ -344,6 +344,9 @@ export function toFact(ev, { codex = false } = {}) {
       return { f: "notify", ntype: ev.notification_type || "", text: clip(ev.message || "", 200) };
     case "Stop":
       return { f: "stop", last: clip(ev.last_assistant_message || "", TEXT_MAX) };
+    case "StopFailure":
+      // API 오류(사용 한도·인증 따위)로 끝난 차례. Stop 대신 온다(받지 않으면 다음 입력까지 「작업 중」 으로 남는다)
+      return { f: "stop", last: clip([`API 오류 (${ev.error || "unknown"})`, ev.last_assistant_message || ""].filter(Boolean).join("\n"), TEXT_MAX) };
     case "SessionEnd":
       return { f: "end", reason: ev.reason || "" };
     default:

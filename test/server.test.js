@@ -231,6 +231,51 @@ test("살아 있음: claude 프로세스가 사라지면 세션을 끝냄으로 
   assert.equal(f.board.pids.has(child.pid), false);
 });
 
+test("조용함: 작업 중인데 15분 넘게 훅·MCP 기록이 없으면 쉼으로 둔다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  await f.hook("S", { f: "prompt", text: "x" });
+  const s = f.board.sessions.get("S");
+  const status = async () => (await f.read("/api/sessions/S/snapshot")).json.scene.sess.status;
+  f.board.checkQuiet(Date.now() + 14 * 60_000);
+  await s.chain;
+  assert.equal(await status(), "working");
+  await f.mcp("plan", { steps: [{ id: "s1", title: "x" }] }, { env: "S" });
+  const drew = s.active;
+  f.board.checkQuiet(drew + 14 * 60_000);
+  await s.chain;
+  assert.equal(await status(), "working", "MCP 기록도 활동이다");
+  f.board.checkQuiet(drew + 16 * 60_000);
+  await s.chain;
+  assert.equal(await status(), "idle");
+  assert.equal(s.active, drew, "화판이 붙인 기록은 활동이 아니다");
+});
+
+test("조용함: 줄에 선 새 입력 뒤의 quiet 는 쓰지 않고, quiet 보다 늦게 도착한 앞선 훅은 다시 작업 중으로 바꾼다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  await f.hook("S", { f: "prompt", text: "x" });
+  const s = f.board.sessions.get("S");
+  const scene = async () => (await f.read("/api/sessions/S/snapshot")).json.scene;
+  s.active = Date.now() - 20 * 60_000; // 20분 전에 굳은 세션
+  const before = s.chain;
+  const p = f.hook("S", { f: "prompt", text: "새 입력" });
+  while (s.chain === before) await new Promise((ok) => setImmediate(ok));
+  f.board.checkQuiet(); // 새 입력의 기록이 끝나기 전에 타이머가 돈다
+  await p;
+  await s.chain;
+  let sc = await scene();
+  assert.equal(sc.sess.status, "working");
+  assert.notEqual(sc.timeline.at(-1).f, "quiet");
+  const t0 = s.active;
+  f.board.checkQuiet(t0 + 16 * 60_000);
+  await s.chain;
+  assert.equal((await scene()).sess.status, "idle");
+  // 마지막 활동 뒤에 뜬 훅이 quiet 보다 늦게 도착했다: quiet 의 사건 시각이 마지막 활동 시각이라 이 훅이 이긴다
+  await f.hook("S", { f: "run-start", id: "r9", cmd: "ls" }, { ht: t0 + 1 });
+  assert.equal((await scene()).sess.status, "working");
+});
+
 test("claude 가 사라지면 /clear 로 남은 옛 세션까지 끝낸다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());

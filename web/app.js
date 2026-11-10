@@ -1279,6 +1279,7 @@ function factParts(e) {
     case "stop": return ["차례 끝", e.last || ""];
     case "end": return ["세션", `끝${e.reason ? ` (${e.reason})` : ""}`];
     case "gone": return ["세션", "끝 (claude 프로세스 없음)"];
+    case "quiet": return ["차례 끝", "오래 조용해 쉼으로 둠 (중단된 듯)"];
     default: return [e.f, ""];
   }
 }

@@ -577,3 +577,8 @@ test("그리기 알림: 큰 입력(그리기·Agent 입력 300KB, 사용자 입�
   assert.equal(run("prompt", "501", { session_id: "G1", hook_event_name: "UserPromptSubmit", prompt: big.repeat(3) }), "");
   assert.ok(!fs.existsSync(path.join(home, "nudge", "501.n")));
 });
+
+test("StopFailure: API 오류로 끝난 차례도 차례 끝으로 올린다", () => {
+  assert.deepEqual(toFact({ hook_event_name: "StopFailure", error: "rate_limit", last_assistant_message: "반쯤" }), { f: "stop", last: "API 오류 (rate_limit)\n반쯤" });
+  assert.deepEqual(toFact({ hook_event_name: "StopFailure" }), { f: "stop", last: "API 오류 (unknown)" });
+});

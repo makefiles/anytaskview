@@ -796,3 +796,45 @@ test("찾기 재료: 타임라인 줄·부품의 글, 낱말 모두 담기(대�
   assert.ok(!matchAll("무엇이든", []));
   assert.equal(snippet("가".repeat(100) + "찾는말" + "나".repeat(300), ["찾는말"]).slice(0, 42), "…" + "가".repeat(40) + "찾");
 });
+
+test("조용함(quiet): 작업 중이고 도는 명령·하위 에이전트가 없을 때만 쉼으로, 다음 사건에 다시 작업 중", () => {
+  const h = harness();
+  h.fact({ f: "prompt", text: "x" }, 1000);
+  h.fact({ f: "run-start", id: "r1", cmd: "make" }, 2000);
+  assert.equal(h.fact({ f: "quiet" }, 3000), "그대로", "명령이 돈다");
+  h.fact({ f: "run-end", id: "r1" }, 4000);
+  h.fact({ f: "agent-start", agent: "a1", agentType: "Explore" }, 5000);
+  assert.equal(h.fact({ f: "quiet" }, 6000), "그대로", "하위 에이전트가 돈다");
+  h.fact({ f: "agent-stop", agent: "a1", agentType: "Explore" }, 7000);
+  assert.equal(h.fact({ f: "quiet" }, 8000), "기록");
+  assert.equal(h.scene.sess.status, "idle");
+  assert.equal(h.scene.sess.lastT, 7000, "조용한 것은 활동이 아니다");
+  assert.equal(h.scene.timeline.at(-1).f, "quiet");
+  assert.equal(h.fact({ f: "quiet" }, 9000), "그대로", "이미 쉼");
+  h.fact({ f: "run-start", id: "r2", cmd: "ls" }, 10000);
+  assert.equal(h.scene.sess.status, "working");
+  assert.deepEqual(h.replay().sess, h.scene.sess);
+});
+
+test("조용함: 끝을 잃은 명령은 두 시간 뒤 기다리지 않고, 승인된 명령(wait)도 기다리며, 늦은 사건 시각이면 쓰지 않는다", () => {
+  const H = 3600_000, h = harness();
+  h.fact({ f: "prompt", text: "x" }, 1000);
+  h.fact({ f: "run-start", id: "r1", cmd: "make" }, 2000);
+  assert.equal(h.fact({ f: "quiet" }, 2000 + 2 * H - 1), "그대로");
+  assert.equal(h.fact({ f: "quiet" }, 2000 + 2 * H), "기록");
+  const w = harness();
+  w.fact({ f: "prompt", text: "x" }, 1000);
+  w.fact({ f: "run-start", id: "r1", cmd: "rm x" }, 2000);
+  w.fact({ f: "notify", ntype: "permission_prompt", text: "Bash" }, 3000);
+  assert.equal(w.scene.runs.r1.state, "wait");
+  assert.equal(w.fact({ f: "quiet" }, 4000), "그대로", "입력 필요는 건드리지 않는다");
+  w.fact({ f: "run-start", id: "r2", cmd: "ls", agent: "a1" }, 5000);
+  w.fact({ f: "run-end", id: "r2", agent: "a1" }, 6000);
+  assert.equal(w.scene.sess.status, "working");
+  assert.equal(w.fact({ f: "quiet" }, 7000), "그대로", "승인된 명령은 끝날 때까지 wait 로 남는다");
+  assert.equal(w.fact({ f: "quiet" }, 2000 + 2 * H), "기록");
+  const l = harness();
+  l.fact({ f: "prompt", text: "x" }, 1000);
+  assert.equal(l.fact({ f: "quiet" }, 9000, 500), "그대로", "상태를 바꾸지 못하면 기록하지 않는다");
+  assert.equal(l.scene.sess.status, "working");
+});
