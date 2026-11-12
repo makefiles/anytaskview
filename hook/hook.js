@@ -301,7 +301,8 @@ export function toFact(ev, { codex = false } = {}) {
       // via: 어느 에이전트의 세션인지. Codex 는 큐로 보낼 때 그 세션의 CODEX_HOME 을 쓴다
       return { f: "start", source: ev.source || "startup", cwd: ev.cwd || "", model: ev.model || "", ...title(ev), ...(codex && { via: "codex", home: codexHome() }) };
     case "UserPromptSubmit": {
-      const p = ev.prompt || "";
+      // VS Code 확장은 첫 입력 앞에 브라우저 안내문(4,000자 넘음)을 붙인다. 떼지 않으면 사용자 입력이 잘려 나간다
+      const p = (ev.prompt || "").replace(/^\s*<browser_instruction>[\s\S]*?<\/browser_instruction>\s*/, "");
       // 백그라운드 작업이 끝났다는 알림도 이 훅으로 온다. 사용자 입력이 아니므로 표시해 둔다
       if (/^\s*<task-notification>/.test(p)) {
         const tag = (name) => (p.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`)) || [])[1] || "";

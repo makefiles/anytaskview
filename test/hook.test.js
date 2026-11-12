@@ -110,6 +110,15 @@ test("백그라운드 작업 알림은 sys 입력으로, 요약만 남긴다", (
   assert.equal(toFact({ hook_event_name: "UserPromptSubmit", prompt: "보통 입력" }).sys, undefined);
 });
 
+test("VS Code 확장이 첫 입력 앞에 붙이는 브라우저 안내문은 떼고 사용자 입력만 올린다", () => {
+  const block = `<browser_instruction># Claude in Chrome\n\n${"안내 ".repeat(1400)}</browser_instruction>`;
+  const send = (prompt) => toFact({ hook_event_name: "UserPromptSubmit", prompt }).text;
+  assert.equal(send(`${block}\n\n핸드온 anytaskview`), "핸드온 anytaskview");
+  assert.equal(send(`${block}AnyTaskView 테스트`), "AnyTaskView 테스트");
+  assert.equal(send("<browser_instruction> 닫지 않은 글"), "<browser_instruction> 닫지 않은 글", "닫는 꼬리표가 없으면 그대로");
+  assert.equal(send(`앞 글 ${block}`), `앞 글 ${block}`.slice(0, 3999) + "…", "맨 앞이 아니면 그대로");
+});
+
 test("사건 → 사실: 명령은 설명과 함께, 수정은 경로와 줄, 출력은 보내지 않는다", () => {
   const pre = toFact({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "t1", tool_input: { command: "npm test", description: "시험 실행" } });
   assert.deepEqual(pre, { f: "run-start", id: "t1", cmd: "npm test", desc: "시험 실행" });
