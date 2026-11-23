@@ -123,12 +123,15 @@ async function main() {
   const shop = "/home/user/shop", api = "/home/user/api";
   await hook(A, { f: "start", cwd: shop, source: "startup" });
   await hook(A, { f: "prompt", text: "결제 화면에서 쿠폰을 적용하면 합계가 두 번 깎이는 문제를 찾아 고쳐 줘" });
+  // 작업 칸: 위 단계 = 작업, 하위 단계 = 그 일(40 단위). 끝난 작업 하나, 지금 작업, 다음 작업
   await mcp(A, shop, "plan", { steps: [
-    { id: "s1", title: "재현과 로그 확인", status: "done" },
-    { id: "s2", title: "할인 계산 경로 추적", status: "done" },
-    { id: "s3", title: "중복 적용 고치기", status: "doing" },
-    { id: "s4", title: "회귀 시험 추가" },
-    { id: "s5", title: "배포 전 확인" },
+    { id: "w1", title: "문제 재현", status: "done" },
+    { id: "s1", title: "재현과 로그 확인", status: "done", parent: "w1" },
+    { id: "w2", title: "쿠폰 중복 할인 고치기", status: "doing" },
+    { id: "s2", title: "할인 계산 경로 추적", status: "done", parent: "w2" },
+    { id: "s3", title: "중복 적용 고치기", status: "doing", parent: "w2" },
+    { id: "s4", title: "회귀 시험 추가", parent: "w2" },
+    { id: "w3", title: "배포 전 확인" },
   ] });
   await mcp(A, shop, "draw", { ops: [
     { id: "g", kind: "group", label: "결제 흐름" },

@@ -1257,6 +1257,60 @@ async function main() {
     await waitFor(`window.__atv.sid === ${JSON.stringify(t1)} && document.getElementById('thread-pos').textContent === '대화 1/2' && document.getElementById('thread-prev').disabled`);
     return `줄 ${rows.length}개`;
   });
+  await check("작업 칸: 끝난 것은 같은 층에서 마지막 둘만 보이고 접힌 줄·▸ 로 펼치며, 지금 작업은 카드, /clear 로 이어진 앞 대화는 맨 위 한 줄(누르면 그 대화의 단계, 보내기 없음)", async () => {
+    const child = spawn("sleep", ["600"], { stdio: "ignore" }); // 두 대화를 /clear 로 잇는 살아 있는 프로세스
+    try {
+      const a = `task-a-${process.pid}`, b = `task-b-${process.pid}`;
+      await hookAs(a, { f: "start", cwd, source: "startup" }, child.pid);
+      await hookAs(a, { f: "prompt", text: "앞 작업 대화" }, child.pid);
+      await post("/api/mcp", { env: a, cwd, tool: "plan", input: { steps: [{ id: "x1", title: "앞대화작업", status: "done" }, { id: "x1a", title: "앞대화단계", parent: "x1", status: "done" }] } });
+      await sleep(5);
+      await hookAs(b, { f: "start", cwd, source: "clear" }, child.pid);
+      await hookAs(b, { f: "prompt", text: "뒤 작업 대화" }, child.pid);
+      const steps = [];
+      for (let i = 1; i <= 4; i++) steps.push({ id: `k${i}`, title: `끝난작업${i}`, status: i === 4 ? "doing" : "done" }, { id: `k${i}a`, title: `끝난일${i}`, parent: `k${i}`, status: "done" }); // k4 는 닫는 것을 잊음
+      steps.push({ id: "w", title: "지금작업", status: "doing" });
+      for (let i = 1; i <= 4; i++) steps.push({ id: `w${i}`, title: `일${i}`, parent: "w", status: "done" });
+      steps.push({ id: "w5", title: "일5", parent: "w", status: "wait" }, { id: "n", title: "다음작업" });
+      await post("/api/mcp", { env: b, cwd, tool: "plan", input: { steps } });
+      await open(b);
+      const titles = `[...document.querySelectorAll('#plan-body .title')].map((t) => t.textContent).filter(Boolean)`;
+      await waitFor(`!!document.querySelector('#plan-body li.card[data-id="w"]')`);
+      let t = await evaluate(titles);
+      expect(JSON.stringify(t) === JSON.stringify(["앞 대화 1개 · 이전에 끝난 작업 2개", "끝난작업3", "끝난작업4", "지금작업", "이전에 끝난 단계 2개", "일3", "일4", "일5", "다음작업"]), `처음 모습 ${JSON.stringify(t)}`);
+      const card = await evaluate(`(() => { const li = document.querySelector('#plan-body li.card'); return { n: document.querySelectorAll('#plan-body li.card').length, c: getComputedStyle(li).borderLeftColor, w: getComputedStyle(document.documentElement).getPropertyValue('--s-wait').trim() }; })()`);
+      expect(card.n === 1, `카드 ${card.n}개`);
+      // ▸ 는 줄 앞에 있어, 줄에 마우스를 올리면 뜨는 보내기 말풍선(줄 오른쪽 위)과 겹치지 않는다
+      const at = await evaluate(`(() => { const b = document.querySelector('#plan-body li[data-id="w"] > .head > button.tog').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
+      await waitFor(`!document.getElementById('ask').hidden`);
+      expect(await evaluate(`!!document.elementFromPoint(${at.x}, ${at.y})?.matches('#plan-body li[data-id="w"] > .head > button.tog')`), "▸ 위에 보내기 말풍선이 겹침");
+      // 끝난 줄 펴기(▸ 단추 대신 줄 머리를 눌러도 된다)
+      await evaluate(`[...document.querySelectorAll('#plan-body li[data-id="k4"] > .head .title')][0].click()`);
+      await waitFor(`!!document.querySelector('#plan-body li[data-id="k4a"]')`);
+      // 접힌 줄을 펴면 앞 대화 줄과 숨은 작업이 보이고, 앞 대화 줄은 보내기 대상이 아니다
+      await evaluate(`document.querySelector('#plan-body > ul > li.fold button.tog').click()`);
+      await waitFor(`!!document.querySelector('#plan-body li.prev') && !!document.querySelector('#plan-body li[data-id="k1"]')`);
+      expect(await evaluate(`!!document.querySelector('#plan-body > ul > li.fold > ul.tree > li.prev') && !!document.querySelector('#plan-body > ul > li.fold > ul.tree > li[data-id="k1"]')`), "펼친 줄이 묶음 머리 아래에 들지 않음");
+      expect(await evaluate(`!document.querySelector('#plan-body li.prev').dataset.id && document.querySelector('#plan-body li.prev .title').textContent.endsWith('앞 작업 대화')`), "앞 대화 줄 모양");
+      await evaluate(`document.querySelector('#plan-body li.prev button.tog').click()`);
+      await waitFor(`[...document.querySelectorAll('#plan-body li.ro .title')].some((x) => x.textContent === '앞대화작업')`, 4000);
+      await evaluate(`document.querySelector('#plan-body li.ro button.tog').click()`);
+      await waitFor(`[...document.querySelectorAll('#plan-body li.ro .title')].some((x) => x.textContent === '앞대화단계')`);
+      expect(await evaluate(`![...document.querySelectorAll('#plan-body li.prev, #plan-body li.ro')].some((x) => x.dataset.id || x.tabIndex >= 0)`), "앞 대화의 줄에 보내기·초점 자리가 있음");
+      // 키보드: ▸ 단추에서 Enter 로 접고, 1초 뒤 다시 그려도 초점이 그 단추에 남는다
+      await evaluate(`document.querySelector('#plan-body li[data-id="w"] > .head button.tog').focus()`);
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      await waitFor(`!document.querySelector('#plan-body li[data-id="w5"]')`);
+      await sleep(1200);
+      expect(await evaluate(`document.activeElement?.dataset.tog === 'w' && document.getElementById('composer').hidden`), "접은 뒤 초점이 단추에 남지 않거나 보내기 창이 열림");
+      return `카드 띠 ${card.c}`;
+    } finally {
+      child.kill();
+      await open(`thread-a-${process.pid}`); // 다음 점검(지우기)은 앞 점검이 남긴 대화에서 시작한다
+    }
+  });
   await check("지우기: 진행 중인 줄은 꺼져 있고, 끝난 줄은 ⋯ 메뉴에서 두 번 눌러야 지워지며 보던 대화가 지워지면 다른 대화로 옮겨 감", async () => {
     const pid = process.pid, t1 = `thread-a-${pid}`, t2 = `thread-b-${pid}`;
     const menuOf = (id) => `document.querySelector('#sess-body .smenu[data-sid="${id}"]')`;

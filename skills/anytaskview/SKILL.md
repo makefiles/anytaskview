@@ -13,7 +13,7 @@ Board calls ride along with your work: put them first in the same message as you
 
 ## What goes where
 
-- **plan**: the steps of *your* work (investigate, design, implement, verify). One call with all steps after you form a plan; later calls send only changed statuses. Set the old step `done` and the new one `doing` in the same call.
+- **plan**: tasks and their steps. Each request or work unit is a top-level step (the task); its work (investigate, design, implement, verify) goes in sub-steps with `parent` set to the task. Add tasks you already know will follow (for example the remaining items of a handoff) as `todo` top-level steps. One call with all steps after you form a plan; later calls send only changed statuses. Set the old step `done` and the new one `doing` in the same call, and mark a task `done` with its last step. The board shows each finished task as one line, the current task as a card with its steps, and the next tasks below it.
 - **draw**: the structure of the *problem* (features, suspects, call paths, data flow, decisions). Not folder layouts, not every file you touch: hooks already post edits, commands and subagents.
 - **note**: one timeline line for a reason (`why`), a decision (`decision`), being stuck (`blocked`) or waiting for approval (`wait`). `on` attaches it to a step or part.
 - **ids**: only when you lost track of ids, for example after compaction.
@@ -63,7 +63,8 @@ The user wants to see the whole work at a glance, not a new picture per task. Dr
 One message: plan, draw and the first Read of the work.
 
 ```json
-plan: {"steps":[{"id":"s1","title":"원인 찾기","status":"doing"},{"id":"s2","title":"고치기"},{"id":"s3","title":"검증"}]}
+plan: {"steps":[{"id":"w1","title":"빈 줄 멈춤 고치기","status":"doing"},{"id":"s1","title":"원인 찾기","parent":"w1","status":"doing"},
+  {"id":"s2","title":"고치기","parent":"w1"},{"id":"s3","title":"검증","parent":"w1"},{"id":"w2","title":"README 갱신"}]}
 draw: {"ops":[{"id":"t1","kind":"group","label":"빈 줄 멈춤 고치기"},{"id":"g","kind":"group","in":"t1","label":"의심 지점"},
   {"id":"a","kind":"box","in":"g","label":"파서 경계값","ref":"src/parse.c:120","status":"doing","icon":"code"},
   {"id":"b","kind":"box","in":"g","label":"버퍼 길이","ref":"src/buf.c:40"},

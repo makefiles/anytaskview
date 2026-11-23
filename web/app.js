@@ -1,4 +1,4 @@
-// 화면: 세션 목록, 맨 위 한 줄, 주의 띠, 가운데 그림, 계획 나무, 타임라인, 재생 막대.
+// 화면: 세션 목록, 맨 위 한 줄, 주의 띠, 가운데 그림, 작업 칸(단계 나무), 타임라인, 재생 막대.
 // 서버가 SSE 로 보내는 결과(res)를 lib/scene.js 의 applyRes 로 적용한다. 재생도 같은 함수로 처음부터 다시 적용한다.
 // 패널 폭·접힘·배율·거르기처럼 이 브라우저에만 남는 값은 localStorage 에 두고, 읽을 때 범위로 자른다.
 import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK, refPath, normPath, agentsRunning, llmRunning, llmSince } from "/lib/scene.js";
@@ -100,6 +100,7 @@ const state = {
   config: { resume: null, trashDays: 30, diffKB: 16 }, // 서버 설정(이어받기 문구, 지난 대화를 휴지통으로 옮기기까지 날수·null 이면 끔, 수정 diff 보관 KB·0 이면 끔)
   dragging: null,        // 목록에서 끌고 있는 세션 id
   tlAgent: null,         // 타임라인을 이 하위 에이전트의 줄만 보이게 거르는 중(이름표를 눌렀을 때)
+  planOpen: new Map(),   // 작업 칸에서 사용자가 펼치거나 접은 줄: 키 → true(펼침)·false(접음). 세션을 바꾸면 비운다
 };
 
 function theme() {
@@ -199,7 +200,7 @@ function applyLayout() {
   side.classList.toggle("fold-tl", !!layout.foldTl);
   $("fold-sessions").textContent = layout.foldLeft ? "▶" : "◀";
   $("fold-sessions").title = layout.foldLeft ? "세션 목록 펴기" : "세션 목록 접기";
-  for (const [id, folded, what] of [["fold-plan", layout.foldPlan, "계획"], ["fold-tl", layout.foldTl, "타임라인"]]) {
+  for (const [id, folded, what] of [["fold-plan", layout.foldPlan, "작업"], ["fold-tl", layout.foldTl, "타임라인"]]) {
     $(id).textContent = folded ? "▸" : "▾";
     $(id).title = `${what} ${folded ? "펴기" : "접기"}`;
     $(id).setAttribute("aria-expanded", String(!folded));
@@ -411,6 +412,7 @@ function connect(sid) {
   tlCache = new Map();
   state.tlFocus = null;
   state.planReveal = null;
+  state.planOpen = new Map();
   state.markerSeq = sid ? Number(store.get(`atv.seen.${sid}`) || 0) : null;
   if (sid) history.replaceState(null, "", `${location.search}#s=${encodeURIComponent(sid)}`);
   const es = openEvents(sid);
@@ -1036,7 +1038,7 @@ function renderTop(scene, now) {
   // 세션이 실제로 일하는 동안(실시간)만 계획의 「지금」 줄에 빛이 지나간다. 단계가 진행 중이어도 세션이 쉬면 멈춘다
   $("plan-now").classList.toggle("live", sess.status === "working" && !state.replay && !state.replayLoading);
   chip.textContent = SESS_KO[sess.status] || sess.status;
-  let line = "계획 없음";
+  let line = "작업 없음";
   if (cur) {
     const st = own(scene.items, cur);
     line = `지금 ${st.title}${st.status !== "doing" ? ` (${ST_KO[st.status]})` : ""} · ${statsText(stepStats(scene, cur, now))}`;
@@ -1184,9 +1186,8 @@ function bandRows(band) {
 function reveal(id, isStep) {
   if (isStep) {
     if (layout.foldPlan) { layout.foldPlan = false; applyLayout(); saveLayout(); }
-    if (planTab() === "docs") setPlanTab("plan"); // 문서 탭을 보던 중이면 계획 탭으로
-    const st = own(viewScene().items, id);
-    if (st && st.status === "done" && !showDone()) setShowDone(true);
+    if (planTab() === "docs") setPlanTab("plan"); // 문서 탭을 보던 중이면 작업 탭으로
+    state.planReveal = id; // 접힌 줄 안이어도 그 단계와 위 단계들을 펼쳐 보인다
     render();
     const li = document.querySelector(`#plan-body li[data-id="${CSS.escape(id)}"]`);
     if (li) { li.scrollIntoView({ block: "center", behavior: "smooth" }); li.classList.remove("flash"); void li.offsetWidth; li.classList.add("flash"); }
@@ -1199,10 +1200,6 @@ function reveal(id, isStep) {
   if (p) revealPart(p.id);
 }
 
-// 끝난 단계는 기본으로 숨기고 개수만 보인다. 실패·막힘과 지금 단계는 숨기지 않는다
-const showDone = () => store.get("atv.showDone") === "1";
-function setShowDone(on) { store.set("atv.showDone", on ? "1" : "0"); queueRender(); }
-$("toggle-done").addEventListener("click", () => { state.planReveal = null; setShowDone(!showDone()); });
 
 // 계획 칸 위 「도는 에이전트」: 지금 도는 다른 LLM 명령(Codex 등)과 하위 에이전트의 이름표, 걸린 시간. 1초마다 불리므로 바뀔 때만 다시 만든다
 const AGENTS_SHOWN = 6;
@@ -1239,18 +1236,57 @@ function renderAgents(scene, now) {
   }
 }
 
+// 작업 칸(40): 단계 나무 하나. 위 단계 = 작업, 하위 단계 = 그 작업의 일. 규칙은 둘이다.
+// 1) 맨 위층과 지금 작업 안에서 끝난 것은 마지막 둘만 보이고 그 위는 묶음 머리 한 줄로 접힌다. 2) 아래가 있는 줄은 누르면 그 자리에서 펼치고 접는다.
+// 지금 단계를 품은 맨 위 단계(지금 작업)는 카드로 감싼다. 앞 대화(prev 를 거슬러 올라간 대화)는 맨 위층 앞에 끝난 줄 하나씩 들어간다
+const FOLD_KEEP = 2;
+const KEEP_OPEN = new Set(["fail", "blocked", "wait"]); // 끝난 것으로 치지 않아 접히지 않는 상태
+// 앞 대화의 단계(펼칠 때 받는다): sid → { sig, steps } | "loading" | "error". 끝난 대화는 바뀌지 않으므로 한 번 받아 둔다
+const prevSteps = new Map();
+// 지금 대화에서 prev 를 거슬러 올라간 대화(오래된 것부터). fork 로 갈라진 곁가지는 들지 않는다. 단계가 없는 대화는 뺀다
+function prevConvs() {
+  const out = [], seen = new Set([state.sid]);
+  for (let s = state.sessions.get(state.sid); s?.prev && !seen.has(s.prev) && state.sessions.has(s.prev);) {
+    seen.add(s.prev);
+    s = state.sessions.get(s.prev);
+    if (s.steps?.[1] > 0) out.unshift(s);
+  }
+  return out;
+}
+// 받기에 실패해도 받아 둔 값(error)으로 친다(실패 → 다시 그림 → 다시 받기가 돌지 않게). 그 줄을 다시 펴면 다시 받는다
+function loadPrev(s) {
+  const have = prevSteps.get(s.id), sig = String(s.steps);
+  if (have === "loading" || have?.sig === sig) return;
+  prevSteps.set(s.id, "loading");
+  fetch(`/api/sessions/${encodeURIComponent(s.id)}/steps`)
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((steps) => prevSteps.set(s.id, { sig, steps }), () => prevSteps.set(s.id, { sig, error: true }))
+    .finally(() => { renderPlan.key = null; queueRender("view"); });
+}
+// 줄 펴기·접기. 찾기로 펼쳐 둔 자리는 사용자가 줄을 만지면 놓는다
+function togglePlan(key, open) {
+  const m = /^p:([^:]+)$/.exec(key);
+  if (m && open && prevSteps.get(m[1])?.error) prevSteps.delete(m[1]);
+  state.planOpen.set(key, open);
+  state.planReveal = null;
+  renderPlan.key = null;
+  queueRender("view");
+}
+const togPad = () => el("span", "tog");
+const togBtn = (key, open) => {
+  const b = el("button", "tog", open ? "▾" : "▸");
+  b.type = "button";
+  b.dataset.tog = key;
+  b.title = open ? "접기" : "펴기";
+  b.setAttribute("aria-expanded", String(open));
+  return b;
+};
+
 function renderPlan(scene, now) {
   renderAgents(scene, now);
   const body = $("plan-body"), cur = currentStep(scene), nowBox = $("plan-now");
   const steps = Object.values(scene.items).filter((it) => it.kind === "step").sort((a, b) => a.ord - b.ord);
-  const toggle = $("toggle-done");
-  if (!steps.length) {
-    nowBox.hidden = true;
-    toggle.hidden = true;
-    renderPlan.key = null;
-    body.replaceChildren(el("p", "row2", "Claude 가 plan 으로 계획을 올리면 여기에 보입니다."));
-    return;
-  }
+  const prevs = prevConvs();
   // 지금 단계: 스크롤해도 위에 남는다
   nowBox.hidden = !cur;
   // 1초마다 불린다. 바뀔 때만 다시 만든다(전에는 매번 새로 만들어 반짝임이 매초 처음부터 다시 시작했다)
@@ -1261,28 +1297,47 @@ function renderPlan(scene, now) {
     nowBox.replaceChildren(addShine(head));
   }
   renderPlan.nowKey = nowKey;
+  const empty = el("p", "row2", "Claude 가 plan 으로 작업을 올리면 여기에 보입니다.");
+  if (!steps.length && !prevs.length) {
+    renderPlan.key = null;
+    body.replaceChildren(empty);
+    return;
+  }
   const ids = new Set(steps.map((s) => s.id));
   const parentOf = (x) => (x.parent && ids.has(x.parent) ? x.parent : "");
-  // 끝났고, 그 아래도 모두 끝났고, 지금 단계를 품지 않은 단계만 숨긴다
+  const kidsOf = new Map();
+  for (const s of steps) { const p = parentOf(s); if (!kidsOf.has(p)) kidsOf.set(p, []); kidsOf.get(p).push(s); }
+  const kids = (id) => kidsOf.get(id) || [];
+  // 끝난 것: 끝났고 아래도 모두 끝났다. 아래가 있으면 제 상태가 남아 있어도(작업을 닫는 것을 잊음) 아래가 모두 끝나면 끝난 것이다.
+  // 지금 단계, 실패·막힘·대기는 끝난 것이 아니다
   const settled = new Map();
   const isSettled = (s) => {
     if (settled.has(s.id)) return settled.get(s.id);
     settled.set(s.id, false);
-    const v = s.status === "done" && s.id !== cur && steps.filter((x) => parentOf(x) === s.id).every(isSettled);
+    const ks = kids(s.id);
+    const v = s.id !== cur && !KEEP_OPEN.has(s.status) && (s.status === "done" || ks.length > 0) && ks.every(isSettled);
     settled.set(s.id, v);
     return v;
   };
-  const hideDone = !showDone();
-  // 찾기로 고른 단계와 그 위 단계들은 숨기지 않는다
-  const reveal = new Set();
-  for (let id = state.planReveal, i = 0; id && ids.has(id) && i < 10; id = parentOf(own(scene.items, id)), i++) reveal.add(id);
-  const doneCount = steps.filter((s) => s.status === "done").length;
-  toggle.hidden = !doneCount || planTab() === "docs";
-  toggle.textContent = hideDone ? `끝난 단계 ${doneCount}개 보기` : "끝난 단계 숨기기";
+  // 시작한 단계: 제가 할 일이 아니거나 아래에 시작한 단계가 있다
+  const startedMemo = new Map();
+  const isStarted = (s) => {
+    if (startedMemo.has(s.id)) return startedMemo.get(s.id);
+    startedMemo.set(s.id, false);
+    const v = s.status !== "todo" || kids(s.id).some(isStarted);
+    startedMemo.set(s.id, v);
+    return v;
+  };
+  // 어떤 단계와 그 위 단계들
+  const upFrom = (id) => { const set = new Set(); for (let x = id, i = 0; x && ids.has(x) && i < 100; x = parentOf(own(scene.items, x)), i++) set.add(x); return set; };
+  const curUp = upFrom(cur), reveal = upFrom(state.planReveal);
+  const topCur = [...curUp].find((id) => !parentOf(own(scene.items, id)));
+  const isOpen = (key, dflt) => (state.planOpen.has(key) ? state.planOpen.get(key) : dflt);
   // 1초마다 불리므로 구조가 같으면 걸린 시간 글자만 고친다(다시 만들면 「보기」 강조와 대상 표시가 지워진다)
   const noteCount = (id) => { const from = bornT(scene, id); return scene.timeline.reduce((n, e) => n + (e.type === "note" && e.on === id && !(e.t < from) ? 1 : 0), 0); };
   const mailKey = (id) => { const ms = msgsTo(scene, id); return ms.length ? mailBadge(ms).title : ""; };
-  const key = JSON.stringify([cur, hideDone, state.planReveal, steps.map((x) => [x.id, x.title, x.status, x.parent, x.note, !!x.answered, !!x.startT, noteCount(x.id), mailKey(x.id)])]);
+  const prevKey = prevs.map((p) => [p.id, sessName(p), p.startedAt, String(p.steps), isOpen(`p:${p.id}`, false) && (prevSteps.get(p.id)?.sig ?? prevSteps.get(p.id) ?? "")]);
+  const key = JSON.stringify([cur, state.planReveal, [...state.planOpen], prevKey, steps.map((x) => [x.id, x.title, x.status, x.parent, x.note, !!x.answered, !!x.startT, noteCount(x.id), mailKey(x.id)])]);
   if (key === renderPlan.key && body.isConnected) {
     for (const li of body.querySelectorAll("li[data-id]")) {
       const stats = li.querySelector(":scope > .stats");
@@ -1292,51 +1347,94 @@ function renderPlan(scene, now) {
     return;
   }
   renderPlan.key = key;
-  const build = (parent) => {
-    const ul = el("ul", "tree");
-    let hidden = 0;
-    for (const s of steps.filter((x) => parentOf(x) === parent)) {
-      if (hideDone && isSettled(s) && !reveal.has(s.id)) { hidden++; continue; }
-      const li = el("li", "step" + (s.id === cur ? " cur" : ""));
-      li.dataset.id = s.id;
-      li.tabIndex = 0; // 키보드로 단계에 가서 Enter 로 Claude 에 보낸다
-      markSend(li, "단계");
-      const head = el("div", `head st-${s.status}`);
-      head.append(el("span", "ico", ST_ICO[s.status]), el("span", "title", s.title));
-      if (s.status !== "todo" && s.status !== "doing") head.append(el("span", "tag", ST_KO[s.status]));
-      if (s.answered) head.append(el("span", "tag", "답 받음"));
-      const ms = msgsTo(scene, s.id);
-      if (ms.length) {
-        const mb = mailBadge(ms), mail = el("span", "mail" + (mb.queued ? " queued" : ""), mb.text);
-        mail.title = mb.title;
-        head.append(mail);
-      }
+  const usesTasks = steps.some((s) => parentOf(s));
+  // 한 층. 접기는 맨 위층과 지금 작업 안에서만 한다(사용자가 펼친 지난 작업·앞 대화는 다 보인다).
+  // 끝난 것(앞 대화 줄 포함)은 마지막 둘만 남기고 그 위는 묶음 머리 한 줄 「이전에 끝난 … n개」 로 접는다(둘 넘게 숨길 때만).
+  // 묶음을 펴면 숨긴 줄이 그 머리 아래 들여쓰기로 들어간다. 찾기·띠 「보기」 로 고른 단계를 품은 줄은 묶음에 넣지 않는다
+  const level = (parent, rows, foldable) => {
+    const ul = el("ul", "tree"), done = rows.filter((r) => r.prev || isSettled(r.s)), fk = `fold:${parent}`;
+    const cand = foldable ? done.slice(0, Math.max(0, done.length - FOLD_KEEP)).filter((r) => !(r.s && reveal.has(r.s.id))) : [];
+    const hidden = new Set(cand.length >= 2 ? cand : []);
+    if (hidden.size) {
+      const open = isOpen(fk, false), nPrev = cand.filter((r) => r.prev).length, nStep = cand.length - nPrev;
+      const what = [nPrev && `앞 대화 ${nPrev}개`, nStep && `이전에 끝난 ${!parent && usesTasks ? "작업" : "단계"} ${nStep}개`].filter(Boolean).join(" · ");
+      const li = el("li", "step fold"), head = el("div", "head st-done");
+      head.title = `끝난 것은 최근 ${FOLD_KEEP}개만 펼쳐 두고, 그 앞은 이 줄에 접어 둡니다`;
+      head.append(togBtn(fk, open), el("span", "ico", ST_ICO.done), el("span", "title", what));
       li.append(head);
-      if (s.startT) li.append(el("div", "stats", statsText(stepStats(scene, s.id, now))));
-      if (s.note) li.append(el("div", "snote", s.note));
-      const notes = scene.timeline.filter((e) => e.type === "note" && e.on === s.id && !(e.t < (s.bornT || 0)));
-      if (notes.length) li.title = notes.map((n) => n.text).join("\n");
-      const sub = build(s.id);
-      if (sub.childElementCount) li.append(sub);
+      if (open) { const sub = el("ul", "tree"); for (const r of cand) sub.append(r.prev ? prevLi(r.prev) : stepLi(r.s)); li.append(sub); }
       ul.append(li);
     }
-    if (hidden) {
-      const li = el("li", "step");
-      const head = el("div", "head st-done");
-      head.append(el("span", "ico", ST_ICO.done), el("span", "muted", `끝난 단계 ${hidden}개`));
-      li.append(head);
-      ul.prepend(li);
-    }
+    for (const r of rows) if (!hidden.has(r)) ul.append(r.prev ? prevLi(r.prev) : stepLi(r.s));
     return ul;
   };
-  const act = document.activeElement, keep = act && body.contains(act) && act.matches("li[data-id]") ? act.dataset.id : null;
+  const stepLi = (s) => {
+    const ks = kids(s.id), done = isSettled(s);
+    const li = el("li", "step" + (s.id === cur ? " cur" : "") + (done ? " settled" : "") + (s.id === topCur ? " card" : ""));
+    if (s.id === topCur) li.style.setProperty("--card", `var(--s-${st.status})`); // 카드 띠 색 = 지금 단계의 상태
+    li.dataset.id = s.id;
+    li.tabIndex = 0; // 키보드로 단계에 가서 Enter 로 Claude 에 보낸다
+    markSend(li, "단계");
+    // 아래가 열려 있는 줄: 지금 작업, 찾기로 고른 자리, 끝나지 않았고 시작한 줄(실패·막힘·대기가 보이게). 끝난 줄과 아직 시작하지 않은 줄
+    // (저도 아래도 모두 할 일)은 닫혀 있다. 위 단계를 할 일로 둔 채 하위 단계만 진행하기도 하므로 아래까지 본다
+    const open = ks.length > 0 && (reveal.has(s.id) || isOpen(s.id, curUp.has(s.id) || (!done && isStarted(s))));
+    const head = el("div", `head st-${s.status}`);
+    head.append(ks.length ? togBtn(s.id, open) : togPad(), el("span", "ico", ST_ICO[s.status]), el("span", "title", s.title));
+    if (!["todo", "doing", "done"].includes(s.status)) head.append(el("span", "tag", ST_KO[s.status])); // 끝은 ✓ 로 충분하다
+    if (s.answered) head.append(el("span", "tag", "답 받음"));
+    const ms = msgsTo(scene, s.id);
+    if (ms.length) {
+      const mb = mailBadge(ms), mail = el("span", "mail" + (mb.queued ? " queued" : ""), mb.text);
+      mail.title = mb.title;
+      head.append(mail);
+    }
+    li.append(head);
+    if (s.startT) li.append(el("div", "stats", statsText(stepStats(scene, s.id, now))));
+    if (s.note) li.append(el("div", "snote", s.note));
+    const notes = scene.timeline.filter((e) => e.type === "note" && e.on === s.id && !(e.t < (s.bornT || 0)));
+    if (notes.length) li.title = notes.map((n) => n.text).join("\n");
+    if (open) li.append(level(s.id, ks.map((k) => ({ s: k })), curUp.has(s.id)));
+    return li;
+  };
+  // 앞 대화 줄: 읽기만 한다(보내기·Enter 보내기·찾기 표시를 붙이지 않는다). 펼치면 그 대화의 단계를 받아 모두 보인다
+  const prevLi = (p) => {
+    const k = `p:${p.id}`, open = isOpen(k, false), li = el("li", "step prev settled"), head = el("div", "head st-done");
+    head.append(togBtn(k, open), el("span", "ico", ST_ICO.done), el("span", "title", `${fmtWhen(p.startedAt, now)} · ${sessName(p)}`), el("span", "tag", "앞 대화"));
+    li.append(head);
+    if (open) {
+      const got = prevSteps.get(p.id);
+      loadPrev(p);
+      if (got?.steps) li.append(readOnly(p.id, got.steps));
+      else li.append(el("div", "snote", got?.error ? "단계를 받지 못했습니다(접었다 다시 펴면 다시 받습니다)" : "불러오는 중…"));
+    }
+    return li;
+  };
+  const readOnly = (sid, list) => {
+    const have = new Set(list.map((x) => x.id)), up = (x) => (x.parent && have.has(x.parent) ? x.parent : "");
+    const sub = (parent) => {
+      const ul = el("ul", "tree");
+      for (const x of list.filter((y) => up(y) === parent)) {
+        const li = el("li", "step ro"), head = el("div", `head st-${x.status}`), k = `p:${sid}:${x.id}`, has = list.some((y) => up(y) === x.id), open = has && isOpen(k, false);
+        head.append(has ? togBtn(k, open) : togPad(), el("span", "ico", ST_ICO[x.status] || ""), el("span", "title", x.title || x.id));
+        li.append(head);
+        if (x.note) li.append(el("div", "snote", x.note));
+        if (open) li.append(sub(x.id));
+        ul.append(li);
+      }
+      return ul;
+    };
+    return sub("");
+  };
+  const act = document.activeElement, inBody = act && body.contains(act);
+  const keep = inBody && act.matches("li[data-id]") ? act.dataset.id : null, keepTog = inBody && act.matches("button.tog") ? act.dataset.tog : null;
   const asked = !askBtn.hidden && askFor === act; // 되돌린 초점이 말풍선을 새로 띄우지 않게
-  body.replaceChildren(build(""));
+  body.replaceChildren(level("", [...prevs.map((p) => ({ prev: p })), ...kids("").map((s) => ({ s }))], true), ...(steps.length ? [] : [empty]));
   const li = keep && body.querySelector(`li[data-id="${CSS.escape(keep)}"]`);
   if (li) {
     li.focus({ preventScroll: true });
     if (asked) showAsk(li); else hideAsk(true);
   }
+  if (keepTog) body.querySelector(`button.tog[data-tog="${CSS.escape(keepTog)}"]`)?.focus({ preventScroll: true });
 }
 
 // 작업 알림 입력: 새 기록은 훅이 sys 로 표시한다. 그 전에 쌓인 기록은 글 모양으로 알아본다
@@ -1984,7 +2082,6 @@ function renderDocTabs() {
   for (const [id, sel] of [["tab-plan", !on], ["tab-docs", on]]) { $(id).setAttribute("aria-selected", String(sel)); $(id).tabIndex = sel ? 0 : -1; }
   $("plan-body").hidden = on;
   $("docs-body").hidden = !on;
-  if (on) $("toggle-done").hidden = true;
   const shown = docs.list.filter((d) => !d.hidden && d.main);
   $("docs-n").textContent = shown.length ? ` ${shown.length}` : "";
   const fresh = shown.some((d) => unread(d, seen));
@@ -3054,7 +3151,10 @@ $("b-send").addEventListener("click", () => {
 // 보낸 글 수 표시를 누르면 그 단계의 보내기 창(그림의 상자는 canvas.js 가 onMail 로 알린다)
 $("plan-body").addEventListener("click", (ev) => {
   const li = ev.target.closest(".mail")?.closest("li[data-id]");
-  if (li) askAbout(li);
+  if (li) { askAbout(li); return; }
+  // 줄 펴기·접기: ▸ 단추, 또는 아래가 있는 줄의 머리(다른 단추·링크를 누른 것은 빼고)
+  const tog = ev.target.closest("button.tog") || (!ev.target.closest("button, a") && getSelection()?.isCollapsed !== false && ev.target.closest(".head")?.querySelector(":scope > button.tog"));
+  if (tog) togglePlan(tog.dataset.tog, tog.getAttribute("aria-expanded") !== "true");
 });
 
 // 말풍선: 그림의 상자나 계획의 단계에 마우스가 들어오거나 초점이 오면 그 오른쪽 위 모서리에 띄운다.
@@ -3193,7 +3293,7 @@ function tlLabel(e) {
   if (e.f === "prompt" && !e.sys) return "사용자";
   return factParts(e)[0];
 }
-const partLabel = (it) => (it.kind === "step" ? "계획" : it.kind === "edge" ? "선" : "그림");
+const partLabel = (it) => (it.kind === "step" ? "작업" : it.kind === "edge" ? "선" : "그림");
 // 그림에서 보일 자리: 목록 항목은 그 목록, 선은 시작 부품
 function partAnchor(scene, it) {
   let p = it;
@@ -3241,7 +3341,7 @@ function remoteGroup(terms) {
     total += s.n;
     const name = state.sessions.has(s.id) ? sessName(state.sessions.get(s.id)) : s.id.slice(0, 8);
     for (const h of s.hits) {
-      const kind = h.type === "part" || h.type === "step" ? (h.type === "step" ? "계획" : "그림") : tlLabel(h);
+      const kind = h.type === "part" || h.type === "step" ? (h.type === "step" ? "작업" : "그림") : tlLabel(h);
       rows.push({ kind, text: h.text, meta: h.t ? `${name} · ${fmtWhen(h.t, now)}` : name, go: { sid: s.id, ...(h.seq != null ? { seq: h.seq, key: h.key } : h.type === "step" ? { step: h.id } : { part: h.id }) } });
     }
     if (s.n > s.hits.length) rows.push({ kind: "", text: `${name} 에서 외 ${s.n - s.hits.length}건`, meta: "열어서 다시 찾기", go: { sid: s.id, again: true } });
@@ -3297,7 +3397,7 @@ function renderSearch(reset) {
     out.push(sec);
   });
   // 알림 줄(목록 상자 밖, 화면 읽기 프로그램이 읽는다): 안내·결과 수·서버 상태
-  const st = !terms.length ? "찾을 말을 쓰세요. 이 화판의 그림·계획, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트의 이름과 폴더, 다른 세션의 기록에서 찾습니다. 낱말을 여럿 쓰면 모두 담은 것만 찾습니다."
+  const st = !terms.length ? "찾을 말을 쓰세요. 이 화판의 그림·작업, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트의 이름과 폴더, 다른 세션의 기록에서 찾습니다. 낱말을 여럿 쓰면 모두 담은 것만 찾습니다."
     : finder.opts.length ? [`${finder.opts.length}개 찾음`, ...notes].join(" · ") : finder.remote?.loading ? "찾는 중…" : ["찾은 것이 없습니다", ...notes].join(" · ");
   if ($("search-status").textContent !== st) $("search-status").textContent = st;
   searchList.hidden = !out.length;
@@ -3325,7 +3425,7 @@ function chooseFound(i) {
   if (unfold) { layout[unfold] = false; applyLayout(); saveLayout(); }
   state.focus = { sid: g.sid || state.sid, ...g };
   if (g.seq != null) state.tlFocus = g.seq; // 400줄 밖·거른 줄이라도 그 줄까지 보인다
-  if (g.step) state.planReveal = g.step; // 끝난 단계·끝난 상위 단계 아래여도 그 단계까지 보인다(세션을 바꾸거나 「끝난 단계」 를 누를 때까지)
+  if (g.step) state.planReveal = g.step; // 접힌 줄 안이어도 그 단계까지 펼쳐 보인다(세션을 바꾸거나 작업 칸의 줄을 펴고 접을 때까지)
   queueRender();
 }
 // 찾은 자리로 간다: 타임라인 줄·계획 단계는 그린 바로 뒤에, 그림 부품은 배치가 끝난 뒤에

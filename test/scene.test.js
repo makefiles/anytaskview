@@ -346,6 +346,77 @@ test("남은 단계: 여섯 개까지 싣고, 하위 에이전트가 도는 동�
   assert.doesNotMatch(h.plan({ steps: [{ id: "r1", title: "파일 읽기", status: "doing" }, { id: "r2", title: "보고" }] }, 4000), /still open/);
 });
 
+test("새 작업(작업 = 위 단계): 미리 올린 다음 작업을 하위 단계와 함께 시작하면 새 작업, 같은 작업의 다음 단계·평평한 계획의 다음 단계·지금 단계 나누기는 아님", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "t1", title: "견본", status: "doing" }, { id: "t1a", title: "읽기", parent: "t1", status: "doing" }, { id: "t1b", title: "만들기", parent: "t1" }, { id: "t2", title: "설계" }, { id: "t3", title: "구현" }] }, 1000);
+  assert.equal(h.scene.view.taskT, 1000);
+  h.plan({ steps: [{ id: "t1a", status: "done" }, { id: "t1b", status: "doing" }] }, 2000);
+  assert.equal(h.scene.view.taskT, 1000, "같은 작업의 다음 단계");
+  // t1 은 닫지 않았지만 하위 단계가 모두 끝났다. 미리 올린 t3 은 앞으로 할 작업이다. 둘 다 남은 단계로 알리지 않는다
+  const msg = h.plan({ steps: [{ id: "t1b", status: "done" }, { id: "t2", status: "doing" }, { id: "t2a", title: "짜기", parent: "t2", status: "doing" }, { id: "t2b", title: "쓰기", parent: "t2" }] }, 3000);
+  assert.equal(h.scene.view.taskT, 3000, "미리 올린 작업을 시작");
+  assert.doesNotMatch(msg, /still open/);
+  // 앞 작업에 열린 하위 단계가 남았으면 그것만 알린다
+  h.plan({ steps: [{ id: "t3x", title: "남길 일", parent: "t2" }] }, 3500);
+  const next = h.plan({ steps: [{ id: "t2a", status: "done" }, { id: "t2b", status: "done" }, { id: "t2", status: "done" }, { id: "t3", status: "doing" }, { id: "t3a", title: "고치기", parent: "t3", status: "doing" }] }, 4000);
+  assert.equal(h.scene.view.taskT, 4000);
+  assert.match(next, /Steps still open from earlier work: t3x todo "남길 일"\. /);
+  assert.doesNotMatch(next.split("Steps still open")[1], /\b(t1|t2|t3|t3a)\b/);
+
+  const flat = harness();
+  flat.plan({ steps: [{ id: "a", title: "읽기", status: "doing" }, { id: "b", title: "고치기" }, { id: "c", title: "검증" }] }, 1000);
+  flat.plan({ steps: [{ id: "a", status: "done" }, { id: "b", status: "doing" }] }, 2000);
+  assert.equal(flat.scene.view.taskT, 1000, "평평한 계획의 다음 단계");
+  flat.plan({ steps: [{ id: "b1", title: "서버", parent: "b", status: "doing" }, { id: "b2", title: "화면", parent: "b" }] }, 3000);
+  assert.equal(flat.scene.view.taskT, 1000, "지금 단계를 하위 단계로 나눔");
+});
+
+test("새 작업(작업 = 위 단계): 견줄 대상은 마지막으로 진행으로 둔 단계의 작업. 지금 단계가 비었다가 같은 작업의 다음 단계, 지금 단계를 지우고 형제로, 닫기만 해 지금 단계가 옛 작업으로 돌아감은 새 작업이 아님", () => {
+  // 지금 단계가 비었다가(차례 끝에 닫음) 같은 작업의 다음 하위 단계를 시작
+  const a = harness();
+  a.plan({ steps: [{ id: "t1", title: "작업" }, { id: "t1a", title: "하나", parent: "t1", status: "doing" }, { id: "t1b", title: "둘", parent: "t1" }] }, 1000);
+  a.plan({ steps: [{ id: "t1a", status: "done" }] }, 2000);
+  a.plan({ steps: [{ id: "t1b", status: "doing" }] }, 3000);
+  assert.equal(a.scene.view.taskT, 1000, "지금 단계가 비었다가 같은 작업");
+  // 지금 단계를 지우고 같은 작업의 형제로
+  const b = harness();
+  b.plan({ steps: [{ id: "t1", title: "작업", status: "doing" }, { id: "t1a", title: "하나", parent: "t1", status: "doing" }, { id: "t1b", title: "둘", parent: "t1" }] }, 1000);
+  b.plan({ steps: [{ id: "t1a", del: true }, { id: "t1b", status: "doing" }] }, 2000);
+  assert.equal(b.scene.view.taskT, 1000, "지금 단계를 지우고 형제로");
+  // 앞 작업 t1 을 진행으로 남긴 채 t2 의 단계를 닫으면 지금 단계가 t1 로 돌아가지만 새 작업이 아니고, t2 의 다음 단계도 아니다
+  const c = harness();
+  c.plan({ steps: [{ id: "t1", title: "앞 작업", status: "doing" }, { id: "t1a", title: "하나", parent: "t1", status: "done" }, { id: "t2", title: "뒤 작업" }] }, 1000);
+  c.plan({ steps: [{ id: "p", title: "가", parent: "t2", status: "doing" }, { id: "q", title: "나", parent: "t2" }] }, 2000);
+  assert.equal(c.scene.view.taskT, 2000, "t2 시작은 새 작업");
+  c.plan({ steps: [{ id: "p", status: "done" }] }, 3000);
+  assert.equal(c.scene.view.taskT, 2000, "닫기만 함");
+  c.plan({ steps: [{ id: "q", status: "doing" }] }, 4000);
+  assert.equal(c.scene.view.taskT, 2000, "같은 작업의 다음 단계");
+});
+
+test("새 작업(작업 = 위 단계): 평평한 계획을 나중에 작업 아래로 묶거나, 마지막 작업 기록이 없는 앞 판 기록에서 같은 작업의 다음 단계는 새 작업이 아님", () => {
+  const a = harness();
+  a.plan({ steps: [{ id: "s1", title: "하나", status: "doing" }, { id: "s2", title: "둘" }, { id: "s3", title: "셋" }] }, 1000);
+  a.plan({ steps: [{ id: "T", title: "작업", status: "doing" }, { id: "s1", parent: "T", status: "done" }, { id: "s2", parent: "T", status: "doing" }, { id: "s3", parent: "T" }] }, 2000);
+  assert.equal(a.scene.view.taskT, 1000, "평평한 계획을 작업 아래로 묶음");
+  // 1.7.0 앞 판 기록: view.taskTop 없이 지금 단계가 작업 아래에 있다
+  const b = harness();
+  b.plan({ steps: [{ id: "T", title: "작업", status: "doing" }, { id: "a", title: "하나", parent: "T", status: "doing" }, { id: "b", title: "둘", parent: "T" }] }, 1000);
+  delete b.scene.view.taskTop;
+  b.plan({ steps: [{ id: "a", status: "done" }, { id: "b", status: "doing" }] }, 2000);
+  assert.equal(b.scene.view.taskT, 1000, "앞 판 기록의 같은 작업");
+});
+
+test("남은 단계(작업 = 위 단계): 위 단계를 할 일로 둔 채 하위 단계만 진행한 작업도 시작한 작업으로 보고 남은 하위 단계를 알린다", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "t1", title: "앞 작업" }, { id: "a1", title: "하나", parent: "t1", status: "doing" }, { id: "a2", title: "남은 일", parent: "t1" }, { id: "t2", title: "뒤 작업" }, { id: "t3", title: "그 뒤 작업" }] }, 1000);
+  h.plan({ steps: [{ id: "a1", status: "done" }] }, 2000);
+  const msg = h.plan({ steps: [{ id: "b1", title: "가", parent: "t2", status: "doing" }, { id: "b2", title: "나", parent: "t2" }] }, 3000);
+  assert.equal(h.scene.view.taskT, 3000);
+  assert.match(msg, /Steps still open from earlier work: a2 todo "남은 일"\. /);
+  assert.doesNotMatch(msg.split("Steps still open")[1], /\b(t1|t2|t3|b1|b2)\b/);
+});
+
 test("note: 막힘·승인 대기는 단계 상태를 바꾸고, 지금 단계는 그대로 남는다", () => {
   const h = harness();
   h.plan({ steps: [{ id: "s", title: "고치기", status: "doing" }] });

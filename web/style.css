@@ -306,7 +306,18 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .tree .step.cur { background: var(--panel-2); outline: 1px solid var(--s-doing); }
 .tree .head { display: flex; gap: 6px; }
 .tree .title { font-weight: 600; }
-.tree .stats, .tree .snote { color: var(--muted); font-size: 13px; line-height: 18px; padding-left: 20px; }
+.tree .stats, .tree .snote { color: var(--muted); font-size: 13px; line-height: 18px; padding-left: 38px; } /* 제목 줄과 맞춤: ▸ 자리 14 − 2 + 간격 6 + 아이콘 14 + 간격 6 */
+/* 작업 칸(40): 펴기·접기 단추는 줄 앞(오른쪽 위는 보내기 말풍선 자리), 끝난 줄은 굵지 않게, 지금 작업은 카드(띠 색 = 지금 단계의 상태) */
+.tree .head > .tog { flex: none; width: 14px; margin-right: -2px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--muted); font: inherit; font-size: 11px; line-height: 20px; text-align: center; }
+.tree .head > button.tog { cursor: pointer; }
+.tree .head > button.tog:hover { color: var(--fg); background: var(--panel-2); }
+.tree .head:has(> button.tog) { cursor: pointer; }
+.tree .step.settled > .head .title, .tree .step.fold > .head .title, .tree .step.ro > .head .title { font-weight: 400; }
+.tree .step.prev > .head .title, .tree .step.fold > .head .title { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tree .step.card { border: 1px solid var(--line); border-left: 4px solid var(--card, var(--s-doing)); border-radius: 8px; padding: 3px 6px 5px; margin: 4px 0 6px; }
+.tree .step.card.cur { background: none; outline: none; }
+#plan-body .tree .tree { border-left: 1px solid var(--line); margin-left: 6px; padding-left: 10px; } /* 펼친 아래는 세로줄로 묶어 어느 줄의 것인지 보이게 */
+.tree .step.card.target { outline: 2px dashed var(--accent); outline-offset: 2px; } /* 카드인 지금 단계도 보내기 대상 점선이 보이게 */
 .tag { font-size: 12px; line-height: 16px; padding: 0 5px; border-radius: 4px; background: var(--panel-2); color: var(--muted); margin-left: 4px; }
 
 #tl-filters { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }

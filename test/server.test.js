@@ -207,6 +207,19 @@ test("SessionStart 전에 시작한 세션도 다른 훅 사건의 cwd 로 작�
   assert.equal((await f.read("/api/sessions/Q/snapshot")).json.scene.meta.cwd, "/w");
 });
 
+test("단계만 읽기: 작업 칸이 앞 대화를 펼칠 때 그 대화의 단계만 준다(읽기 토큰 필요, 없는 세션 404)", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  await f.mcp("plan", { steps: [{ id: "t1", title: "작업", status: "doing" }, { id: "t1a", title: "일", parent: "t1", status: "done", note: "메모" }] }, { env: "ST" });
+  await f.mcp("draw", { ops: [{ id: "b", kind: "box", label: "상자" }] }, { env: "ST" });
+  const r = await f.read("/api/sessions/ST/steps");
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.json.map((s) => [s.id, s.title, s.status, s.parent || null, s.note || null]), [["t1", "작업", "doing", null, null], ["t1a", "일", "done", "t1", "메모"]]);
+  assert.ok(r.json.every((s) => typeof s.ord === "number" && !("timeline" in s)));
+  assert.equal((await f.read("/api/sessions/NONE/steps")).status, 404);
+  assert.equal((await f.request("GET", "/api/sessions/ST/steps")).status, 401);
+});
+
 test("압축 직후 SessionStart 에 이미 있는 이름표를 돌려준다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
