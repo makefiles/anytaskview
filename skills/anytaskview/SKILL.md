@@ -19,9 +19,9 @@ Board calls ride along with your work: put them first in the same message as you
 - **ids**: only when you lost track of ids, for example after compaction.
 - **project**: work spanning several conversations. A `[anytaskview 프로젝트]` line at session start lists candidates; join one with `{action:"join", id}` when the user's work matches. Create one (`{action:"create", name, purpose}`) only when the user starts work meant to span conversations. The user's own choice (drag on the board, their resume phrase) wins; a refusal is not an error to retry.
 
-## Project board (big picture)
+## Projects
 
-While the conversation belongs to a project, add `project:"<id>"` to plan/draw/note only at milestones: a work unit starts or ends, or a user decision is made or awaited. Units are plan steps (`u01` "01 첫 화판" done, `u08` "08 …" doing, and the next planned units as todo so the user sees what comes), open decisions are `note` kind `wait` on the unit. Keep one drawing there that shows the whole road: one box per unit in order with an edge to the next (done, the current one doing, planned ones todo; box ids must differ from step ids, e.g. box `b01` for step `u01`), extended when a unit starts, ends or is added; group finished phases if the road gets long, and the board folds them. Never `clear` it (other conversations share it); remove parts with `del`. Session detail stays on the session board (no `project`).
+The board shows a project's conversations side by side (status, current step, the latest open `wait` or `blocked` note) from each conversation's own plan and notes, so keep your plan current and say in a `wait` or `blocked` note what you are waiting for. There is no separate project board and no `project` argument on plan, draw or note.
 
 ## Choosing the form
 

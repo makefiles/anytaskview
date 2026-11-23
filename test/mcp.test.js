@@ -31,6 +31,9 @@ test("도구 5개, 안내문은 4,096자 안, 부르면 한 줄 결과", async (
   assert.deepEqual(tools.map((x) => x.name), ["plan", "draw", "note", "ids", "project"]);
   const instructions = client.getInstructions();
   assert.ok(instructions.length <= 4096, `안내문 ${instructions.length}자`);
+  // 큰 그림 화판은 없어졌다(1.6.0): 그리기 도구에 project 인자가 없고 안내문도 그것을 시키지 않는다
+  for (const x of tools.filter((x) => x.name !== "project")) assert.ok(!Object.hasOwn(x.inputSchema.properties || {}, "project"), x.name);
+  assert.ok(!instructions.includes('project:"'), "안내문이 project 인자를 시킴");
   const toolChars = JSON.stringify(tools).length;
   t.diagnostic(`도구 정의 ${toolChars}자, 안내문 ${instructions.length}자`);
 

@@ -546,45 +546,51 @@ async function main() {
     await key("Escape", "Escape", 27);
     await waitFor(`document.getElementById('group-menu').hidden && document.activeElement?.classList.contains('smenu')`);
   });
-  await check("프로젝트: 맨 위 「프로젝트 없음」 으로 넣을 곳을 고르고, 「프로젝트 …」 를 누르면 큰 그림(맨 위 「프로젝트」, 오른쪽 아래 「대화 이력」, 보내기·말풍선 꺼짐)이 열리며, 대화 이력에서 대화를 누르면 돌아옴", async () => {
+  await check("프로젝트: 맨 위 「프로젝트 없음」 으로 넣을 곳을 고르고, 목록 줄에 「지금: 단계」 와 결정 대기 줄(눌러서 펼침)이 붙으며, 맨 위 「프로젝트 …」 는 목록의 그 묶음으로, 이름은 묶음을 펴고 접고, project 를 붙인 호출은 건너뜀", async () => {
     await waitFor(`document.getElementById('proj-link').textContent === '프로젝트 없음'`);
     await evaluate(`document.getElementById('proj-link').click()`);
     await waitFor(`!document.getElementById('group-menu').hidden && [...document.querySelectorAll('#group-menu .gm-item')].some((b) => b.textContent === '시험 프로젝트')`);
     await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((b) => b.textContent === '시험 프로젝트').click()`);
-    await waitFor(`document.getElementById('proj-link').textContent.startsWith('프로젝트 시험 프로젝트') && document.activeElement?.id === 'proj-link'`);
+    await waitFor(`document.getElementById('proj-link').textContent === '프로젝트 시험 프로젝트' && document.activeElement?.id === 'proj-link'`);
     const pid = await evaluate(`document.getElementById('proj-link').dataset.pid`);
-    await mcp("plan", { steps: [{ id: "u1", title: "08 프로젝트 화판", status: "doing" }], project: pid });
-    await mcp("draw", { ops: [{ id: "big", kind: "box", label: "큰 그림 상자", status: "doing" }], project: pid });
-    await waitFor(`document.getElementById('proj-link').textContent.includes('지금 08 프로젝트 화판')`);
-    await evaluate(`document.getElementById('proj-link').click()`);
-    await waitFor(`window.__atv.sid === ${JSON.stringify(pid)} && document.getElementById('sess-chip').textContent === '프로젝트' && document.getElementById('tl-title').textContent === '대화 이력'
-      && document.querySelector('#canvas .part[data-id="big"]') !== null && document.getElementById('compose').disabled && document.getElementById('proj-link').hidden
-      && document.querySelector('#sessions .gfold.sel')?.textContent.startsWith('시험 프로젝트') && document.getElementById('headline').textContent.startsWith('지금 08 프로젝트 화판')`);
-    await evaluate(`document.querySelector('#canvas .part[data-id="big"]').focus()`);
-    await sleep(200);
-    expect(await evaluate(`document.getElementById('ask').hidden`), "프로젝트 화판에 말풍선이 뜸(받을 Claude 가 없다)");
-    expect(await evaluate(`!document.querySelector('#canvas .part[aria-keyshortcuts], #plan-body li[aria-keyshortcuts]')`), "프로젝트 화판의 상자·단계가 Enter 보내기를 알림");
-    // 다른 세션의 사건으로 대화 이력을 다시 그려도 그 단추의 초점이 남는다
-    await waitFor(`document.querySelector('#tl-body .hist') !== null`);
-    await evaluate(`document.querySelector('#tl-body .hist').focus()`);
-    await hook({ f: "prompt", text: "대화 이력을 다시 그리게 하는 입력" });
+    const row = `document.querySelector('#sessions .sess.sel').parentElement`;
+    await mcp("plan", { steps: [{ id: "ov1", title: "목록 줄 시험", status: "doing" }] });
+    await mcp("note", { kind: "wait", text: "목록 줄 모양을 승인할지 여부를 여기에 아주 길게 적어서 한 줄을 넘기게 만든 결정 대기 글", on: "ov1" });
+    await waitFor(`${row}.querySelector('.rnow')?.textContent === '지금: 목록 줄 시험' && ${row}.querySelector('.holdline.wait')?.textContent.includes('목록 줄 모양을 승인할지')`);
+    // 결정 대기 줄: 한 줄로 접혀 있다가 누르면 펼치고, 목록을 다시 그려도 펼침과 초점이 남는다
+    expect(await evaluate(`${row}.querySelector('.holdline').getAttribute('aria-expanded') === 'false' && getComputedStyle(${row}.querySelector('.holdline')).whiteSpace === 'nowrap'`), "결정 대기 줄이 접혀 있지 않음");
+    await evaluate(`${row}.querySelector('.holdline').click()`);
+    await waitFor(`${row}.querySelector('.holdline')?.getAttribute('aria-expanded') === 'true' && getComputedStyle(${row}.querySelector('.holdline')).whiteSpace === 'normal'`);
+    await evaluate(`${row}.querySelector('.holdline').focus()`);
+    await hook({ f: "notify", ntype: "permission_prompt", text: "목록을 다시 그리게 하는 알림" });
     await sleep(300);
-    expect(await evaluate(`document.activeElement?.classList.contains('hist')`), "대화 이력 단추에서 초점을 잃음");
+    expect(await evaluate(`document.activeElement?.classList.contains('holdline') && document.activeElement.getAttribute('aria-expanded') === 'true'`), "다시 그린 뒤 결정 대기 줄의 초점·펼침을 잃음");
+    // 앞 판의 안내를 받은 대화가 project 를 붙여 보내도 이 대화의 계획에 섞이지 않는다
+    await mcp("plan", { steps: [{ id: "unit9", title: "옛 큰 그림 단위", status: "doing" }], project: pid });
+    await sleep(200);
+    expect(await evaluate(`!document.querySelector('#plan-body li[data-id="unit9"]')`), "project 를 붙인 계획이 이 대화의 계획에 들어감");
+    // 사용자 입력으로 대기가 풀리면 결정 대기 줄이 빠진다
+    await hook({ f: "prompt", text: "승인" });
+    await waitFor(`!${row}.querySelector('.holdline')`);
+    // 프로젝트 이름은 보는 대화는 그대로 두고 묶음을 접고 편다. 맨 위 단추는 목록의 그 묶음 머리로 간다
+    const gname = `[...document.querySelectorAll('#sessions .gfold')].find((b) => b.dataset.pid === ${JSON.stringify(pid)})`;
+    await evaluate(`${gname}.click()`);
+    await waitFor(`window.__atv.sid === ${JSON.stringify(sid)} && ${gname}.getAttribute('aria-expanded') === 'false' && !document.querySelector('#sessions .sess.sel')`);
+    await evaluate(`document.getElementById('proj-link').click()`);
+    await waitFor(`${gname}.getAttribute('aria-expanded') === 'true' && document.activeElement === ${gname} && document.querySelector('#sessions .sess.sel') !== null`);
+    await mcp("plan", { steps: [{ id: "ov1", del: true }] });
     // ⋯ 「끝으로 표시」 뒤 초점은 접힌 「끝난 프로젝트」 머리로 간다. 다시 진행으로 돌려 둔다
     await evaluate(`document.querySelector('#sessions .pmenu[data-pid="${pid}"]').click()`);
     await waitFor(`!document.getElementById('group-menu').hidden`);
     await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((b) => b.textContent === '끝으로 표시').click()`);
-    await waitFor(`document.activeElement?.classList.contains('dhead') && document.getElementById('sess-chip').textContent === '끝난 프로젝트'`);
+    await waitFor(`document.activeElement?.classList.contains('dhead')`);
     await evaluate(`document.querySelector('#sessions .dhead').click()`);
     await waitFor(`document.querySelector('#sessions .pmenu[data-pid="${pid}"]') !== null`);
     await evaluate(`document.querySelector('#sessions .pmenu[data-pid="${pid}"]').click()`);
     await waitFor(`!document.getElementById('group-menu').hidden`);
     await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((b) => b.textContent === '다시 진행으로 두기').click()`);
-    await waitFor(`document.getElementById('sess-chip').textContent === '프로젝트' && document.getElementById('group-menu').hidden && document.querySelector('#sessions .dhead') === null`);
+    await waitFor(`document.getElementById('group-menu').hidden && document.querySelector('#sessions .dhead') === null`);
     await evaluate(`localStorage.removeItem('atv.doneOpen')`);
-    await waitFor(`[...document.querySelectorAll('#tl-body .hist')].some((b) => b.textContent.includes('화판 이름 시험'))`);
-    await evaluate(`[...document.querySelectorAll('#tl-body .hist')].find((b) => b.textContent.includes('화판 이름 시험')).click()`);
-    await waitFor(`window.__atv.sid === ${JSON.stringify(sid)} && document.getElementById('tl-title').textContent === '타임라인' && !document.getElementById('compose').disabled && document.querySelectorAll('#canvas .part').length > 0`);
     // 다음 검사들이 처음 목록 모양을 쓰므로 다시 뺀다
     await evaluate(`document.querySelector('#sessions .sess.sel').parentElement.querySelector('.smenu').click()`);
     await waitFor(`!document.getElementById('group-menu').hidden`);

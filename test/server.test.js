@@ -320,7 +320,7 @@ const boardHeaders = (f, extra = {}) => {
 };
 const board = (f, body, extra) => f.request("POST", "/api/board", { headers: boardHeaders(f, extra), body });
 
-test("도형 옮기기: 화판 쓰기 열쇠로 move 를 기록하고(세션·큰 그림), 다시 띄워도 남는다", async (t) => {
+test("도형 옮기기: 화판 쓰기 열쇠로 move 를 기록하고, 다시 띄워도 남는다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
   await f.hook("M", { f: "start", cwd: "/w" });
@@ -334,13 +334,9 @@ test("도형 옮기기: 화판 쓰기 열쇠로 move 를 기록하고(세션·�
   await f.restart();
   assert.deepEqual(f.board.sessions.get("M").scene.items.a.pos, { x: 10, y: 20 });
   assert.equal(JSON.parse((await board(f, { op: "move", sid: "M", all: true })).text).msg, "자동 배치로 1개");
-  // 큰 그림
-  await f.hook("M", { f: "start", cwd: "/w", source: "resume" }, { pid: (1 << 22) + 3 });
+  // 프로젝트 id 는 화판이 아니다(큰 그림 화판은 1.6.0 에서 없어졌다)
   const P = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
-  await board(f, { op: "proj-set", sids: ["M"], pid: P });
-  await f.mcp("draw", { ops: [{ id: "u", kind: "box", label: "단위" }], project: P }, { env: "M" });
-  assert.equal(JSON.parse((await board(f, { op: "move", sid: P, id: "u", x: 3, y: 4 })).text).ok, true);
-  assert.deepEqual(f.board.pboards.get(P).scene.items.u.pos, { x: 3, y: 4 });
+  assert.equal(JSON.parse((await board(f, { op: "move", sid: P, id: "u", x: 3, y: 4 })).text).ok, false);
 });
 
 test("찾기 API: 읽기 토큰이 필요하고, 세션마다 맞은 수와 앞의 몇 건(부품 먼저, 그다음 최근 줄)을 최근 세션부터", async (t) => {
@@ -362,18 +358,11 @@ test("찾기 API: 읽기 토큰이 필요하고, 세션마다 맞은 수와 앞�
   assert.equal(a.hits.length, 3);
   assert.deepEqual((await f.read(`/api/search?q=${encodeURIComponent("npm login 4")}`)).json.sessions.map((s) => [s.id, s.n]), [["A", 1]]); // 낱말을 모두 담은 줄만
   assert.deepEqual((await f.read("/api/search?q=%20")).json, { sessions: [], more: 0 });
-  // 목록 항목·선은 화면에 보이는 부품(목록·시작 부품)으로, 큰 그림의 메모는 붙은 단위로 간다
+  // 목록 항목·선은 화면에 보이는 부품(목록·시작 부품)으로 간다
   const asA = { env: "A", pid: 999_991 }; // B 가 기본 프로세스 번호로 시작해 짝지어졌으므로 A 로 보낸다
   await f.mcp("draw", { ops: [{ id: "l", kind: "list", label: "목록" }, { id: "li", kind: "item", in: "l", label: "고래항목" }, { id: "e", kind: "edge", from: "lg", to: "l", label: "고래선" }] }, asA);
   assert.deepEqual((await f.read(`/api/search?q=${encodeURIComponent("고래항목")}`)).json.sessions[0].hits[0], { id: "l", type: "part", text: "고래항목" });
   assert.deepEqual((await f.read(`/api/search?q=${encodeURIComponent("고래선")}`)).json.sessions[0].hits[0], { id: "lg", type: "part", text: "고래선" });
-  const P = JSON.parse((await board(f, { op: "proj-new", name: "큰일" })).text).pid;
-  await board(f, { op: "proj-set", sids: ["A"], pid: P });
-  await f.mcp("plan", { steps: [{ id: "u1", title: "단위", status: "doing" }], project: P }, asA);
-  await f.mcp("note", { text: "고래결정 기다림", kind: "wait", on: "u1", project: P }, asA);
-  const pj = (await f.read(`/api/search?q=${encodeURIComponent("고래결정")}`)).json.sessions.find((s) => s.project);
-  assert.equal(pj.id, P);
-  assert.deepEqual([pj.hits[0].id, pj.hits[0].type, pj.hits[0].note, pj.hits[0].kind], ["u1", "step", true, "wait"]);
 });
 
 test("브라우저 쓰기 보안: 같은 화판 페이지(Origin·머리글·쿠키)에서 온 것만, 큰 본문은 거절", async (t) => {
@@ -680,7 +669,7 @@ test("포트 주인: 이 사용자의 화판은 self, 아무도 안 들으면 no
 const tick = () => new Promise((ok) => setTimeout(ok, 5)); // 시작 시각·마지막 시각이 같은 ms 에 겹치지 않게
 const sessMap = async (f) => Object.fromEntries((await f.read("/api/sessions")).json.map((s) => [s.id, s]));
 
-test("이어진 대화: /clear 는 같은 claude 의 직전 세션, 이어받기 문구는 그 키를 가진 가장 최근 세션을 앞 대화로 남기고, 그 키의 프로젝트에 넣는다(처음 보는 키는 새 프로젝트)", async (t) => {
+test("이어진 대화: /clear 는 같은 claude 의 직전 세션, 이어받기 문구는 그 키를 가진 가장 최근 세션을 앞 대화로 남기고, 그 키의 프로젝트에 넣는다(처음 보는 키로는 프로젝트를 만들지 않음)", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
   const pid = process.pid, other = (n) => (1 << 22) + n;
@@ -716,9 +705,10 @@ test("이어진 대화: /clear 는 같은 claude 의 직전 세션, 이어받기
   s = await sessMap(f);
   assert.deepEqual([s.C1.prev, s.D1.prev, s.E1.prev], ["B1", null, null]);
   assert.equal(f.board.projects.members.D1, undefined, "첫 입력이 아니면 넣지 않는다");
-  const fresh = f.board.projects.members.E1;
-  assert.equal(fresh.why, "phrase");
-  assert.deepEqual([f.board.projects.projects[fresh.pid].name, f.board.projects.projects[fresh.pid].keys], ["없는키", ["없는키"]], "처음 보는 키는 그 이름으로 새 프로젝트");
+  assert.equal(f.board.projects.members.E1, undefined, "처음 보는 키로는 프로젝트를 만들지 않는다(사용자 결정 2026-11-23)");
+  assert.equal(Object.keys(f.board.projects.projects).length, 1);
+  assert.equal((await sessMap(f)).E1.key, "없는키", "받은 키는 세션 요약에 남는다(개요 칸의 이어받기 표시)");
+  assert.equal((await sessMap(f)).A1.key, "", "인계 문서를 쓰기만 한 대화는 이어받은 키가 없다");
   await f.restart();
   s = await sessMap(f);
   assert.equal(s.C1.prev, "B1", "다시 띄워도 기록에서 되살아난다");
@@ -960,7 +950,7 @@ test("project 도구: list·join·create·leave, 손·이어받기 문구가 정
   assert.match(r, /어느 프로젝트에도 속하지 않습니다/);
   assert.ok(r.includes(`${A} 「가」`), r);
   r = await call("project", { action: "join", id: A });
-  assert.ok(r.includes(`「가」(${A}, Claude 가 고름)`) && r.includes(`project:"${A}"`), r);
+  assert.ok(r.includes(`「가」(${A}, Claude 가 고름)`) && !r.includes("project:"), r);
   r = await call("project", { action: "create", name: "나", purpose: "두 번째 일" });
   const B = f.board.projects.members.S1.pid;
   assert.notEqual(B, A);
@@ -981,52 +971,40 @@ test("project 도구: list·join·create·leave, 손·이어받기 문구가 정
   // 사용자가 뺀 대화(「프로젝트 없음」)에는 Claude 가 넣지 못한다
   await board(f, { op: "proj-set", sids: ["S1"], pid: null });
   assert.match(await call("project", { action: "join", id: A }), /^거부/);
-  // 이어받기 문구로 들어간 대화도 Claude 가 바꾸지 못한다
-  await board(f, { op: "config-set", resume: { phrase: "핸드온 <키>" } });
+  // 이어받기 문구로 들어간 대화도 Claude 가 바꾸지 못한다. 키는 그 키의 인계 문서를 고친 대화가 든 프로젝트에 붙어 있다
+  await board(f, { op: "config-set", resume: { phrase: "핸드온 <키>", doc: "/handoff/<키>.md" } });
+  await f.hook("S0", { f: "start", cwd: "/w" }, { pid: (1 << 22) });
+  await board(f, { op: "proj-set", sids: ["S0"], pid: B });
+  await f.hook("S0", { f: "edit", tool: "Write", path: "/m/handoff/kk.md" }, { pid: (1 << 22) });
   await f.hook("S2", { f: "start", cwd: "/w" }, { pid: P2 });
   await f.hook("S2", { f: "prompt", text: "핸드온 kk" }, { pid: P2 });
-  assert.equal(f.board.projects.members.S2.why, "phrase");
+  assert.deepEqual(f.board.projects.members.S2, { pid: B, why: "phrase" });
   assert.match(await call("project", { action: "join", id: A }, P2, "S2"), /^거부/);
   r = await call("note", { text: "메모" }, P2, "S2");
-  assert.ok(r.includes("「kk」") && r.includes("이어받기 문구"), "문구로 들어간 것도 다음 도구 결과에 알린다");
+  assert.ok(r.includes("「나」") && r.includes("이어받기 문구"), "문구로 들어간 것도 다음 도구 결과에 알린다");
 });
 
-test("프로젝트 화판: project 인자는 지금 소속과 같아야 하고 clear 는 받지 않으며, 부품마다 쓴 대화를 남기고, 스냅샷·재생·다시 띄우기·풀기(휴지통)가 프로젝트 id 로도 된다", async (t) => {
+test("project 인자: 앞 판 안내대로 project 를 붙인 plan·draw·note·ids 는 건너뛰고 이 대화의 화판에도 쓰지 않으며, 프로젝트 id 는 화판이 아니고, 남아 있던 큰 그림 기록은 읽지 않다가 프로젝트를 지우면 휴지통으로", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
   const P1 = (1 << 22) + 1;
   await f.hook("S1", { f: "start", cwd: "/w" }, { pid: P1 });
   const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
-  const call = async (tool, input) => (await f.mcp(tool, input, { pid: P1, env: "S1" })).text;
-  assert.match(await call("plan", { steps: [{ id: "u1", title: "단위 1" }], project: A }), /^거부: 이 대화는 프로젝트 .* 소속이 아님\(지금: 없음\)/);
   await board(f, { op: "proj-set", sids: ["S1"], pid: A });
-  assert.ok((await call("plan", { steps: [{ id: "u1", title: "단위 1", status: "doing" }, { id: "u2", title: "단위 2" }], project: A })).startsWith("계획 2단계 · 지금 u1"));
-  assert.equal(await call("draw", { ops: [{ id: "b", kind: "box", label: "큰 상자" }], project: A }), "적용 1");
-  assert.match(await call("draw", { clear: true, project: A }), /^거부: 프로젝트 화판은/);
-  assert.equal(await call("note", { text: "결정 대기", kind: "wait", on: "u2", project: A }), "기록 · u2 승인 대기");
-  assert.match(await call("ids", { project: A }), /^plan: u1 "단위 1" doing, u2 "단위 2" wait \| draw: b "큰 상자" box$/);
-  // 세션을 시작할 때 실리는 프로젝트 안내: 끝난 단위는 최근 셋만 제목을 싣고 나머지는 id 만(ids 도구는 그대로 다 싣는다)
-  await call("plan", { steps: [3, 4, 5, 6, 7].map((n) => ({ id: `u${n}`, title: `단위 ${n}`, status: "done" })), project: A });
-  const note = JSON.parse((await f.hook("S1", { f: "start", source: "resume" }, { pid: P1 })).text).out;
-  assert.match(note, /plan: 끝남 2: u3 u4, u1 "단위 1" doing, u2 "단위 2" wait, u5 "단위 5" done, u6 "단위 6" done, u7 "단위 7" done \| draw: b "큰 상자" box/);
-  assert.match(await call("ids", { project: A }), /u3 "단위 3" done/);
-  const pb = f.board.pboards.get(A).scene;
-  assert.deepEqual([pb.items.u1.by, pb.items.b.by, pb.timeline.at(-1).by], ["S1", "S1", "S1"]);
-  assert.equal(f.board.sessions.get("S1").scene.items.u1, undefined, "세션 화판에는 쓰지 않는다");
-  const snap = (await f.read(`/api/sessions/${A}/snapshot`)).json;
-  assert.equal(snap.scene.items.b.label, "큰 상자");
-  assert.ok((await f.read(`/api/sessions/${A}/log`)).json.length >= 4);
+  const call = async (tool, input) => (await f.mcp(tool, input, { pid: P1, env: "S1" })).text;
+  await call("plan", { steps: [{ id: "s1", title: "일" }] }); // 소속 알림을 먼저 받아 둔다
+  for (const [tool, input] of [["plan", { steps: [{ id: "u1", title: "단위 1", status: "doing" }] }], ["draw", { ops: [{ id: "b", kind: "box", label: "큰 상자" }] }], ["note", { text: "결정 대기", kind: "wait" }], ["ids", {}]]) {
+    assert.match(await call(tool, { ...input, project: A }), /^건너뜀: 프로젝트 큰 그림 화판은 없어졌습니다/, tool);
+  }
+  const sc = f.board.sessions.get("S1").scene;
+  assert.deepEqual([sc.items.u1, sc.items.b], [undefined, undefined], "이 대화의 화판에도 쓰지 않는다");
+  assert.equal(sc.timeline.filter((e) => e.type === "note").length, 0);
+  assert.equal((await f.read(`/api/sessions/${A}/snapshot`)).status, 404);
+  fs.writeFileSync(path.join(f.home, "projects", `${A}.jsonl`), "{}\n");
   await f.restart();
-  assert.equal(f.board.pboards.get(A).scene.items.u2.status, "wait", "다시 띄워도 기록에서 되살아난다");
-  // 큰 그림에는 서버가 끝난 단위에 승인 대기를 붙이지 않는다(다른 대화가 끝낸 단위일 수 있다)
-  await call("plan", { steps: [{ id: "u1", status: "done" }, { id: "u2", status: "done" }], project: A });
-  assert.equal(await call("note", { text: "다음 단위 결정", kind: "wait", project: A }), "기록 (지금 단계 없음)");
-  assert.equal(f.board.pboards.get(A).scene.items.u2.status, "done");
   assert.equal((await board(f, { op: "proj-drop", pid: A })).status, 200);
   assert.ok(!fs.existsSync(path.join(f.home, "projects", `${A}.jsonl`)));
-  assert.match(fs.readdirSync(path.join(f.home, "trash")).join(" "), new RegExp(`^${A}\\.\\d+\\.jsonl$`));
-  assert.equal((await f.read(`/api/sessions/${A}/snapshot`)).status, 404);
-  assert.match(await call("plan", { steps: [{ id: "u3", title: "단위 3" }], project: A }), /^거부/);
+  assert.match(fs.readdirSync(path.join(f.home, "trash")).join(" "), new RegExp(`${A}\\.\\d+\\.jsonl`));
 });
 
 test("SessionStart 답: 소속이 있으면 프로젝트 상태, 없으면 후보(같은 저장소·브랜치에서 쓰인 것 먼저, 작업 트리는 원래 저장소로), 사용자가 뺀 대화에는 후보를 싣지 않는다", async (t) => {
@@ -1079,10 +1057,10 @@ test("이어받기 키: 키가 있는 대화를 손으로 다른 프로젝트에
   await board(f, { op: "config-set", resume: { phrase: "핸드온 <키>" } });
   await f.hook("K1", { f: "start", cwd: "/w" }, { pid: (1 << 22) + 1 });
   await f.hook("K1", { f: "prompt", text: "핸드온 phase1" }, { pid: (1 << 22) + 1 });
-  const auto = f.board.projects.members.K1.pid;
+  assert.equal(f.board.projects.members.K1, undefined, "그 키를 가진 프로젝트가 없으면 넣지 않는다");
   const V = JSON.parse((await board(f, { op: "proj-new", name: "제품 V" })).text).pid;
   await board(f, { op: "proj-set", sids: ["K1"], pid: V });
-  assert.deepEqual([f.board.projects.projects[V].keys, f.board.projects.projects[auto].keys], [["phase1"], []]);
+  assert.deepEqual(f.board.projects.projects[V].keys, ["phase1"]);
   await f.hook("K2", { f: "start", cwd: "/w" }, { pid: (1 << 22) + 2 });
   await f.hook("K2", { f: "prompt", text: "핸드온 phase1 이어서" }, { pid: (1 << 22) + 2 });
   assert.deepEqual(f.board.projects.members.K2, { pid: V, why: "phrase" });
@@ -1109,86 +1087,31 @@ function sse(f, route, t) {
   };
 }
 
-test("아직 한 번도 쓰지 않은 프로젝트를 보는 화면도 그 뒤 큰 그림 변경을 받는다(빈 스냅샷 뒤 1번부터)", async (t) => {
+test("세션 요약: 지금 단계(cur)·결정 대기·막힘(hold)·자동 요약 제목(ai)을 싣고, 계획·메모만 바뀌어도 그 값이 바뀌면 다시 보낸다(그림만 바뀌면 보내지 않음)", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
-  const P = (1 << 22) + 1;
-  await f.hook("S1", { f: "start", cwd: "/w" }, { pid: P });
-  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
-  await board(f, { op: "proj-set", sids: ["S1"], pid: A });
-  const s = sse(f, `/events?session=${A}`, t);
+  const P = (1 << 22) + 1, as = { pid: P, env: "S1" };
+  await f.hook("S1", { f: "start", cwd: "/w", ai: "자동 제목" }, { pid: P });
+  const s = sse(f, "/events", t);
   await s.until((ev) => ev.some((e) => e.ev === "list"));
-  await f.mcp("plan", { steps: [{ id: "u1", title: "단위", status: "doing" }], project: A }, { pid: P, env: "S1" });
-  const ev = await s.until((x) => x.filter((e) => e.ev === "res").length >= 2);
-  assert.deepEqual(ev.filter((e) => e.ev === "res").map((e) => e.data.seq), [1, 2]);
-  // 화면은 스냅샷을 받은 뒤의 변경만 쓰므로 화판이 없어도 빈 장면을 먼저 받는다
-  const snaps = ev.filter((e) => e.ev === "snap");
-  assert.deepEqual(snaps.map((e) => [e.data.id, e.data.seq, Object.keys(e.data.scene.items).length]), [[A, 0, 0]]);
-  assert.ok(ev.indexOf(snaps[0]) < ev.findIndex((e) => e.ev === "res"));
-});
-
-test("큰 그림 덮어쓰기: 이 대화가 마지막으로 본 뒤 다른 대화가 바꾼 부품·단계를 고치거나 지우면 쓰고 알린다(본 것·자기 것·다시 띄우기 전 것은 알리지 않음)", async (t) => {
-  const f = await boardFixture();
-  t.after(() => f.close());
-  const P1 = (1 << 22) + 1, P2 = (1 << 22) + 2;
-  await f.hook("S1", { f: "start", cwd: "/w" }, { pid: P1 });
-  await f.hook("S2", { f: "start", cwd: "/w" }, { pid: P2 });
-  await f.hook("S1", { f: "prompt", text: "가" }, { pid: P1 });
-  await f.hook("S2", { f: "prompt", text: "나" }, { pid: P2 });
-  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
-  await board(f, { op: "proj-set", sids: ["S1", "S2"], pid: A });
-  const as1 = (tool, input) => f.mcp(tool, { ...input, project: A }, { pid: P1, env: "S1" }).then((r) => r.text);
-  const as2 = (tool, input) => f.mcp(tool, { ...input, project: A }, { pid: P2, env: "S2" }).then((r) => r.text);
-  await f.mcp("project", {}, { pid: P1, env: "S1" });
-  await f.mcp("project", {}, { pid: P2, env: "S2" });
-  assert.doesNotMatch(await as1("plan", { steps: [{ id: "u1", title: "단위 1", status: "doing" }] }), /덮었습니다/);
-  assert.doesNotMatch(await as1("draw", { ops: [{ id: "b1", kind: "box", label: "상자" }] }), /덮었습니다/);
-  // S2 는 S1 이 쓰기 전에 봤다: 모르고 되돌리면 알린다
-  const back = await as2("plan", { steps: [{ id: "u1", status: "todo" }] });
-  assert.match(back, /^계획/);
-  assert.match(back, /덮었습니다\(쓰기는 됨\): u1 상태 doing→todo\(「가」 대화가 바꾼 것\)/);
-  assert.equal(f.board.pboards.get(A).scene.items.u1.status, "todo", "쓰기는 한다");
-  assert.doesNotMatch(await as2("plan", { steps: [{ id: "u1", status: "doing" }] }), /덮었습니다/, "자기가 마지막으로 쓴 것");
-  // S1 도 S2 의 변경을 보지 못했다. 지우기도 알린다
-  assert.match(await as2("draw", { ops: [{ id: "b1", label: "S2 가 고친 상자" }] }), /b1 이름 상자→S2 가 고친 상자/);
-  assert.match(await as1("draw", { ops: [{ id: "b1", del: true }] }), /b1 지움\(「나」 대화가 바꾼 것\)/);
-  // ids 로 보면 그 뒤로는 알리지 않는다
-  await as1("ids", {});
-  assert.doesNotMatch(await as1("plan", { steps: [{ id: "u1", status: "done" }] }), /덮었습니다/);
-  // project 도구의 안내(큰 그림 요약)를 받은 뒤의 쓰기도 알리지 않는다
-  await as1("plan", { steps: [{ id: "u1", title: "단위 1 고침" }] });
-  await f.mcp("project", {}, { pid: P2, env: "S2" });
-  assert.doesNotMatch(await as2("plan", { steps: [{ id: "u1", status: "doing" }] }), /덮었습니다/);
-  // 다시 띄우기 전의 변경은 따지지 않는다(본 번호는 메모리에만 있다)
-  await as2("plan", { steps: [{ id: "u1", note: "S2 메모" }] });
-  await f.restart();
-  assert.doesNotMatch(await as1("plan", { steps: [{ id: "u1", note: "S1 메모" }] }), /덮었습니다/);
-});
-
-test("큰 그림 덮어쓰기: 내용이 그대로인 쓰기는 앞서 쓴 대화를 남기고, 지우고 다른 종류로 다시 만든 것도 알린다", async (t) => {
-  const f = await boardFixture();
-  t.after(() => f.close());
-  const P1 = (1 << 22) + 1, P2 = (1 << 22) + 2;
-  await f.hook("S1", { f: "start", cwd: "/w" }, { pid: P1 });
-  await f.hook("S2", { f: "start", cwd: "/w" }, { pid: P2 });
-  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
-  await board(f, { op: "proj-set", sids: ["S1", "S2"], pid: A });
-  const as1 = (tool, input) => f.mcp(tool, { ...input, project: A }, { pid: P1, env: "S1" }).then((r) => r.text);
-  const as2 = (tool, input) => f.mcp(tool, { ...input, project: A }, { pid: P2, env: "S2" }).then((r) => r.text);
-  await as1("plan", { steps: [{ id: "u1", title: "옛 제목", status: "doing" }] });
-  await as1("draw", { ops: [{ id: "k1", kind: "box", label: "상자" }] });
-  await f.mcp("project", {}, { pid: P2, env: "S2" });
-  await as1("plan", { steps: [{ id: "u1", title: "새 제목" }] }); // S2 는 이것을 모른다
-  await as2("plan", { steps: [{ id: "u1", status: "doing" }] }); // 그대로인 쓰기
-  assert.equal(f.board.pboards.get(A).scene.items.u1.by, "S1", "그대로인 쓰기는 쓴 대화를 바꾸지 않는다");
-  assert.match(await as2("plan", { steps: [{ id: "u1", title: "옛 제목" }] }), /u1 제목 새 제목→옛 제목/);
-  await as1("draw", { ops: [{ id: "k1", label: "상자 고침" }] });
-  assert.match(await as2("draw", { ops: [{ id: "k1", del: true }, { id: "k1", kind: "group", label: "상자 고침" }] }), /k1 종류 box→group/);
-  // 안내의 요약이 잘렸으면(부품·단계 40개 넘게) 본 것으로 치지 않는다: 잘려 나간 부품을 고치면 알린다
-  await as1("draw", { ops: Array.from({ length: 45 }, (_, i) => ({ id: `p${i}`, kind: "box", label: `부품 ${i}` })) });
-  await as1("draw", { ops: [{ id: "p44", label: "끝 부품 고침" }] });
-  await f.mcp("project", {}, { pid: P2, env: "S2" });
-  assert.match(await as2("draw", { ops: [{ id: "p44", label: "S2 생각" }] }), /p44 이름 끝 부품 고침→S2 생각/);
+  const sent = () => s.events.filter((e) => e.ev === "sess" && e.data.id === "S1").map((e) => e.data);
+  await f.mcp("plan", { steps: [{ id: "a", title: "고치기", status: "doing" }, { id: "b", title: "검증" }] }, as);
+  await s.until(() => sent().some((x) => x.cur?.title === "고치기"));
+  const n = sent().length;
+  await f.mcp("draw", { ops: [{ id: "x", kind: "box", label: "상자" }] }, as);
+  await f.mcp("note", { text: "API 2와 3 중 무엇으로", kind: "wait" }, as);
+  await s.until(() => sent().some((x) => x.hold));
+  const last = sent().at(-1);
+  assert.equal(sent().length, n + 1, "그림만 바뀐 것은 보내지 않는다");
+  assert.deepEqual([last.ai, last.cur, last.hold], ["자동 제목", { title: "고치기", status: "wait" }, { kind: "wait", text: "API 2와 3 중 무엇으로" }]);
+  await f.hook("S1", { f: "prompt", text: "2로" }, { pid: P });
+  assert.equal((await sessMap(f)).S1.hold, null, "사용자 입력으로 답을 받으면 빠진다");
+  await f.mcp("note", { text: "빌드 서버 응답 기다림", kind: "blocked" }, as);
+  assert.deepEqual((await sessMap(f)).S1.hold, { kind: "blocked", text: "빌드 서버 응답 기다림" });
+  await f.hook("S1", { f: "stop", last: "끝", ai: "바뀐 제목" }, { pid: P });
+  assert.equal((await sessMap(f)).S1.ai, "바뀐 제목");
+  await f.hook("S1", { f: "end", reason: "other" }, { pid: P });
+  assert.equal((await sessMap(f)).S1.hold, null, "끝난 대화의 막힘은 싣지 않는다");
 });
 
 test("이어받기 키: 그 키를 가진 프로젝트가 없으면 앞 대화에서 물려받은 프로젝트에 키를 붙이고, 인계 문서를 고친 대화는 다른 프로젝트가 가진 키를 옮기지 않는다", async (t) => {
@@ -1238,31 +1161,32 @@ test("끝난 프로젝트는 /clear 로 물려받지 않고, 다시 띄운 뒤�
   assert.equal(f.board.projects.projects[P].done, true);
 });
 
-test("소속 확인은 쓸 차례에 다시 본다(기다리는 사이 옮기면 옛 프로젝트에 쓰지 않음), 사용자가 뺀 줄은 /clear 로 이어도 빠진 채, 이어받기 문구는 뺀 앞 대화에 이어도 들어감, 안내에 결정 대기 글을 싣는다", async (t) => {
+test("안내에 같은 프로젝트의 다른 대화가 지금 하는 일(지금 단계·결정 대기 글)을 싣고, 사용자가 뺀 줄은 /clear 로 이어도 빠진 채, 이어받기 문구는 뺀 앞 대화에 이어도 들어감", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
   const pid = process.pid, p = (n) => (1 << 22) + n;
   await f.hook("S1", { f: "start", cwd: "/w" }, { pid: p(1) });
+  await f.hook("S3", { f: "start", cwd: "/w" }, { pid: p(3) });
+  await f.hook("S3", { f: "prompt", text: "API 고르기" }, { pid: p(3) });
   const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
-  const B = JSON.parse((await board(f, { op: "proj-new", name: "나" })).text).pid;
-  await board(f, { op: "proj-set", sids: ["S1"], pid: A });
-  await f.mcp("plan", { steps: [{ id: "u1", title: "단위 1", status: "doing" }, { id: "u2", title: "단위 2" }], project: A }, { pid: p(1), env: "S1" });
-  // A 의 쓰기 줄을 잠깐 막아 두고, 그사이 draw 를 줄 세운 뒤 사용자가 B 로 옮긴다
-  const b = f.board.pboards.get(A);
-  b.chain = b.chain.then(() => new Promise((ok) => setTimeout(ok, 200)));
-  const draw = f.mcp("draw", { ops: [{ id: "late", kind: "box", label: "늦은 상자" }], project: A }, { pid: p(1), env: "S1" });
-  await new Promise((ok) => setTimeout(ok, 50));
-  await board(f, { op: "proj-set", sids: ["S1"], pid: B });
-  assert.match((await draw).text, /^거부: 기다리는 사이/);
-  assert.equal(f.board.pboards.get(A).scene.items.late, undefined);
-  // 결정 대기 글은 이름표만으로 알 수 없으므로 안내에 싣는다(답을 받으면 빠진다)
-  await board(f, { op: "proj-set", sids: ["S1"], pid: A });
-  await f.mcp("note", { text: "API 2와 3 중 무엇으로 할지", kind: "wait", on: "u2", project: A }, { pid: p(1), env: "S1" });
+  await board(f, { op: "proj-set", sids: ["S1", "S3"], pid: A });
+  // 다른 대화의 결정 대기 글은 이름표만으로 알 수 없으므로 안내에 싣는다(답을 받으면 빠진다). 자기 줄은 싣지 않는다
+  await f.mcp("plan", { steps: [{ id: "u2", title: "단위 2", status: "doing" }] }, { pid: p(3), env: "S3" });
+  await f.mcp("note", { text: "API 2와 3 중 무엇으로 할지", kind: "wait", on: "u2" }, { pid: p(3), env: "S3" });
   let r = (await f.mcp("project", {}, { pid: p(1), env: "S1" })).text;
-  assert.ok(r.includes("결정 대기(u2): API 2와 3 중 무엇으로 할지"), r);
-  await f.mcp("plan", { steps: [{ id: "u2", status: "doing" }], project: A }, { pid: p(1), env: "S1" });
+  assert.match(r, /같은 프로젝트의 다른 대화: 「API 고르기」 작업 중 .+ · 지금 단위 2 · 결정 대기: API 2와 3 중 무엇으로 할지\n/);
+  r = (await f.mcp("project", {}, { pid: p(3), env: "S3" })).text;
+  assert.ok(r.includes("「S1」 쉼") && !r.includes("「API 고르기」"), `자기 줄은 싣지 않는다: ${r}`);
+  await f.hook("S3", { f: "prompt", text: "2로" }, { pid: p(3) });
   r = (await f.mcp("project", {}, { pid: p(1), env: "S1" })).text;
-  assert.ok(!r.includes("결정 대기("), "답을 받아 상태가 바뀌면 싣지 않는다");
+  assert.ok(r.includes("「API 고르기」 작업 중") && !r.includes("결정 대기"), r);
+  // 이어진 대화 한 줄에서는 답이 필요한 대화를 고른다(뒤 대화가 더 최근에 쉬어도)
+  await f.mcp("note", { text: "API 4 도 볼지", kind: "wait", on: "u2" }, { pid: p(3), env: "S3" });
+  await f.hook("S3", { f: "end", reason: "clear" }, { pid: p(3) });
+  await f.hook("S4", { f: "start", source: "clear", cwd: "/w" }, { pid: p(3) });
+  await f.hook("S4", { f: "end", reason: "other" }, { pid: p(3) });
+  r = (await f.mcp("project", {}, { pid: p(1), env: "S1" })).text;
+  assert.ok(!r.includes("결정 대기"), `끝난 대화의 대기는 싣지 않는다: ${r}`);
   // 사용자가 뺀 줄: /clear 로 이어진 대화도 빠진 채이고 후보를 받지 않는다
   await f.hook("C1", { f: "start", cwd: "/w" }, { pid });
   await board(f, { op: "proj-set", sids: ["C1"], pid: null });
@@ -1270,15 +1194,20 @@ test("소속 확인은 쓸 차례에 다시 본다(기다리는 사이 옮기면
   const out = JSON.parse((await f.hook("C2", { f: "start", source: "clear", cwd: "/w" }, { pid })).text).out;
   assert.deepEqual([f.board.projects.members.C2, out], [{ pid: null, why: "hand" }, undefined]);
   assert.match((await f.mcp("project", { action: "join", id: A }, { pid, env: "C2" })).text, /^거부/);
-  // 이어받기 문구로 그 줄에 이어진 대화는 문구의 프로젝트로 들어간다
+  // 이어받기 문구로 그 줄에 이어진 대화는 문구의 프로젝트(그 키를 가진 프로젝트)로 들어간다
   await board(f, { op: "config-set", resume: { phrase: "핸드온 <키>", doc: "/handoff/<키>.md" } });
+  const Z = JSON.parse((await board(f, { op: "proj-new", name: "다" })).text).pid;
+  await f.hook("X1", { f: "start", cwd: "/w" }, { pid: p(4) });
+  await board(f, { op: "proj-set", sids: ["X1"], pid: Z });
+  await f.hook("X1", { f: "edit", tool: "Write", path: "/m/handoff/kz.md" }, { pid: p(4) });
+  await tick();
   await f.hook("C2", { f: "prompt", text: "인계 쓰기" }, { pid });
   await f.hook("C2", { f: "edit", tool: "Write", path: "/m/handoff/kz.md" }, { pid });
   await tick();
   await f.hook("D1", { f: "start", cwd: "/w" }, { pid: p(2) });
   await f.hook("D1", { f: "prompt", text: "핸드온 kz" }, { pid: p(2) });
   assert.equal((await sessMap(f)).D1.prev, "C2");
-  assert.equal(f.board.projects.members.D1.why, "phrase");
+  assert.deepEqual(f.board.projects.members.D1, { pid: Z, why: "phrase" });
 });
 
 test("지난 대화 자동 휴지통: 기본 30일, 진행 중인 프로젝트의 대화는 남기고 날수 설정·끄기를 따른다", async (t) => {
@@ -1354,51 +1283,6 @@ test("지난 대화 자동 휴지통: 이어진 대화는 줄째로 보고, 설�
   }
 });
 
-test("승인 대기: 프로젝트에 든 대화에 사용자 입력이 오면 큰 그림의 대기도 「답 받음」, 다른 프로젝트·작업 알림은 건드리지 않는다", async (t) => {
-  const f = await boardFixture();
-  t.after(() => f.close());
-  const P = (1 << 22) + 300;
-  await f.hook("W1", { f: "start", cwd: "/w" }, { pid: P });
-  await f.hook("W2", { f: "start", cwd: "/w" }, { pid: P + 1 });
-  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
-  const B = JSON.parse((await board(f, { op: "proj-new", name: "나" })).text).pid;
-  await board(f, { op: "proj-set", sids: ["W1"], pid: A });
-  await board(f, { op: "proj-set", sids: ["W2"], pid: B });
-  await f.mcp("plan", { steps: [{ id: "u1", title: "단위", status: "doing" }], project: A }, { pid: P, env: "W1" });
-  await f.mcp("note", { text: "결정 기다림", kind: "wait", on: "u1", project: A }, { pid: P, env: "W1" });
-  await f.mcp("plan", { steps: [{ id: "v1", title: "다른 단위", status: "wait" }], project: B }, { pid: P + 1, env: "W2" });
-  const wait = (pid, id) => f.board.pboards.get(pid).scene.items[id];
-  assert.equal(wait(A, "u1").status, "wait");
-  await f.hook("W1", { f: "prompt", text: "<task-notification>", sys: true }, { pid: P });
-  assert.equal(wait(A, "u1").answered, undefined, "작업 알림은 사용자 입력이 아니다");
-  await f.hook("W1", { f: "prompt", text: "1번으로 가자" }, { pid: P });
-  assert.equal(wait(A, "u1").answered, true);
-  assert.equal(wait(B, "v1").answered, undefined, "다른 프로젝트는 그대로");
-  await f.restart();
-  assert.equal(wait(A, "u1").answered, true, "기록에 남아 다시 띄워도 같다");
-});
-
-test("승인 대기: 이어받기 문구로 이 입력에서 막 들어간 프로젝트의 대기는 풀지 않고, 그다음 입력부터 푼다", async (t) => {
-  const f = await boardFixture();
-  t.after(() => f.close());
-  const P = (1 << 22) + 400;
-  await board(f, { op: "config-set", resume: { phrase: "핸드온 <키>" } });
-  await f.hook("H0", { f: "start", cwd: "/w" }, { pid: P });
-  await f.hook("H0", { f: "prompt", text: "핸드온 zz" }, { pid: P });
-  const pid = f.board.projects.members.H0.pid;
-  await f.mcp("plan", { steps: [{ id: "u1", title: "결정", status: "wait" }], project: pid }, { pid: P, env: "H0" });
-  await f.hook("H0", { f: "end", reason: "other" }, { pid: P });
-  await f.hook("H1", { f: "start", cwd: "/w" }, { pid: P + 1 });
-  await f.hook("H1", { f: "prompt", text: "핸드온 zz" }, { pid: P + 1 });
-  assert.equal(f.board.projects.members.H1.pid, pid, "시험 전제: 문구로 같은 프로젝트에 들어감");
-  assert.equal(f.board.pboards.get(pid).scene.items.u1.answered, undefined, "이어받는 첫 입력은 답이 아니다");
-  await f.hook("H1", { f: "prompt", text: "그걸로 하자" }, { pid: P + 1 });
-  assert.equal(f.board.pboards.get(pid).scene.items.u1.answered, true);
-  // 승인 대기를 다시 보내면(같은 상태여도) 새 질문이다
-  await f.mcp("plan", { steps: [{ id: "u1", status: "wait" }], project: pid }, { pid: P + 1, env: "H1" });
-  assert.equal(f.board.pboards.get(pid).scene.items.u1.answered, undefined);
-});
-
 test("프로젝트와 끝난 대화 지우기(proj-purge): 받은 때의 소속으로 끝난 대화만 옮기고, 하나라도 못 옮기면 프로젝트를 남긴다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
@@ -1425,14 +1309,15 @@ test("프로젝트와 끝난 대화 지우기(proj-purge): 받은 때의 소속�
   assert.ok(f.board.sessions.has("Y1") && f.board.projects.members.Y1.pid === B, "다른 프로젝트의 끝난 대화는 그대로");
 });
 
-test("프로젝트 지우기: 큰 그림 기록을 휴지통으로 옮기지 못하면 프로젝트를 남기고 실패로 알린다", async (t) => {
+test("프로젝트 지우기: 앞 판이 남긴 큰 그림 기록을 휴지통으로 옮기지 못하면 프로젝트를 남기고 실패로 알린다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
   const P = (1 << 22) + 600;
   await f.hook("Q1", { f: "start", cwd: "/w" }, { pid: P });
   const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
   await board(f, { op: "proj-set", sids: ["Q1"], pid: A });
-  await f.mcp("plan", { steps: [{ id: "u1", title: "단위" }], project: A }, { pid: P, env: "Q1" });
+  const old = path.join(f.home, "projects", `${A}.jsonl`);
+  fs.writeFileSync(old, "{}\n");
   const trash = path.join(f.home, "trash");
   fs.mkdirSync(trash, { recursive: true });
   fs.chmodSync(trash, 0o500);
@@ -1440,7 +1325,7 @@ test("프로젝트 지우기: 큰 그림 기록을 휴지통으로 옮기지 못
   fs.chmodSync(trash, 0o700);
   assert.equal(out.ok, false);
   assert.match(out.msg, /큰 그림 기록을 휴지통으로 옮기지 못해/);
-  assert.ok(f.board.projects.projects[A] && f.board.pboards.has(A), "프로젝트와 큰 그림이 남는다");
+  assert.ok(f.board.projects.projects[A] && fs.existsSync(old), "프로젝트와 큰 그림 기록이 남는다");
   out = JSON.parse((await board(f, { op: "proj-drop", pid: A })).text);
   assert.equal(out.ok, true, out.msg);
   assert.ok(!f.board.projects.projects[A] && fs.readdirSync(trash).some((n) => n.startsWith(`${A}.`)));

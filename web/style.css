@@ -332,10 +332,10 @@ button.atag[aria-pressed="true"] { border-color: var(--ac); box-shadow: inset 0 
 #tl-body li .when { color: var(--muted); font-size: 13px; margin-right: 6px; font-variant-numeric: tabular-nums; }
 /* 타임라인: 시각 | 종류 표지 | 글 세 칸. 표지 칸 폭을 고정해 글 머리가 줄마다 맞고, 넘어간 줄도 글 머리 아래에서 잇는다.
    하위 에이전트 줄(.sub)은 들여 쓰지 않고 흐린 글자로만 가른다(들여 쓰면 글 머리가 어긋난다) */
-#tl-body.hang li:not(.new-mark) { display: grid; grid-template-columns: 58px 64px minmax(0, 1fr); column-gap: 6px; align-items: baseline; }
-#tl-body.hang li .when { font-weight: 400; margin: 0; } /* 굵은 줄(사용자·화판 글)에서도 칸 폭을 넘지 않게 */
-#tl-body.hang li .tl-k { justify-self: start; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font-weight: 400; }
-#tl-body.hang li.sub { padding-left: 0; }
+#tl-body li:not(.new-mark) { display: grid; grid-template-columns: 58px 64px minmax(0, 1fr); column-gap: 6px; align-items: baseline; }
+#tl-body li .when { font-weight: 400; margin: 0; } /* 굵은 줄(사용자·화판 글)에서도 칸 폭을 넘지 않게 */
+#tl-body li .tl-k { justify-self: start; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font-weight: 400; }
+#tl-body li.sub { padding-left: 0; }
 #tl-body .tl-k.fact { color: var(--muted); }
 #tl-body .tl-k.fact.notify { color: var(--s-wait); } #tl-body .tl-k.fact.edit-fail { color: var(--s-fail); }
 #tl-body .tl-k.note { color: var(--muted); }
@@ -498,6 +498,37 @@ kbd { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; f
 .srow > .sess { margin: 0; padding-right: 30px; }
 .srow > .smenu { position: absolute; top: 5px; right: 4px; opacity: 0; } /* 숨겨도 Tab 으로 갈 수 있게 visibility 가 아니라 opacity 로 감춘다 */
 .srow:hover > .smenu, .srow:focus-within > .smenu, .smenu[aria-expanded="true"] { opacity: 1; }
+/* 진행 중인 줄은 카드(.srow.card): 테두리와 둥근 모서리. 상태 띠·바탕은 줄 단추(.sess)에 두고, 그 아래 펼치는 단추들도 같은 띠·바탕을 잇는다 */
+.srow.card { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 0 0 8px; }
+.srow.card.sel { border-color: var(--accent); }
+.srow.card > .sess { border-width: 0 0 0 4px; border-radius: 0; }
+.srow.card > .sess:not(.working):not(.input):not(.sel) { border-left-color: transparent; }
+.srow.card > .holdline, .srow.card > .moreline { border-left: 4px solid transparent; }
+.srow.card.working > .holdline, .srow.card.working > .moreline { border-left-color: var(--s-doing); background: var(--work-bg); }
+.srow.card.input > .holdline, .srow.card.input > .moreline { border-left-color: var(--s-wait); background: var(--wait-bg); }
+.srow.card.sel.working > .holdline, .srow.card.sel.working > .moreline { background: var(--work-bg-sel); }
+.srow.card.sel.input > .holdline, .srow.card.sel.input > .moreline { background: var(--wait-bg-sel); }
+.srow.card.sel:not(.working):not(.input) > .holdline, .srow.card.sel:not(.working):not(.input) > .moreline { border-left-color: var(--accent); background: var(--panel-2); }
+/* 카드 안: 단계 진척 막대와 지금 단계, 이번 차례 활동, 브랜치 */
+.sess .rprog { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 13px; line-height: 18px; }
+.sess .rbar { flex: none; width: 44px; height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.sess .rbar > i { display: block; height: 100%; background: var(--s-done); }
+.sess .rprog .rnow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.sess .ract { margin-top: 2px; font-size: 12px; line-height: 17px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess .rfail { color: var(--s-fail); font-weight: 600; }
+.sess .rbr { color: var(--key); }
+/* 결정 대기·막힘(.holdline)과 마지막 요청·답(.moreline): 한 줄로 접히고 누르면 펼친다 */
+.srow > .holdline, .srow > .moreline { display: block; width: 100%; text-align: left; margin: 0; border: 0; background: transparent; padding: 2px 8px 5px 28px; font-size: 13px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srow > .holdline .hk { font-weight: 700; }
+.srow > .holdline.open, .srow > .moreline.open { white-space: normal; overflow-wrap: anywhere; }
+.srow > .holdline.wait { color: var(--wait-fg); } .srow > .holdline.blocked { color: var(--s-blocked); }
+.srow > .moreline { font-size: 12px; color: var(--btn-fg); padding-top: 0; }
+.srow > .moreline.open { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 6px; color: var(--fg); }
+.srow > .moreline.open .hk { grid-column: 1 / -1; color: var(--btn-fg); }
+.srow > .moreline .mlab { color: var(--muted); }
+.srow > .holdline:hover, .srow > .moreline:hover .hk { text-decoration: underline dotted; }
+main.fold-left .srow > .holdline, main.fold-left .srow > .moreline, main.fold-left .sess .rprog, main.fold-left .sess .ract { display: none; }
+main.fold-left .srow.card { border: 0; margin: 0 0 4px; }
 .sess[draggable="true"] { cursor: grab; }
 .gsec { border-radius: 6px; padding: 0 2px; }
 body.dragging .gsec { outline: 1px dashed var(--line); outline-offset: 1px; }

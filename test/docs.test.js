@@ -147,7 +147,7 @@ test("문서 목록 범위: 이어진 대화 전체, 프로젝트에 들면 프�
   const P = JSON.parse((await board(f, { op: "proj-new", name: "문서" })).text).pid;
   await board(f, { op: "proj-set", sids: ["T1", "T2", "U1"], pid: P });
   assert.deepEqual(await names("U1"), ["docs/a.md", "index.md", "notes/d.md"]);
-  assert.deepEqual(await names(P), ["docs/a.md", "index.md", "notes/d.md"], "프로젝트 화판에서도 같은 목록");
+  assert.equal((await f.read(`/api/docs?id=${P}`)).status, 404, "프로젝트 id 로는 받지 않음(큰 그림 화판이 없다)");
 });
 
 test("문서 고정·숨김: 화판 쓰기 열쇠로, 목록 맨 위·숨김 표시, 다시 띄워도 남는다", async (t) => {

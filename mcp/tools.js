@@ -14,15 +14,14 @@ When to call (at these moments, not on every tool call):
 - When a step starts or ends: plan with only the changed statuses, in the message that starts the next work. The current step is the step most recently set to doing, so set the old one done and the new one doing in the same call.
 - Closing: in the message with what you expect to be your last tool calls before you answer, mark done the steps whose work is finished, and give the drawing's parts for that work (and their group) their final status; a step whose check is still running stays doing. If you will ask the user to approve something, add a note kind wait to that same message even before the check result is in (it marks the step as waiting until the user answers; do not mark that step done yourself). After the last tool result, answer directly: do not send board calls just to close steps (the board already shows the session as idle); your next tool calls close them. The one exception: if you stop to ask the user (approval, or help because you are stuck) and that note kind wait or blocked is not on the board yet, send it alone.
 - Before launching subagents: plan or draw what they will do, in the same message as the launch.
-- When stuck: note kind blocked.
+- When stuck: note kind blocked, saying what you are waiting for.
 - Draw the structure of the problem once early in every multi-step task, with your first plan call, inside one group for that task. A later task in the same work adds its own group to that drawing, so the user sees the whole work (the board folds finished groups); clear:true only when the subject changes completely. Pick the form that fits the content and mix two or three forms in a view: boxes (shape, icon) and edges for the parts, suspects or options whose status you will update; a table for comparisons, options and results; mermaid for a flow the user reads as a whole. Then update statuses as you go and redraw when that structure changes. Add ref (path:line) to parts tied to a file; the board marks them when the file is edited.
 Rules: ids are yours and stable; resending an id updates only the fields you send; null clears a field. Send only changes, never the whole scene. Do not look at screenshots of the board.
 Keep each group small (about 8 boxes, short tables and diagrams). Draw problem-solving units (features, suspects, call paths), not folder layouts. The anytaskview skill has examples of each form and the command that opens the board in the user's browser (use it when the user asks to open the board).
 plan = the steps of your work. draw list + item = structure of a deliverable (document outline, checklist).
 Write labels, titles and notes in the user's language (Korean for this user).
 If a result or note says the board is off or no board tab is open, skip board calls as it says.
-Projects: work spanning several conversations can belong to a project with its own long-lived board (the big picture). If a [anytaskview 프로젝트] line lists candidates and the user's work matches one, call project {action:"join", id}. Create a project only when the user starts work meant to span conversations. While this conversation belongs to a project, also update its board by adding project:"<id>" to plan/draw/note, but only when a work unit starts or ends or a user decision is made or awaited: units as plan steps (the next planned units too, as todo), open decisions as wait notes, and one drawing of the units in order as boxes with status, extended as units change, never cleared. Keep session detail on the session board (no project argument).`;
-const project = { type: "string", description: "Project id: write to that project's long-lived board instead of this conversation's board" };
+Projects: work spanning several conversations can belong to a project; the board shows its conversations side by side from their plans and wait or blocked notes. If a [anytaskview 프로젝트] line lists candidates and the user's work matches one, call project {action:"join", id}. Create a project only when the user starts work meant to span conversations.`;
 
 export const TOOLS = [
   {
@@ -39,7 +38,6 @@ export const TOOLS = [
             required: ["id"],
           },
         },
-        project,
       },
       required: ["steps"],
     },
@@ -66,7 +64,6 @@ export const TOOLS = [
         },
         clear: { type: "boolean" },
         dir: { type: "string", enum: ["RIGHT", "DOWN"] },
-        project,
       },
     },
   },
@@ -75,18 +72,18 @@ export const TOOLS = [
     description: "Add one line to the timeline: a reason, decision, or that you are blocked or waiting for approval. on = step or part id to attach it to. blocked/wait also set that step (default: current step) to that status.",
     inputSchema: {
       type: "object",
-      properties: { text: str, kind: { type: "string", enum: NOTE_KINDS }, on: str, ref: str, project },
+      properties: { text: str, kind: { type: "string", enum: NOTE_KINDS }, on: str, ref: str },
       required: ["text"],
     },
   },
   {
     name: "ids",
     description: "List the ids already on the board with short labels. Use only when you lost track of them (for example after context compaction).",
-    inputSchema: { type: "object", properties: { project } },
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "project",
-    description: "Projects group conversations about one piece of work and keep its big-picture board. action list (default): this conversation's project and active ones; join {id}; create {name, purpose} (only when the user starts multi-conversation work) and join it; leave. The user's own choice is never overridden.",
+    description: "Projects group conversations about one piece of work; the board shows them side by side. action list (default): this conversation's project and active ones; join {id}; create {name, purpose} (only when the user starts multi-conversation work) and join it; leave. The user's own choice is never overridden.",
     inputSchema: {
       type: "object",
       properties: { action: { type: "string", enum: ["list", "join", "create", "leave"] }, id: str, name: str, purpose: str },

@@ -119,6 +119,45 @@ test("VS Code 확장이 첫 입력 앞에 붙이는 브라우저 안내문은 �
   assert.equal(send(`앞 글 ${block}`), `앞 글 ${block}`.slice(0, 3999) + "…", "맨 앞이 아니면 그대로");
 });
 
+test("붙여 넣은 글의 꼬리표(<pasted_content>)는 떼고 글은 남긴다(제목·이어받기 문구가 글 머리를 본다)", () => {
+  const send = (prompt) => toFact({ hook_event_name: "UserPromptSubmit", prompt }).text;
+  assert.equal(send('\n\n<pasted_content id="5def">\n핸드온 anytaskview — 질문\n</pasted_content id="5def">'), "핸드온 anytaskview — 질문\n");
+  assert.equal(send('이것 봐 <pasted_content id="a1">로그 한 줄</pasted_content id="a1"> 어때'), "이것 봐 로그 한 줄 어때");
+  assert.equal(send("<pasted_content 닫지 않음"), "<pasted_content 닫지 않음", "꼬리표 모양이 아니면 그대로");
+  assert.equal(send("본문의 <pasted_content> 예"), "본문의 <pasted_content> 예", "id 없는 글은 예로 쓴 것이라 그대로");
+  assert.equal(send("    들여 쓴 코드"), "    들여 쓴 코드", "꼬리표가 없으면 앞 공백도 그대로");
+  const pasted = toFact({ hook_event_name: "UserPromptSubmit", prompt: '<pasted_content id="t1"><task-notification>예문</task-notification></pasted_content id="t1">' });
+  assert.deepEqual([pasted.sys, pasted.text], [undefined, "<task-notification>예문</task-notification>"], "붙여 넣은 글은 작업 알림이 아니라 사용자 입력");
+});
+
+test("자동 요약 제목: Stop·SessionStart 는 대화 기록 끝의 마지막 ai-title 을 싣고, 기록이 없거나 깨졌거나 끝 256KB 밖이거나 링크거나 Codex 면 싣지 않는다", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "atv-ai-"));
+  try {
+    const line = (o) => JSON.stringify(o) + "\n";
+    const file = path.join(dir, "s.jsonl");
+    fs.writeFileSync(file, line({ type: "user", message: "x" }) + line({ type: "ai-title", aiTitle: "옛 제목", sessionId: "s" }) + "x".repeat(300 * 1024) + "\n" + line({ type: "ai-title", aiTitle: "  화판 개선  ", sessionId: "s" }) + line({ type: "assistant" }));
+    const stop = (ev, opt) => toFact({ hook_event_name: "Stop", last_assistant_message: "끝", ...ev }, opt);
+    assert.equal(stop({ transcript_path: file }).ai, "화판 개선");
+    assert.equal(toFact({ hook_event_name: "SessionStart", source: "resume", transcript_path: file }).ai, "화판 개선");
+    assert.equal(stop({ transcript_path: file }, { codex: true }).ai, undefined, "Codex 는 읽지 않는다");
+    assert.equal(stop({ transcript_path: path.join(dir, "없음.jsonl") }).ai, undefined);
+    assert.equal(stop({}).ai, undefined);
+    const broken = path.join(dir, "b.jsonl");
+    fs.writeFileSync(broken, '{"type":"ai-title","aiTitle":"깨\n');
+    assert.equal(stop({ transcript_path: broken }).ai, undefined, "깨진 줄은 싣지 않는다");
+    fs.writeFileSync(broken, line({ type: "ai-title", aiTitle: "앞 제목" }) + '{"type":"ai-title","aiTitle":"쓰는 중');
+    assert.equal(stop({ transcript_path: broken }).ai, "앞 제목", "쓰는 중인 마지막 줄이 깨졌으면 그 앞의 제목");
+    const far = path.join(dir, "far.jsonl");
+    fs.writeFileSync(far, line({ type: "ai-title", aiTitle: "먼 제목" }) + "y".repeat(300 * 1024) + "\n");
+    assert.equal(stop({ transcript_path: far }).ai, undefined, "끝 256KB 밖은 읽지 않는다");
+    const link = path.join(dir, "l.jsonl");
+    fs.symlinkSync(file, link);
+    assert.equal(stop({ transcript_path: link }).ai, undefined, "기록 파일이 링크면 열지 않는다");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("사건 → 사실: 명령은 설명과 함께, 수정은 경로와 줄, 출력은 보내지 않는다", () => {
   const pre = toFact({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "t1", tool_input: { command: "npm test", description: "시험 실행" } });
   assert.deepEqual(pre, { f: "run-start", id: "t1", cmd: "npm test", desc: "시험 실행" });

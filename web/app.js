@@ -75,7 +75,10 @@ function fmtMin(ms) {
 const pad2 = (n) => String(n).padStart(2, "0");
 const fmtClock = (t) => { const d = new Date(t); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
 const base = (p) => String(p || "").split("/").filter(Boolean).pop() || p || "";
-const sessName = (s) => s.name || s.title || base(s.cwd) || s.id.slice(0, 8);
+// 세션 이름: 화판·Claude 에서 붙인 이름 > Claude Code 의 자동 요약 제목 > 첫 입력 > 폴더
+const sessName = (s) => s.name || s.ai || s.title || base(s.cwd) || s.id.slice(0, 8);
+// 이름이 첫 입력과 다르면 마우스를 올렸을 때 첫 입력도 보인다
+const firstInput = (s) => (s.title && s.title !== sessName(s) ? `\n첫 입력: ${s.title}` : "");
 
 // ---- 상태 ----
 const state = {
@@ -93,7 +96,7 @@ const state = {
   renderQueued: false,
   tlTopSeq: 0,           // 타임라인을 맨 위(최신)에서 마지막으로 본 사건 번호
   followed: null,        // 따라가기로 마지막에 옮겨 간 부품 id
-  projects: { projects: {}, members: {} }, // 프로젝트 정의·소속과 큰 그림 요약(서버의 projects.json)
+  projects: { projects: {}, members: {} }, // 프로젝트 정의·소속(서버의 projects.json)
   config: { resume: null, trashDays: 30, diffKB: 16 }, // 서버 설정(이어받기 문구, 지난 대화를 휴지통으로 옮기기까지 날수·null 이면 끔, 수정 diff 보관 KB·0 이면 끔)
   dragging: null,        // 목록에서 끌고 있는 세션 id
   tlAgent: null,         // 타임라인을 이 하위 에이전트의 줄만 보이게 거르는 중(이름표를 눌렀을 때)
@@ -164,9 +167,9 @@ async function boardOp(body) {
     return { ok: false };
   }
 }
-// 보고 있는 id 는 세션이나 프로젝트(큰 그림 화판)다
+// 보고 있는 id 는 세션이다. isProj: 있는 프로젝트 id 인가
 const isProj = (id) => !!id && Object.hasOwn(state.projects.projects, id);
-const known = (id) => state.sessions.has(id) || isProj(id);
+const known = (id) => state.sessions.has(id);
 const projOf = (sid) => {
   const m = Object.hasOwn(state.projects.members, sid) ? state.projects.members[sid] : null;
   return m && m.pid && isProj(m.pid) ? m.pid : null;
@@ -174,13 +177,14 @@ const projOf = (sid) => {
 
 // ---- 패널 폭·접힘 ----
 // left 는 px, right·plan 은 비율. 화면 크기가 바뀌어도 같은 느낌이 나게 하고, 쓸 때마다 범위로 자른다
-const LAYOUT_DEFAULT = { left: 260, right: 0.3, plan: 0.4, foldLeft: false, foldPlan: false, foldTl: false };
+const LAYOUT_DEFAULT = { left: 300, right: 0.3, plan: 0.4, foldLeft: false, foldPlan: false, foldTl: false };
 const layout = { ...LAYOUT_DEFAULT, ...store.json("atv.layout", {}) };
 const main = document.querySelector("main"), side = $("side");
 
 function applyLayout() {
   const W = main.clientWidth || window.innerWidth, H = side.clientHeight || 400;
-  layout.left = clamp(num(layout.left, LAYOUT_DEFAULT.left), 160, 360);
+  // 목록은 560px 까지 넓히되, 오른쪽 칸(최소 300px)과 그림 칸(화면 30%)이 들어갈 자리를 남긴다
+  layout.left = clamp(num(layout.left, LAYOUT_DEFAULT.left), 160, Math.max(160, Math.min(560, W - 312 - 0.3 * W)));
   const left = layout.foldLeft ? 40 : layout.left;
   // 오른쪽: 300px~화면 60%, 그림 칸은 화면 30% 이상 남긴다
   const rightMax = Math.max(300, Math.min(0.6 * W, W - left - 12 - 0.3 * W));
@@ -422,15 +426,16 @@ function connect(sid) {
     state.sessions.set(s.id, s);
     if (!state.sid) return connect(s.id); // 처음 생긴 세션을 바로 보여 준다
     // 바쁜 세션은 사건마다 마지막 활동 시각만 바뀐 요약을 보낸다. 목록의 「n분 전」·활동순은 2초 늦어도 되므로 모아서 그린다
-    const rest = ({ lastT, seq, ...x }) => JSON.stringify(x);
+    // 이번 차례 활동(turn)도 명령마다 바뀌므로 같이 모아 그린다
+    const rest = ({ lastT, seq, turn, ...x }) => JSON.stringify(x);
     if (old && rest(old) === rest(s)) {
       state.listTimer ||= setTimeout(() => { state.listTimer = 0; queueRender("list"); }, 2000);
       return;
     }
-    // 보는 화면이 이 세션의 요약을 쓰는 경우(같은 줄의 대화, 프로젝트의 대화 이력, 이 세션을 받는 쪽으로 연 보내기 창·모은 글)만
+    // 보는 화면이 이 세션의 요약을 쓰는 경우(같은 줄의 대화, 이 세션을 받는 쪽으로 연 보내기 창·모은 글)만
     // 화면 전체를, 아니면 목록만 다시 그린다
     if (old && old.edits !== s.edits && inDocScope(s.id)) queueDocs(800); // 같은 범위의 다른 대화가 파일을 고쳤다
-    const uses = isProj(state.sid) || rootOf(s.id) === rootOf(state.sid) || ask?.sid === s.id || compose.basket.sid === s.id;
+    const uses = rootOf(s.id) === rootOf(state.sid) || ask?.sid === s.id || compose.basket.sid === s.id;
     queueRender(uses ? "all" : "list");
   });
   // 서버는 프로젝트를 목록보다 먼저 보낸다(보던 id 가 프로젝트인지 목록을 받을 때 알아야 한다)
@@ -590,9 +595,8 @@ function stepStats(scene, id, now) {
   const elapsed = st && st.startT ? (st.endT || now) - st.startT : null;
   return { files, cmds, fails, elapsed };
 }
-// 프로젝트 화판의 단위에는 훅 사실(파일·명령)이 붙지 않으므로 걸린 시간만 보인다
-const statsText = (x) => (isProj(state.sid) ? fmtMin(x.elapsed) : `${fmtMin(x.elapsed)} · 파일 ${x.files} · 명령 ${x.cmds}${x.fails ? `(실패 ${x.fails})` : ""}`);
-// 날짜가 다르면 날짜도(프로젝트의 대화 이력은 며칠에 걸친다)
+const statsText = (x) => `${fmtMin(x.elapsed)} · 파일 ${x.files} · 명령 ${x.cmds}${x.fails ? `(실패 ${x.fails})` : ""}`;
+// 날짜가 다르면 날짜도(찾기 결과는 며칠에 걸친다)
 const fmtWhen = (t, now) => (new Date(t).toDateString() === new Date(now).toDateString() ? fmtClock(t) : new Date(t).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }));
 
 // 주의 띠: 입력 필요·승인 대기 → 막힘 → 실패
@@ -633,7 +637,7 @@ function render({ list = true, view = true } = {}) {
   const hasParts = Object.values(scene.items).some((it) => it.kind !== "step");
   $("empty").hidden = hasParts;
   renderStale(scene, hasParts, now);
-  $("empty").textContent = isProj(state.sid) ? "아직 큰 그림이 없습니다. 이 프로젝트에 든 대화의 Claude·Codex 가 작업 단위를 시작·끝낼 때 그립니다." : `아직 그림이 없습니다. ${agentName(state.sessions.get(state.sid))} 가 draw 로 그리면 여기에 나타납니다.`;
+  $("empty").textContent = `아직 그림이 없습니다. ${agentName(state.sessions.get(state.sid))} 가 draw 로 그리면 여기에 나타납니다.`;
   applyFocus(false);
   if (!ONLY_TL) canvas.render(scene).then(() => {
     for (const p of $("canvas").querySelectorAll(".part[data-id]")) markSend(p, "상자");
@@ -643,13 +647,13 @@ function render({ list = true, view = true } = {}) {
   markSeen();
 }
 
-// 그림이 지금 작업(새 단계 묶음)보다 먼저 그린 것이면 그림 위 막대에 알린다(큰 그림 화판은 빼고).
+// 그림이 지금 작업(새 단계 묶음)보다 먼저 그린 것이면 그림 위 막대에 알린다.
 // 같은 메시지의 draw 가 올 틈(DRAW_SLACK)은 기다렸다가 보인다. 그사이 다른 사건이 없어도 보이게 그때 한 번 다시 본다
 let staleTimer = 0;
 function renderStale(scene, hasParts, now) {
   const v = scene.view, el = $("stale");
   clearTimeout(staleTimer);
-  const on = hasParts && !isProj(state.sid) && drawingStale(v);
+  const on = hasParts && drawingStale(v);
   const wait = on ? v.taskT + DRAW_SLACK - now : 0;
   el.hidden = !on || wait > 0;
   if (on && wait > 0 && !state.replay) {
@@ -662,21 +666,25 @@ function renderStale(scene, hasParts, now) {
 }
 
 // 세션 목록: 프로젝트가 있으면 프로젝트별로(최근에 움직인 프로젝트 먼저, 빈 프로젝트도 보인다), 프로젝트 없는 세션은
-// 「프로젝트 없음」, 끝난 프로젝트는 맨 아래 「끝난 프로젝트」 에 접어 둔다. 프로젝트 이름을 누르면 큰 그림 화판을 연다.
+// 「프로젝트 없음」, 끝난 프로젝트는 맨 아래 「끝난 프로젝트」 에 접어 둔다. 프로젝트 이름을 누르면 그 묶음을 펴고 접는다.
+// 진행 중인 줄에는 지금 단계 한 줄과, 결정 대기·막힘이 있으면 그 글 한 줄(눌러서 펼침)을 붙여 프로젝트의 진행을 목록에서 본다.
 // 세션 줄을 끌어 프로젝트(머리나 그 아래 줄 어디든)에 놓으면 그 줄의 대화 전체가 옮겨 간다. 키보드는 줄의 「⋯」 메뉴로 한다
 const gfold = new Set(Array.isArray(store.json("atv.gfold", [])) ? store.json("atv.gfold", []) : []);
 const DRAG_TYPE = "text/x-atv-sid";
 const canWrite = () => !!store.get("atv.w");
-// 상자·단계에서 보내기 창을 열 수 있는가(프로젝트 화판·재생 중·쓰기 열쇠 없음이면 아니다)
-const sendable = () => canWrite() && !state.replay && !!state.sid && !isProj(state.sid);
+// 상자·단계에서 보내기 창을 열 수 있는가(재생 중·쓰기 열쇠 없음이면 아니다)
+const sendable = () => canWrite() && !state.replay && !!state.sid;
 // 열 수 있을 때만 화면 읽기 프로그램에 Enter 동작을 알린다
 function markSend(e, what) {
   if (sendable()) { e.setAttribute("aria-keyshortcuts", "Enter"); e.setAttribute("aria-description", `Enter: 이 ${what}에 대해 보내기`); }
   else { e.removeAttribute("aria-keyshortcuts"); e.removeAttribute("aria-description"); }
 }
+// 세션 목록의 한 줄. 진행 중인 줄은 카드(.srow.card): 제목, 상태·시각·폴더·브랜치, 단계 진척과 지금 단계, 이번 차례 활동,
+// 결정 대기·막힘(눌러서 펼침), 마지막 요청·답(눌러서 펼침). 끝난 줄은 제목과 상태 줄만 둔다.
+// 카드 안의 펼치기는 줄 단추 밖의 따로 된 단추다(단추 안에 단추를 두지 않는다. 마우스를 올리지 않아도 키보드로 연다)
 function sessRow(thread, now) {
-  const s = thread[0], mine = thread.some((x) => x.id === state.sid);
-  const row = el("div", "srow");
+  const s = thread[0], mine = thread.some((x) => x.id === state.sid), live = s.status !== "ended";
+  const row = el("div", "srow" + (live ? ` card ${s.status}` : "") + (mine ? " sel" : ""));
   const b = el("button", "sess" + (mine ? " sel" : "") + (s.status === "ended" ? " ended" : "") + (s.status === "input" || s.status === "working" ? ` ${s.status}` : ""));
   b.type = "button";
   if (mine) b.setAttribute("aria-current", "true");
@@ -692,9 +700,38 @@ function sessRow(thread, now) {
   // 상태 글자는 따로 감싸 작업 중·입력 필요면 빛이 지나가게 한다(CSS .stw)
   const stw = el("span", `stw ${s.status}`, SESS_KO[s.status] || s.status);
   if (s.status === "working" || s.status === "input") addShine(stw);
-  r2.append(logo, stw, ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}${more}${s.agents ? ` · 에이전트 ${s.agents}` : ""}${(s.llms || []).map(([n, c]) => ` · ${n} ${c}`).join("")}`);
-  b.title = `${sessName(s)}\n${agentName(s)} · ${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
+  // 이어받기 문구로 받은 키(이어진 대화 가운데 하나라도): 「← 키」
+  const key = thread.map((x) => x.key).find(Boolean);
+  r2.append(logo, stw, ` · ${fmtAgo(s.lastT, now)} · ${base(s.cwd) || "폴더 모름"}`);
+  if (live && s.branch) r2.append(" ", el("span", "rbr", `⎇ ${s.branch}`));
+  r2.append(`${more}${key ? ` · ← ${key}` : ""}`);
+  if (!live) r2.append(`${s.agents ? ` · 에이전트 ${s.agents}` : ""}${(s.llms || []).map(([n, c]) => ` · ${n} ${c}`).join("")}`);
+  b.title = `${sessName(s)}${firstInput(s)}\n${agentName(s)} · ${SESS_KO[s.status] || s.status} · ${s.cwd}${more && "\n이어진 대화(/clear·이어받기 문구)를 한 줄로 모았습니다. 맨 위 ◀ ▶ 로 앞뒤 대화를 봅니다"}`;
   b.append(r1, r2);
+  if (live) {
+    // 단계 진척(끝난 단계/전체)과 지금 단계
+    const [done, total] = s.steps || [0, 0];
+    if (total) {
+      const p = el("div", "rprog");
+      const bar = el("span", "rbar");
+      const fill = el("i");
+      fill.style.width = `${Math.round((done / total) * 100)}%`;
+      bar.append(fill);
+      p.append(bar, el("b", "", `${done}/${total}`), el("span", "rnow", s.cur ? `지금: ${s.cur.title}` : done === total ? "모두 끝" : ""));
+      b.append(p);
+    }
+    // 이번 차례(마지막 사용자 입력 뒤): 고친 파일, 명령(실패), 도는 에이전트·다른 LLM. 없는 것은 빼고, 다 없으면 줄을 두지 않는다
+    const t = s.turn || {};
+    // 실패를 맨 앞에 둔다(줄이 넘쳐 말줄임이 돼도 보이게)
+    const act = [t.files ? `파일 ${t.files}` : "", t.cmds ? `명령 ${t.cmds}` : "", s.agents ? `에이전트 ${s.agents}` : "", ...(s.llms || []).map(([n, c]) => `${n} ${c}`)].filter(Boolean);
+    if (act.length || t.fails) {
+      const a = el("div", "ract", "이번 차례 · ");
+      if (t.fails) a.append(el("span", "rfail", `실패 ${t.fails}${t.failName ? `: ${t.failName}` : ""}`), act.length ? " · " : "");
+      a.append(act.join(" · "));
+      a.title = `${t.fails ? `실패 ${t.fails}${t.failName ? `: ${t.failName}` : ""} · ` : ""}${act.join(" · ")}`;
+      b.append(a);
+    }
+  }
   b.addEventListener("click", () => { if (s.id !== state.sid) connect(s.id); }); // 앞 대화를 보는 중이어도 줄이 보이는 대화로 간다
   const menu = el("button", "mini smenu", "⋯");
   menu.type = "button";
@@ -717,8 +754,34 @@ function sessRow(thread, now) {
     menu.title = $("nokey").title;
   }
   row.append(b, menu);
+  if (!live) return row;
+  // 펼치는 단추: 한 줄로 접혀 있다가 누르면(Enter 도) 펼친다. 펼침은 대화마다 기억한다(목록을 다시 그려도 남는다)
+  const opener = (cls, set, fill) => {
+    const open = set.has(s.id);
+    const h = el("button", `${cls}${open ? " open" : ""}`);
+    h.type = "button";
+    h.dataset.sid = s.id;
+    h.setAttribute("aria-expanded", String(open));
+    h.title = open ? "눌러서 접기" : "눌러서 전체 보기";
+    fill(h, open);
+    h.addEventListener("click", () => { if (!set.delete(s.id)) set.add(s.id); queueRender("list"); });
+    row.append(h);
+  };
+  // 결정 대기·막힘: 에이전트가 기다리며 남긴 글
+  if (s.hold) opener(`holdline ${s.hold.kind}`, holdOpen, (h) => {
+    h.append(el("span", "hk", `${ST_ICO[s.hold.kind]} ${s.hold.kind === "wait" ? "결정 대기" : "막힘"}`), ` ${s.hold.text}`);
+  });
+  // 마지막 요청·답: 쉬는 대화가 무엇을 하다 멈췄는지
+  const t = s.turn || {};
+  if (t.ask || t.ans) opener("moreline", moreOpen, (h, open) => {
+    if (!open) { h.append(el("span", "hk", "▸ 마지막 요청·답")); return; }
+    h.append(el("span", "hk", "▾ 마지막 요청·답"));
+    if (t.ask) h.append(el("span", "mlab", "요청"), el("span", "mtxt", t.ask));
+    if (t.ans) h.append(el("span", "mlab", "답"), el("span", "mtxt", t.ans));
+  });
   return row;
 }
+const holdOpen = new Set(), moreOpen = new Set(); // 결정 대기·막힘 줄, 마지막 요청·답을 펼친 대화
 function endDrag() {
   if (!state.dragging) return;
   state.dragging = null;
@@ -775,7 +838,7 @@ function dropZone(sec, pid) {
     if (sid && state.sessions.has(sid)) moveThread(sid, pid || null);
   });
 }
-// 프로젝트 머리: 접기, 이름(누르면 큰 그림 화판), ⋯ 메뉴(이름·끝·지우기). pid "" 은 「프로젝트 없음」(프로젝트와 다른 흐린 색)
+// 프로젝트 머리: 접기, 이름(누르면 펴고 접기), ⋯ 메뉴(이름·끝·지우기). pid "" 은 「프로젝트 없음」(프로젝트와 다른 흐린 색)
 function projHead(p, count) {
   const head = el("div", "ghead"), folded = gfold.has(p);
   const fold = el("button", "gtog", folded ? "▸" : "▾");
@@ -794,12 +857,12 @@ function projHead(p, count) {
     return head;
   }
   const pr = state.projects.projects[p];
-  const name = el("button", "gfold" + (state.sid === p ? " sel" : ""), `${pr.name} · ${count}`);
+  const name = el("button", "gfold", `${pr.name} · ${count}`);
   name.type = "button";
-  if (state.sid === p) name.setAttribute("aria-current", "true");
   name.dataset.pid = p;
-  name.title = `${pr.name}${pr.purpose ? `\n${pr.purpose}` : ""}\n눌러서 큰 그림 보기${pr.cur ? ` · 지금 ${pr.cur}` : ""}${pr.left ? ` · 남은 단계 ${pr.left}` : ""}`;
-  name.addEventListener("click", () => { if (state.sid !== p) connect(p); });
+  name.title = `${pr.name}${pr.purpose ? `\n${pr.purpose}` : ""}\n눌러서 묶음 펴기·접기`;
+  name.setAttribute("aria-expanded", String(!folded));
+  name.addEventListener("click", () => fold.click());
   head.append(name);
   if (canWrite()) {
     // 이름을 끌어 다른 프로젝트의 위·아래에 놓으면 순서를 바꾼다
@@ -890,7 +953,7 @@ function renderSessions(now) {
     const by = new Map([...pids, ""].map((p) => [p, []])), totals = new Map();
     for (const t of list) by.get(projOf(t[0].id) || "").push(t);
     for (const t of before) { const p = projOf(t[0].id) || ""; totals.set(p, (totals.get(p) || 0) + 1); }
-    const recent = (p) => Math.max(projs[p].lastT || 0, ...by.get(p).map(threadLast));
+    const recent = (p) => Math.max(projs[p].t || 0, ...by.get(p).map(threadLast));
     const sort = sessSort();
     const cmp = sort === "name" ? (a, b) => projs[a].name.localeCompare(projs[b].name, "ko")
       : sort === "start" ? (a, b) => (projs[b].t || 0) - (projs[a].t || 0) : (a, b) => recent(b) - recent(a);
@@ -920,7 +983,7 @@ function renderSessions(now) {
   const act = document.activeElement;
   let keep = null, gone = false;
   if (act && body.contains(act) && act.dataset.sid) {
-    keep = `.${act.classList.contains("smenu") ? "smenu" : "sess"}[data-sid="${CSS.escape(act.dataset.sid)}"]`;
+    keep = `.${["smenu", "holdline", "moreline"].find((c) => act.classList.contains(c)) || "sess"}[data-sid="${CSS.escape(act.dataset.sid)}"]`;
     gone = !state.sessions.has(act.dataset.sid);
   } else if (act && body.contains(act) && act.dataset.past !== undefined) {
     keep = `.pastfold[data-past="${CSS.escape(act.dataset.past)}"]`;
@@ -934,7 +997,9 @@ function renderSessions(now) {
   const folded = !gone && act?.dataset.pid && isProj(act.dataset.pid) && state.projects.projects[act.dataset.pid].done;
   // 줄이 접힌 「지난 세션」 안으로 들어갔으면 그 묶음의 「지난 세션」 단추로
   const past = !gone && act?.dataset.sid && body.querySelector(`.pastfold[data-past="${CSS.escape(projOf(act.dataset.sid) || "")}"]`);
-  if (keep) (body.querySelector(keep) || (folded ? body.querySelector(".dhead") : past) || body.querySelector(".sess") || $("sess-sort")).focus({ preventScroll: true });
+  // 펼치기 단추(결정 대기가 풀려 사라짐 따위)가 없어졌으면 같은 대화의 줄 단추로
+  const same = !gone && act?.dataset.sid && body.querySelector(`.sess[data-sid="${CSS.escape(act.dataset.sid)}"]`);
+  if (keep) (body.querySelector(keep) || same || (folded ? body.querySelector(".dhead") : past) || body.querySelector(".sess") || $("sess-sort")).focus({ preventScroll: true });
 }
 
 // 글자 자리를 잠깐 입력 칸으로 바꾼다(브라우저 prompt 창을 쓰지 않는다). Enter 저장, Esc 취소.
@@ -965,18 +1030,17 @@ function inlineEdit(anchor, value, save, back = anchor) {
 }
 
 function renderTop(scene, now) {
-  const sess = scene.sess, cur = currentStep(scene), proj = isProj(state.sid) ? state.projects.projects[state.sid] : null;
+  const sess = scene.sess, cur = currentStep(scene);
   const chip = $("sess-chip");
-  chip.className = proj ? `chip proj${proj.done ? " ended" : ""}` : `chip ${sess.status}`;
+  chip.className = `chip ${sess.status}`;
   // 세션이 실제로 일하는 동안(실시간)만 계획의 「지금」 줄에 빛이 지나간다. 단계가 진행 중이어도 세션이 쉬면 멈춘다
-  $("plan-now").classList.toggle("live", !proj && sess.status === "working" && !state.replay && !state.replayLoading);
-  chip.textContent = proj ? (proj.done ? "끝난 프로젝트" : "프로젝트") : SESS_KO[sess.status] || sess.status;
-  let line = proj ? "큰 그림 없음" : "계획 없음";
+  $("plan-now").classList.toggle("live", sess.status === "working" && !state.replay && !state.replayLoading);
+  chip.textContent = SESS_KO[sess.status] || sess.status;
+  let line = "계획 없음";
   if (cur) {
     const st = own(scene.items, cur);
     line = `지금 ${st.title}${st.status !== "doing" ? ` (${ST_KO[st.status]})` : ""} · ${statsText(stepStats(scene, cur, now))}`;
-  } else if (Object.values(scene.items).some((it) => it.kind === "step")) line = proj ? "진행 중인 단위 없음" : "진행 중인 단계 없음";
-  if (proj) line += `${proj.left ? ` · 남은 단계 ${proj.left}` : ""} · 갱신 ${proj.lastT ? fmtAgo(proj.lastT, now) : "없음"}`;
+  } else if (Object.values(scene.items).some((it) => it.kind === "step")) line = "진행 중인 단계 없음";
   if (state.replay) line = `재생 중 · ` + line;
   $("headline").textContent = line;
   const stall = $("stall");
@@ -995,20 +1059,19 @@ function renderTop(scene, now) {
   }
 
   const s = state.sessions.get(state.sid);
-  const name = proj ? proj.name : s ? sessName(s) : base(scene.meta.cwd) || "";
-  if ($("name-form").hidden) $("sess-name").textContent = proj || s ? name : "";
-  $("sess-name").title = proj ? "눌러서 이 프로젝트의 이름을 바꿉니다" : "눌러서 이 세션의 이름을 바꿉니다";
-  $("sess-name").hidden = !(s || proj) || !$("name-form").hidden;
-  $("sess-agent").toggleAttribute("hidden", !s || !!proj); // svg 에는 hidden 속성(IDL)이 없다
+  const name = s ? sessName(s) : base(scene.meta.cwd) || "";
+  if ($("name-form").hidden) $("sess-name").textContent = s ? name : "";
+  $("sess-name").title = s?.title && s.title !== name ? `눌러서 이 세션의 이름을 바꿉니다\n첫 입력: ${s.title}` : "눌러서 이 세션의 이름을 바꿉니다";
+  $("sess-name").hidden = !s || !$("name-form").hidden;
+  $("sess-agent").toggleAttribute("hidden", !s); // svg 에는 hidden 속성(IDL)이 없다
   if (s) { setIcon($("sess-agent"), agentLogo(s)); $("sess-agent").setAttribute("aria-label", agentName(s)); }
   renderThreadNav(s);
   renderProjLink(s);
-  // 프로젝트 화판은 대화가 아니라 받을 Claude 가 없다. 대화를 골라 보낸다
-  $("compose").disabled = !canWrite() || !!proj;
+  $("compose").disabled = !canWrite();
   const who = agentName(state.sessions.get(state.sid));
   setIcon($("compose").querySelector("svg"), agentLogo(state.sessions.get(state.sid)));
   $("compose").querySelector("span").textContent = `${who} 에 보내기`;
-  $("compose").title = proj ? "프로젝트 화판에서는 보내지 않습니다. 오른쪽 아래 대화 이력에서 대화를 골라 보내세요" : canWrite() ? `지금 보는 세션 전체에 대해 의견·지시를 써서 ${who} 에 보냅니다. 상자·단계에 대해서는 그 위의 「보내기」 를 누릅니다` : $("nokey").title;
+  $("compose").title = canWrite() ? `지금 보는 세션 전체에 대해 의견·지시를 써서 ${who} 에 보냅니다. 상자·단계에 대해서는 그 위의 「보내기」 를 누릅니다` : $("nokey").title;
   renderComposer(scene);
   const needs = band.some((x) => x.kind === "input" || x.kind === "wait");
   const prefix = needs ? "● 입력 필요 · " : band.some((x) => x.kind === "blocked") ? "막힘 · " : "";
@@ -1024,7 +1087,7 @@ function renderThreadNav(s) {
   $("thread-prev").disabled = at === 0;
   $("thread-next").disabled = at === th.length - 1;
 }
-// 세션 화판의 맨 위: 이 대화의 프로젝트(누르면 큰 그림), 없으면 「프로젝트 없음」(누르면 넣을 곳을 고르는 ⋯ 메뉴)
+// 세션 화판의 맨 위: 이 대화의 프로젝트(누르면 세션 목록의 그 묶음으로), 없으면 「프로젝트 없음」(누르면 넣을 곳을 고르는 ⋯ 메뉴)
 function renderProjLink(s) {
   const b = $("proj-link"), pid = s && projOf(s.id);
   b.hidden = !s;
@@ -1032,15 +1095,30 @@ function renderProjLink(s) {
   const pr = pid && state.projects.projects[pid];
   b.classList.toggle("none", !pr);
   b.disabled = !pr && !canWrite();
-  b.textContent = pr ? `프로젝트 ${pr.name}${pr.cur ? ` · 지금 ${pr.cur}` : ""}${pr.left ? ` · 남은 ${pr.left}` : ""}` : "프로젝트 없음";
-  b.title = pr ? `「${pr.name}」 큰 그림 보기 · ${WHY_KO[state.projects.members[s.id]?.why] || ""}` : "이 대화를 넣을 프로젝트를 고릅니다";
+  b.textContent = pr ? `프로젝트 ${pr.name}` : "프로젝트 없음";
+  b.title = pr ? `「${pr.name}」 의 대화들을 세션 목록에서 보기 · ${WHY_KO[state.projects.members[s.id]?.why] || ""}` : "이 대화를 넣을 프로젝트를 고릅니다";
   b.dataset.pid = pr ? pid : "";
 }
 $("proj-link").addEventListener("click", () => {
   const b = $("proj-link");
-  if (b.dataset.pid) connect(b.dataset.pid);
+  if (b.dataset.pid) showProject(b.dataset.pid);
   else if (state.sessions.has(state.sid)) openGroupMenu(state.sid, b);
 });
+
+// 맨 위 단추·찾기에서 프로젝트를 고르면 세션 목록의 그 묶음으로 가서 편다(화면은 그대로). 목록 머리의 이름은 묶음을 펴고 접는다
+function showProject(pid) {
+  if (!isProj(pid)) return;
+  if (gfold.delete(pid)) store.set("atv.gfold", JSON.stringify([...gfold]));
+  if (state.projects.projects[pid].done) store.set("atv.doneOpen", "1");
+  if (layout.foldLeft) { layout.foldLeft = false; applyLayout(); saveLayout(); }
+  queueRender();
+  requestAnimationFrame(() => {
+    const head = $("sess-body").querySelector(`.gfold[data-pid="${CSS.escape(pid)}"]`);
+    head?.scrollIntoView({ block: "nearest" });
+    head?.focus({ preventScroll: true });
+  });
+}
+
 for (const [id, d] of [["thread-prev", -1], ["thread-next", 1]]) {
   $(id).addEventListener("click", () => {
     const th = threadOf(state.sid), to = th[th.findIndex((x) => x.id === state.sid) + d];
@@ -1129,7 +1207,7 @@ $("toggle-done").addEventListener("click", () => { state.planReveal = null; setS
 // 계획 칸 위 「도는 에이전트」: 지금 도는 다른 LLM 명령(Codex 등)과 하위 에이전트의 이름표, 걸린 시간. 1초마다 불리므로 바뀔 때만 다시 만든다
 const AGENTS_SHOWN = 6;
 function renderAgents(scene, now) {
-  const box = $("plan-agents"), list = isProj(state.sid) ? [] : agentsRunning(scene, now), llms = isProj(state.sid) ? [] : llmRunning(scene, now);
+  const box = $("plan-agents"), list = agentsRunning(scene, now), llms = llmRunning(scene, now);
   box.hidden = !list.length && !llms.length;
   const shown = list.slice(0, AGENTS_SHOWN), more = list.length - shown.length;
   const key = JSON.stringify([more, shown.map((a) => [a.id, subInfo(scene, a.id).name]), llms.map((r) => [r.id, r.llm, r.desc, llmSince(r)])]);
@@ -1170,7 +1248,7 @@ function renderPlan(scene, now) {
     nowBox.hidden = true;
     toggle.hidden = true;
     renderPlan.key = null;
-    body.replaceChildren(el("p", "row2", isProj(state.sid) ? "이 프로젝트의 작업 단위가 여기에 보입니다." : "Claude 가 plan 으로 계획을 올리면 여기에 보입니다."));
+    body.replaceChildren(el("p", "row2", "Claude 가 plan 으로 계획을 올리면 여기에 보입니다."));
     return;
   }
   // 지금 단계: 스크롤해도 위에 남는다
@@ -1344,42 +1422,6 @@ for (const [k, label] of TL_KINDS) {
   $("tl-filters").append(b);
 }
 
-// 프로젝트 화판의 오른쪽 아래: 이 프로젝트의 대화(기록된 사실만: 시작 시각·상태·고친 파일 수·올린 계획의 끝난 단계)와
-// 큰 그림의 메모를 최근 것부터. 대화를 누르면 그 대화의 화판으로 간다
-function renderHistory(scene, now) {
-  const rows = [];
-  for (const [sid, m] of Object.entries(state.projects.members)) {
-    const s = m.pid === state.sid && state.sessions.get(sid);
-    if (s && !s.empty) rows.push({ t: s.startedAt || s.lastT, s, why: m.why });
-  }
-  for (const e of scene.timeline) if (e.type === "note") rows.push({ t: e.t, e });
-  rows.sort((a, b) => b.t - a.t);
-  const items = rows.slice(0, 300).map((r) => {
-    const li = el("li");
-    li.append(el("span", "when", fmtWhen(r.t, now)));
-    if (r.e) {
-      if (r.e.kind) li.append(el("span", `k ${r.e.kind}`, NOTE_KO[r.e.kind]));
-      const by = r.e.by && state.sessions.get(r.e.by);
-      li.append(document.createTextNode(r.e.text + (r.e.on ? ` (${r.e.on})` : "") + (by ? ` · ${sessName(by)}` : "")));
-      return li;
-    }
-    const s = r.s, b = el("button", "hist");
-    b.type = "button";
-    b.dataset.sid = s.id;
-    b.append(el("span", `sico ${s.status}`, SESS_ICO[s.status] || "○"), document.createTextNode(` ${sessName(s)}`));
-    b.title = `${WHY_KO[r.why] || ""} · 이 대화의 화판 보기`;
-    b.addEventListener("click", () => connect(s.id));
-    li.append(b, el("span", "muted", ` ${SESS_KO[s.status] || s.status} · 파일 ${s.edits || 0}${s.steps?.[1] ? ` · 단계 ${s.steps[0]}/${s.steps[1]}` : ""}`));
-    return li;
-  });
-  if (!items.length) items.push(el("li", "muted", "아직 이 프로젝트에 든 대화가 없습니다. 세션 줄을 이 프로젝트로 끌어 놓거나, Claude 가 project 도구로 들어오면 여기에 쌓입니다."));
-  // 다른 세션의 사건마다 다시 만들므로, 키보드 초점이 대화 단추에 있었으면 같은 대화의 단추로 되돌린다
-  const focused = document.activeElement?.closest?.("#tl-body .hist")?.dataset.sid;
-  $("tl-body").replaceChildren(...items);
-  if (focused) $("tl-body").querySelector(`.hist[data-sid="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
-  $("tl-new").hidden = true;
-}
-
 // 타임라인 줄 요소. 열쇠는 기록 번호와 그 줄의 모양을 바꾸는 값(실행 상태·걸린 시간, 보낸 글 상태, 묶은 수정 횟수)이다.
 // 기록 번호는 세션마다 따로 매기므로 다른 세션·스냅샷으로 바꿀 때 비운다
 let tlCache = new Map();
@@ -1487,13 +1529,6 @@ function renderAgentFilter(scene, id) {
 }
 
 function renderTimeline(scene, now) {
-  const proj = isProj(state.sid);
-  $("tl-title").textContent = proj ? "대화 이력" : "타임라인";
-  $("tl-filters").hidden = proj;
-  $("popout").hidden = proj;
-  // 시각을 왼쪽 칸에 두고 글은 그 오른쪽에 내어 쓴다(대화 이력은 날짜가 붙어 폭이 달라 그대로 둔다)
-  $("tl-body").classList.toggle("hang", !proj);
-  if (proj) return renderHistory(scene, now);
   const ol = $("tl-body"), box = $("timeline");
   const items = [];
   // 시작 없이 끝만 온 하위 에이전트(종류도 없음)는 Claude Code 안쪽 보조 에이전트(다음 입력 제안 따위)로 보여 숨긴다
@@ -2395,12 +2430,12 @@ function leaveSession() {
   hideAsk(true);
 }
 
-// ---- 세션·프로젝트 이름 ----
+// ---- 세션 이름 ----
 $("sess-name").addEventListener("click", () => {
-  const s = state.sessions.get(state.sid), pr = isProj(state.sid) && state.projects.projects[state.sid];
-  if (!s && !pr) return;
-  $("name-input").value = pr ? pr.name : s.name || "";
-  $("name-input").placeholder = pr ? "프로젝트 이름" : s.title || "이름";
+  const s = state.sessions.get(state.sid);
+  if (!s) return;
+  $("name-input").value = s.name || "";
+  $("name-input").placeholder = s.ai || s.title || "이름";
   $("name-form").hidden = false;
   $("sess-name").hidden = true;
   $("name-input").focus();
@@ -2412,9 +2447,8 @@ $("name-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const sid = state.sid;
   closeName();
-  // 세션 이름은 비우면 Claude Code 이름·첫 프롬프트로 돌아간다. 프로젝트 이름은 비울 수 없다
-  if (isProj(sid)) { if ($("name-input").value.trim()) await boardOp({ op: "proj-rename", pid: sid, name: $("name-input").value }); }
-  else if (sid) await boardOp({ op: "rename", sid, name: $("name-input").value });
+  // 세션 이름은 비우면 Claude Code 이름·자동 요약 제목·첫 입력으로 돌아간다
+  if (sid) await boardOp({ op: "rename", sid, name: $("name-input").value });
 });
 
 // ---- 프로젝트 만들기·옮기기 ----
@@ -2506,7 +2540,7 @@ function openProjectMenu(pid, anchor) {
     closeGroupMenu();
     boardOp({ op: "proj-drop", pid });
   }, "gm-del");
-  drop.title = "프로젝트를 지웁니다. 대화는 「프로젝트 없음」 으로 가고, 큰 그림 기록은 상태 폴더의 trash 에 30일 동안 남습니다";
+  drop.title = "프로젝트를 지웁니다. 대화는 「프로젝트 없음」 으로 갑니다";
   // 끝난 대화까지: 서버가 받은 때의 소속으로 끝난 대화를 휴지통으로 옮기고 프로젝트를 지운다(한 번에, 일부만 되면 프로젝트는 남는다).
   // 진행 중인 대화는 「프로젝트 없음」 으로 남는다. 여기 수는 안내일 뿐이다
   const ended = () => [...state.sessions.values()].filter((s) => projOf(s.id) === pid && s.status === "ended").length;
@@ -3176,29 +3210,20 @@ function localGroups(terms) {
     const go = it.kind === "step" ? { step: it.id } : { part: partAnchor(scene, it) };
     board.push({ kind: partLabel(it), text: snippet(text, terms), meta: it.status ? ST_KO[it.status] : "", go: { sid: state.sid, ...go } });
   }
-  if (isProj(state.sid)) {
-    // 큰 그림에는 타임라인이 없다: 메모는 붙은 단위·부품으로 간다
-    for (let i = scene.timeline.length - 1; i >= 0; i--) {
-      const e = scene.timeline[i], on = e.type === "note" ? own(scene.items, e.on || e.step) : null;
-      if (on && matchAll(entryText(scene, e), terms)) board.push({ kind: NOTE_KO[e.kind] || "메모", text: snippet(entryText(scene, e), terms), meta: fmtWhen(e.t, now), go: { sid: state.sid, ...(on.kind === "step" ? { step: on.id } : { part: partAnchor(scene, on) }) } });
-    }
+  if (board.length) groups.push({ title: "이 화판", count: board.length, rows: board.slice(0, FIND_MAX.board), note: board.length > FIND_MAX.board ? `외 ${board.length - FIND_MAX.board}개 — 낱말을 더 써서 좁혀 보세요` : "" });
+  const tl = [];
+  let n = 0;
+  for (let i = scene.timeline.length - 1; i >= 0; i--) {
+    const e = scene.timeline[i], text = entryText(scene, e);
+    if (matchAll(text, terms) && ++n <= FIND_MAX.tl) tl.push({ kind: tlLabel(e), text: snippet(text, terms), meta: fmtWhen(e.t, now), go: { sid: state.sid, seq: e.seq, key: tlKey(e) } });
   }
-  if (board.length) groups.push({ title: isProj(state.sid) ? "이 큰 그림" : "이 화판", count: board.length, rows: board.slice(0, FIND_MAX.board), note: board.length > FIND_MAX.board ? `외 ${board.length - FIND_MAX.board}개 — 낱말을 더 써서 좁혀 보세요` : "" });
-  if (!isProj(state.sid)) {
-    const tl = [];
-    let n = 0;
-    for (let i = scene.timeline.length - 1; i >= 0; i--) {
-      const e = scene.timeline[i], text = entryText(scene, e);
-      if (matchAll(text, terms) && ++n <= FIND_MAX.tl) tl.push({ kind: tlLabel(e), text: snippet(text, terms), meta: fmtWhen(e.t, now), go: { sid: state.sid, seq: e.seq, key: tlKey(e) } });
-    }
-    if (n) groups.push({ title: "이 세션 타임라인", count: n, rows: tl, note: n > FIND_MAX.tl ? `외 ${n - FIND_MAX.tl}개(옛 기록) — 낱말을 더 써서 좁혀 보세요` : "" });
-  }
+  if (n) groups.push({ title: "이 세션 타임라인", count: n, rows: tl, note: n > FIND_MAX.tl ? `외 ${n - FIND_MAX.tl}개(옛 기록) — 낱말을 더 써서 좁혀 보세요` : "" });
   const sess = [];
   for (const [pid, p] of Object.entries(state.projects.projects)) {
-    if (matchAll(`${p.name} ${p.purpose || ""}`, terms)) sess.push({ kind: "프로젝트", text: p.name, meta: p.done ? "끝난 프로젝트" : p.purpose || "", go: { sid: pid } });
+    if (matchAll(`${p.name} ${p.purpose || ""}`, terms)) sess.push({ kind: "프로젝트", text: p.name, meta: p.done ? "끝난 프로젝트" : p.purpose || "", go: { proj: pid } });
   }
   for (const s of [...state.sessions.values()].sort((a, b) => b.lastT - a.lastT)) {
-    if (s.empty || !matchAll(`${sessName(s)} ${s.title} ${s.cwd}`, terms)) continue;
+    if (s.empty || !matchAll(`${sessName(s)} ${s.title} ${s.ai || ""} ${s.cwd}`, terms)) continue;
     sess.push({ kind: "세션", text: sessName(s), meta: `${base(s.cwd) || "폴더 모름"} · ${fmtAgo(s.lastT, now)}`, go: { sid: s.id } });
   }
   if (sess.length) groups.push({ title: "세션 · 프로젝트", count: sess.length, rows: sess.slice(0, FIND_MAX.sess), note: sess.length > FIND_MAX.sess ? `외 ${sess.length - FIND_MAX.sess}개` : "" });
@@ -3214,9 +3239,9 @@ function remoteGroup(terms) {
   for (const s of r.sessions) {
     if (s.id === state.sid) continue;
     total += s.n;
-    const name = s.project ? `프로젝트 ${state.projects.projects[s.id]?.name || s.id}` : state.sessions.has(s.id) ? sessName(state.sessions.get(s.id)) : s.id.slice(0, 8);
+    const name = state.sessions.has(s.id) ? sessName(state.sessions.get(s.id)) : s.id.slice(0, 8);
     for (const h of s.hits) {
-      const kind = h.note ? NOTE_KO[h.kind] || "메모" : h.type === "part" || h.type === "step" ? (h.type === "step" ? "계획" : "그림") : tlLabel(h);
+      const kind = h.type === "part" || h.type === "step" ? (h.type === "step" ? "계획" : "그림") : tlLabel(h);
       rows.push({ kind, text: h.text, meta: h.t ? `${name} · ${fmtWhen(h.t, now)}` : name, go: { sid: s.id, ...(h.seq != null ? { seq: h.seq, key: h.key } : h.type === "step" ? { step: h.id } : { part: h.id }) } });
     }
     if (s.n > s.hits.length) rows.push({ kind: "", text: `${name} 에서 외 ${s.n - s.hits.length}건`, meta: "열어서 다시 찾기", go: { sid: s.id, again: true } });
@@ -3292,6 +3317,7 @@ function chooseFound(i) {
   const q = finder.q;
   closeSearch(false);
   const g = o.go;
+  if (g.proj) { showProject(g.proj); return; }
   if (g.sid && g.sid !== state.sid) connect(g.sid); // 이어 아래 자리로 간다(스냅샷을 받은 뒤)
   if (g.again) { searchQ.value = q; openSearch(); return; }
   // 접어 둔 계획·타임라인 칸은 펴고 간다

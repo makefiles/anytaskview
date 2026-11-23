@@ -181,20 +181,10 @@ async function main() {
   await hook(D, { f: "stop", last: "점검했습니다" });
   await hook(D, { f: "end", reason: "exit" });
 
-  // 프로젝트: 큰 그림에 작업 단위와 결정 대기. 간트의 「오늘」 선은 끈다(찍은 날에 따라 그림이 달라지지 않게)
+  // 프로젝트: 결제·주문 API 두 대화를 묶는다. 목록 줄에 두 대화의 지금 단계와 결정 대기가 붙는다
   const proj = await boardOp({ op: "proj-new", name: "쇼핑몰 결제 개편" });
   await boardOp({ op: "proj-set", sids: [A, B], pid: proj.pid });
-  await mcp(A, shop, "plan", { project: proj.pid, steps: [
-    { id: "u1", title: "결제 흐름 조사", status: "done" },
-    { id: "u2", title: "쿠폰 중복 할인 고치기", status: "doing" },
-    { id: "u3", title: "주문 API 응답 시간 개선", status: "todo" },
-    { id: "u4", title: "배포·모니터링", status: "todo" },
-  ] });
-  await mcp(A, shop, "draw", { project: proj.pid, ops: [
-    { id: "m", kind: "mermaid", label: "일정", src: "gantt\n  dateFormat YYYY-MM-DD\n  axisFormat %m-%d\n  todayMarker off\n  section 결제\n  흐름 조사 :done, a1, 2026-10-26, 2d\n  쿠폰 중복 고치기 :active, a2, after a1, 3d\n  section 주문 API\n  응답 시간 개선 :b1, 2026-11-02, 3d\n  section 배포\n  배포·모니터링 :c1, after b1, 2d" },
-    { id: "risk", kind: "table", label: "남은 결정", cols: ["무엇", "누가", "언제"], rows: [["배포 시점", "사용자", "11-05 전"], ["캐시 쓸지", "사용자", "방안 비교 뒤"]] },
-  ] });
-  await mcp(A, shop, "note", { project: proj.pid, kind: "wait", text: "배포 시점 결정 기다림", on: "u4" });
+  await mcp(B, api, "note", { kind: "wait", text: "색인과 캐시 가운데 무엇으로 할지", on: "s2" });
 
   // 「보내기」 창이 받을 준비가 된 모습이 되게, 플러그인의 Stop 훅처럼 결제 세션의 메시지를 기다린다(서버 상한 4분, 찍는 데 십여 초)
   fetch(base + "/api/inbox", { method: "POST", headers: { "content-type": "application/json", "x-atv-key": keys.write, Host: host }, body: JSON.stringify({ sid: A, wait: 240_000 }) }).catch(() => {});
@@ -254,9 +244,14 @@ async function main() {
       const x = Math.max(0, Math.min(c.left, p.left) - 24), y = Math.max(0, Math.min(c.top, p.top) - 12);
       return { x, y, width: Math.min(${W} - x, Math.max(c.right, p.right) + 24 - x), height: Math.min(${H} - y, Math.max(c.bottom, p.bottom) + 24 - y) }; })()`));
     await ev(`document.getElementById('composer-close').click()`);
-    // 프로젝트 큰 그림: 작업 단위의 간트·남은 결정·대화 이력
-    await open(proj.pid, theme);
-    await shot("project", theme);
+    // 프로젝트: 목록의 프로젝트 묶음 카드(단계 진척·지금 단계·이번 차례, 결정 대기와 마지막 요청·답은 하나씩 펼침)
+    await open(A, theme);
+    await ev(`document.querySelector('#sessions .holdline')?.click()`);
+    await sleep(100);
+    await ev(`document.querySelector('#sessions .moreline')?.click()`);
+    await sleep(200);
+    const group = await ev(`(() => { const r = document.querySelector('#sessions .gsec[data-pid]').getBoundingClientRect(); return { x: Math.max(0, r.left - 4), y: Math.max(0, r.top - 4), width: r.width + 8, height: r.height + 8 }; })()`);
+    await shot("project", theme, group);
   }
 }
 

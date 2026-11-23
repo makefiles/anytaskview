@@ -64,7 +64,7 @@ tabnote() {
   if [ -n "$off" ]; then
     mkdir -p -m 700 "$D" 2>/dev/null
     ( set -C; : >"$D/$K.off" ) 2>/dev/null || return 1
-    msg="no board tab has been open for 30 seconds, so nobody is watching the board. The board's rule is to skip this conversation's board calls (calls with project still go) until a note says a tab is open again."
+    msg="no board tab has been open for 30 seconds, so nobody is watching the board. The board's rule is to skip this conversation's board calls until a note says a tab is open again."
   else
     [ -e "$D/$K.off" ] || return 1
     mv "$D/$K.off" "$D/$K.off.$$" 2>/dev/null || return 1

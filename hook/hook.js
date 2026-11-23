@@ -187,6 +187,43 @@ const codexHome = () => process.env.CODEX_HOME || path.join(os.homedir(), ".code
 // Claude Code 의 세션 이름(/rename, claude -n). SessionStart·UserPromptSubmit 입력에 있다
 const title = (ev) => (typeof ev.session_title === "string" && ev.session_title ? { title: clip(ev.session_title, 80) } : {});
 
+// Claude Code 가 대화 기록(transcript_path)에 남기는 자동 요약 제목 {"type":"ai-title","aiTitle":…}. 문서에 없는 내부 기록이라
+// 없거나 모양이 다르면 싣지 않는다(목록 이름은 첫 입력으로 남는다). 같은 제목이 차례마다 다시 적히므로 끝 TITLE_TAIL 만 읽는다.
+// 파일 자체가 심볼릭 링크면 열지 않는다(readMeta 와 같다)
+const TITLE_TAIL = 256 * 1024;
+const AI_MARK = '"type":"ai-title"';
+function aiTitle(ev) {
+  const file = ev.transcript_path;
+  if (typeof file !== "string" || !file.endsWith(".jsonl")) return {};
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || !st.size) return {};
+    const len = Math.min(st.size, TITLE_TAIL), buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, st.size - len);
+    // 뒤에서부터 표지가 든 줄을 읽는다. 쓰는 중이라 깨진 마지막 줄이면 그 앞의 것을 쓴다(다섯 줄까지)
+    const text = buf.toString("utf8");
+    for (let at = text.lastIndexOf(AI_MARK), n = 0; at >= 0 && n < 5; at = text.lastIndexOf(AI_MARK, at - 1), n++) {
+      const start = text.lastIndexOf("\n", at) + 1, end = text.indexOf("\n", at);
+      let t;
+      try { t = JSON.parse(text.slice(start, end < 0 ? text.length : end)); } catch { continue; }
+      if (t?.type === "ai-title" && typeof t.aiTitle === "string" && t.aiTitle.trim()) return { ai: clip(t.aiTitle.trim(), 80) };
+      if (!start) break;
+    }
+    return {};
+  } catch {
+    return {};
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+// 붙여 넣은 글을 감싼 꼬리표(<pasted_content id="…">…</pasted_content id="…">). 글은 두고 꼬리표만 뗀다(제목·이어받기 문구가 글 머리를 본다).
+// id 가 붙은 꼬리표만 뗀다(글 안에 예로 쓴 <pasted_content> 는 남긴다). 뗐을 때만 앞 공백을 지운다(꼬리표 앞의 빈 줄)
+const PASTE_TAG = /<\/?pasted_content id="[^"]*">/g;
+const unpaste = (p) => { const q = p.replace(PASTE_TAG, ""); return q === p ? p : q.replace(/^\s+/, ""); };
+
 // Codex 의 apply_patch: 고친 파일마다 사실 하나. 결과 글의 「Success. Updated the following files:」 아래
 // 「A|M|D 경로」 줄이 실제로 바뀐 파일이다. 그 줄이 없으면 실패로 보고 패치 머리(*** Add File: 따위)의 경로를 쓴다
 const PATCH_MAX = 5;
@@ -299,7 +336,7 @@ export function toFact(ev, { codex = false } = {}) {
   switch (ev.hook_event_name) {
     case "SessionStart":
       // via: 어느 에이전트의 세션인지. Codex 는 큐로 보낼 때 그 세션의 CODEX_HOME 을 쓴다
-      return { f: "start", source: ev.source || "startup", cwd: ev.cwd || "", model: ev.model || "", ...title(ev), ...(codex && { via: "codex", home: codexHome() }) };
+      return { f: "start", source: ev.source || "startup", cwd: ev.cwd || "", model: ev.model || "", ...title(ev), ...(!codex && aiTitle(ev)), ...(codex && { via: "codex", home: codexHome() }) };
     case "UserPromptSubmit": {
       // VS Code 확장은 첫 입력 앞에 브라우저 안내문(4,000자 넘음)을 붙인다. 떼지 않으면 사용자 입력이 잘려 나간다
       const p = (ev.prompt || "").replace(/^\s*<browser_instruction>[\s\S]*?<\/browser_instruction>\s*/, "");
@@ -310,7 +347,8 @@ export function toFact(ev, { codex = false } = {}) {
         // run: 끝난 뒤에서 실행의 번호(훅의 tool_use_id). status 는 completed 말고 failed·stopped·killed 가 있다
         return { f: "prompt", sys: true, text: clip(tag("summary") || "백그라운드 작업 알림", 300), ...(run && { run, end: status === "failed" ? "fail" : !status || status === "completed" ? "done" : "stopped" }) };
       }
-      return { f: "prompt", text: clip(p, TEXT_MAX), ...title(ev) };
+      // 꼬리표는 작업 알림 판정 뒤에 뗀다(붙여 넣은 글이 <task-notification> 으로 시작해도 사용자 입력이다)
+      return { f: "prompt", text: clip(unpaste(p), TEXT_MAX), ...title(ev) };
     }
     case "PreToolUse":
       if (tool !== "Bash") return null;
@@ -344,7 +382,7 @@ export function toFact(ev, { codex = false } = {}) {
     case "Notification":
       return { f: "notify", ntype: ev.notification_type || "", text: clip(ev.message || "", 200) };
     case "Stop":
-      return { f: "stop", last: clip(ev.last_assistant_message || "", TEXT_MAX) };
+      return { f: "stop", last: clip(ev.last_assistant_message || "", TEXT_MAX), ...(!codex && aiTitle(ev)) };
     case "StopFailure":
       // API 오류(사용 한도·인증 따위)로 끝난 차례. Stop 대신 온다(받지 않으면 다음 입력까지 「작업 중」 으로 남는다)
       return { f: "stop", last: clip([`API 오류 (${ev.error || "unknown"})`, ev.last_assistant_message || ""].filter(Boolean).join("\n"), TEXT_MAX) };

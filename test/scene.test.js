@@ -1,7 +1,7 @@
 // 장면 규칙 시험: 명령 검사, 지금 단계, 훅 사실의 순서 처리, 재생이 실시간과 같은지
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, idsView, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs, drawingStale, DRAW_SLACK, agentsRunning, llmRunning, llmCounts } from "../lib/scene.js";
+import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, overview, recent, evalDeliver, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs, drawingStale, DRAW_SLACK, agentsRunning, llmRunning, llmCounts } from "../lib/scene.js";
 
 // 서버처럼: 검사 → 기록(JSON) → 기록을 되읽어 적용
 function harness(resume) {
@@ -24,6 +24,53 @@ function harness(resume) {
     replay() { const s = newScene(); for (const r of log) applyRes(s, r); return s; },
   };
 }
+
+test("개요(overview): 결정 대기 > 막힘, 글은 지금의 대기·막힘을 세운 메모(답 받은 대기·상태가 바뀌기 전 메모는 빼고), 없으면 단계 메모·이름, 끝난 대화는 싣지 않음", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "a", title: "고치기", status: "doing" }, { id: "b", title: "검증" }] }, 1000);
+  assert.deepEqual(overview(h.scene), { cur: { title: "고치기", status: "doing" }, hold: null });
+  h.draw({ ops: [{ id: "x", kind: "box", label: "빌드 서버", status: "blocked" }] }, 1100);
+  assert.deepEqual(overview(h.scene).hold, { kind: "blocked", text: "빌드 서버" }, "메모가 없으면 부품 이름");
+  h.note({ text: "빌드 서버 응답 기다림", kind: "blocked", on: "x" }, 1200);
+  assert.deepEqual(overview(h.scene).hold, { kind: "blocked", text: "빌드 서버 응답 기다림" });
+  h.note({ text: "첫 질문 승인?", kind: "wait" }, 1300); // on 없음: 지금 단계 a
+  assert.deepEqual(overview(h.scene), { cur: { title: "고치기", status: "wait" }, hold: { kind: "wait", text: "첫 질문 승인?" } }, "결정 대기가 막힘보다 앞선다");
+  h.fact({ f: "prompt", text: "1번" }, 1400);
+  assert.deepEqual(overview(h.scene).hold, { kind: "blocked", text: "빌드 서버 응답 기다림" }, "답을 받으면 막힘이 남는다");
+  h.plan({ steps: [{ id: "a", status: "wait", note: "두 번째 질문: 배포?" }] }, 1500);
+  assert.deepEqual(overview(h.scene).hold, { kind: "wait", text: "두 번째 질문: 배포?" }, "답 받은 옛 메모가 아니라 단계 메모");
+  h.draw({ ops: [{ id: "x", status: "doing" }] }, 1600);
+  h.draw({ ops: [{ id: "x", status: "blocked", note: "다른 이유" }] }, 1700);
+  h.fact({ f: "prompt", text: "2번" }, 1800);
+  assert.deepEqual(overview(h.scene).hold, { kind: "blocked", text: "다른 이유" }, "다시 막히기 전의 막힘 메모는 빼고 부품 메모");
+  h.fact({ f: "end", reason: "other" }, 1900);
+  assert.deepEqual(overview(h.scene), { cur: null, hold: null }, "끝난 대화는 싣지 않는다");
+});
+
+test("이번 차례(recent): 마지막 입력이나 화판에서 받은 글 뒤의 파일(같은 파일은 한 번)·명령·실패(가장 늦게 실패한 것)와 차례를 연 글·마지막 답", () => {
+  const h = harness();
+  h.fact({ f: "start", cwd: "/w", source: "startup" }, 500);
+  h.fact({ f: "prompt", text: "요청 A" }, 1000);
+  h.fact({ f: "run-start", id: "r1", cmd: "npm test" }, 1100);
+  h.fact({ f: "run-end", id: "r1", cmd: "npm test" }, 1200);
+  h.fact({ f: "stop", last: "답 A\n둘째 줄" }, 1300);
+  assert.deepEqual(recent(h.scene), { files: 0, cmds: 1, fails: 0, failName: "", ask: "요청 A", ans: "답 A" });
+  h.fact({ f: "prompt", text: "요청 B" }, 2000);
+  h.fact({ f: "edit", tool: "Edit", path: "src/a.js" }, 2100);
+  h.fact({ f: "edit", tool: "Edit", path: "/w/src/a.js" }, 2200);
+  h.fact({ f: "run-start", id: "long", cmd: "long job", desc: "긴 작업" }, 2300);
+  h.fact({ f: "run-start", id: "r2", cmd: "npm run lint" }, 2400);
+  h.fact({ f: "run-fail", id: "r2", cmd: "npm run lint", error: "x" }, 2500);
+  h.fact({ f: "run-fail", id: "long", cmd: "long job", desc: "긴 작업", error: "y" }, 2600);
+  assert.deepEqual(recent(h.scene), { files: 1, cmds: 2, fails: 2, failName: "긴 작업", ask: "요청 B", ans: "" });
+  // 화판에서 보낸 글을 Claude 가 받으면 새 차례다
+  h.fact({ f: "stop", last: "답 B" }, 2700);
+  applyRes(h.scene, evalSend(h.scene, { kind: "instruction", text: "화판 지시 C" }, { t: 2800, seq: 900 }, "m1").res);
+  applyRes(h.scene, evalDeliver(h.scene, { t: 2900, seq: 901 }).res);
+  h.fact({ f: "run-start", id: "r3", cmd: "git status" }, 3000);
+  assert.deepEqual(recent(h.scene), { files: 0, cmds: 1, fails: 0, failName: "", ask: "화판 지시 C", ans: "" });
+  assert.equal(recent({ ...h.scene, timeline: [...h.scene.timeline, { type: "fact", f: "stop", last: "긴 답 ".repeat(100), t: 3100 }] }).ans.length, 300, "긴 답은 300자에서 자른다");
+});
 
 test("plan: 새 단계는 title 필요, 지금 단계는 가장 최근에 doing 이 된 단계", () => {
   const h = harness();
@@ -212,7 +259,7 @@ test("끝난 단계의 id 를 새 제목으로 다시 쓰면 같은 자리의 �
   assert.equal(h.scene.items.s1.startT, 600_000);
 });
 
-test("옛 그림: 하위 에이전트가 도는 동안, 작업을 끝내는 호출, 그림이 없거나 비웠을 때, 큰 그림 화판에는 알리지 않는다", () => {
+test("옛 그림: 하위 에이전트가 도는 동안, 작업을 끝내는 호출, 그림이 없거나 비웠을 때는 알리지 않는다", () => {
   // 하위 에이전트(같은 세션 화판에 쓴다)
   const h = harness();
   h.plan({ steps: [{ id: "m1", title: "원인 찾기", status: "doing" }, { id: "m2", title: "수정" }] }, 1000);
@@ -237,12 +284,6 @@ test("옛 그림: 하위 에이전트가 도는 동안, 작업을 끝내는 호�
   assert.equal(e.scene.view.shapeT, 800_000);
   e.plan({ steps: [{ id: "b", status: "done" }, { id: "c", title: "다음", status: "doing" }, { id: "d", title: "검증" }] }, 900_000);
   assert.doesNotMatch(e.plan({ steps: [{ id: "c", status: "done" }, { id: "d", status: "doing" }] }, 1_000_000), /drawing/);
-  // 큰 그림 화판: 시각을 남기지 않고 알리지도 않는다
-  const sc = newScene(), ctx = (t) => ({ t, seq: t, project: true });
-  applyRes(sc, evalDraw(sc, { ops: [{ id: "u", kind: "box", label: "단위" }] }, ctx(1)).res);
-  applyRes(sc, evalPlan(sc, { steps: [{ id: "u1", title: "01", status: "doing" }, { id: "u2", title: "02" }] }, ctx(2)).res);
-  assert.deepEqual(sc.view, { dir: "RIGHT" });
-  assert.doesNotMatch(evalPlan(sc, { steps: [{ id: "u1", status: "done" }, { id: "u2", status: "doing" }] }, ctx(3)).msg, /drawing/);
   // 옛 기록(시각 없음)은 옛 그림으로 보지 않는다
   assert.ok(!drawingStale({ dir: "RIGHT" }));
   assert.ok(drawingStale({ taskT: 50_000 }));
@@ -292,7 +333,7 @@ test("남은 단계: 새 작업을 올린 호출 결과에 앞 작업에서 열�
   assert.equal(h.plan({ steps: [{ id: "c1", title: "다섯째", status: "doing" }, { id: "c2", title: "검증" }] }, 10_000), "계획 12단계 · 지금 c1");
 });
 
-test("남은 단계: 여섯 개까지 싣고, 하위 에이전트가 도는 동안과 큰 그림 화판에는 알리지 않는다", () => {
+test("남은 단계: 여섯 개까지 싣고, 하위 에이전트가 도는 동안은 알리지 않는다", () => {
   const h = harness();
   h.plan({ steps: Array.from({ length: 8 }, (_, i) => ({ id: `o${i}`, title: `옛 단계 ${i} 제목이 아주 길어서\n잘리는 경우`, status: i ? "todo" : "doing" })) }, 1000);
   const msg = h.plan({ steps: [{ id: "n1", title: "새 작업", status: "doing" }, { id: "n2", title: "검증" }] }, 2000);
@@ -303,10 +344,6 @@ test("남은 단계: 여섯 개까지 싣고, 하위 에이전트가 도는 동�
   // 하위 에이전트가 도는 동안은 새 작업으로 보지 않으므로 알리지도 않는다
   h.fact({ f: "agent-start", agent: "sub1", agentType: "Explore" }, 3000);
   assert.doesNotMatch(h.plan({ steps: [{ id: "r1", title: "파일 읽기", status: "doing" }, { id: "r2", title: "보고" }] }, 4000), /still open/);
-  // 큰 그림 화판: 단위가 여럿 열려 있는 것이 보통이다
-  const sc = newScene(), ctx = (t) => ({ t, seq: t, project: true });
-  applyRes(sc, evalPlan(sc, { steps: [{ id: "u1", title: "01", status: "doing" }, { id: "u2", title: "02" }] }, ctx(1)).res);
-  assert.doesNotMatch(evalPlan(sc, { steps: [{ id: "u3", title: "03", status: "doing" }, { id: "u4", title: "04" }] }, ctx(2)).msg, /still open/);
 });
 
 test("note: 막힘·승인 대기는 단계 상태를 바꾸고, 지금 단계는 그대로 남는다", () => {
@@ -456,38 +493,6 @@ test("ids: 이름표와 label 앞부분을 한 줄로", () => {
   h.plan({ steps: [{ id: "s1", title: "원인 찾기", status: "doing" }] });
   h.draw({ ops: [{ id: "a", kind: "box", label: "parser.c", status: "doing" }, { id: "b", kind: "box" }, { id: "e1", kind: "edge", from: "a", to: "b" }] });
   assert.equal(idsLine(h.scene), 'plan: s1 "원인 찾기" doing | draw: a "parser.c" box doing, b box, e1 a>b edge');
-});
-
-test("ids 줄이기(brief): 끝난 단계는 최근 몇 개만 제목을 싣고 나머지는 id 만, id 만 실은 단계는 한도에 세지 않는다", () => {
-  const h = harness();
-  h.plan({ steps: Array.from({ length: 6 }, (_, i) => ({ id: `u0${i + 1}`, title: `단위 ${i + 1}`, status: i < 5 ? "done" : "doing" })) });
-  h.draw({ ops: [{ id: "a", kind: "box", label: "지금 부품" }] });
-  assert.deepEqual(idsView(h.scene, 40, 2), { text: 'plan: 끝남 3: u01 u02 u03, u04 "단위 4" done, u05 "단위 5" done, u06 "단위 6" doing | draw: a "지금 부품" box', cut: false });
-  assert.equal(idsView(h.scene, 40).text, idsLine(h.scene, 40)); // brief 없이는 예전 그대로
-  assert.deepEqual(idsView(h.scene, 3, 2), { text: 'plan: 끝남 3: u01 u02 u03, u04 "단위 4" done, u05 "단위 5" done, u06 "단위 6" doing | 외 1개', cut: true });
-  // 제목을 싣는 최근 단계는 끝낸 때 순서로, id 만 싣는 단계는 최근 60개까지(넘으면 잘린 것으로 친다)
-  const g = harness();
-  for (const from of [0, 35]) g.plan({ steps: Array.from({ length: 35 }, (_, i) => ({ id: `d${from + i}`, title: `끝 ${from + i}` })) }); // 한 번에 50개까지
-  for (let i = 69; i >= 0; i--) g.plan({ steps: [{ id: `d${i}`, status: "done" }] }, 1000 + (69 - i)); // 뒤 단계부터 끝냄
-  const v = idsView(g.scene, 40, 1);
-  assert.match(v.text, /^plan: 끝남 69: d60 d59 .* d1 외 9개, d0 "끝 0" done$/);
-  assert.equal(v.cut, true);
-});
-
-test("ids 줄이기(brief): 큰 그림의 단위 상자도 끝난 것은 id 만, 선은 수만 실어 단위가 쌓여도 잘리지 않는다", () => {
-  const h = harness(), N = 30;
-  h.plan({ steps: Array.from({ length: N }, (_, i) => ({ id: `u${i}`, title: `단위 ${i}`, status: i < N - 2 ? "done" : i === N - 2 ? "doing" : "todo" })) });
-  for (let at = 0; at < N; at += 20) {
-    const ops = [];
-    for (let i = at; i < Math.min(N, at + 20); i++) {
-      ops.push({ id: `b${i}`, kind: "box", label: `단위 ${i}`, status: i < N - 2 ? "done" : i === N - 2 ? "doing" : "todo" });
-      if (i) ops.push({ id: `w${i}`, kind: "edge", from: `b${i - 1}`, to: `b${i}` });
-    }
-    h.draw({ ops });
-  }
-  const v = idsView(h.scene, 40, 3);
-  assert.equal(v.cut, false);
-  assert.match(v.text, / \| draw: 끝남 25: b0 b1 .* b24, b25 "단위 25" box done, b26 "단위 26" box done, b27 "단위 27" box done, b28 "단위 28" box doing, b29 "단위 29" box todo, 선 29개$/);
 });
 
 test("ref 에 줄바꿈 같은 제어 문자는 받지 않는다(복사해 터미널에 붙이면 명령이 된다)", () => {

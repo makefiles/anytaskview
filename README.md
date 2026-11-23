@@ -4,10 +4,10 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.png">
-  <img src="docs/images/hero-light.png" alt="AnyTaskView board. Left: session list grouped by project, with Claude and Codex logos and a 'past sessions' group (expanded here). Middle: a diagram the agent drew, with a rounded screen box, a decision diamond, a server box and a database cylinder joined by labelled arrows, a results table, a document box and a hexagon waiting for approval. Right: the plan with the current step pinned on top, and a timeline of commands, file edits, notes and the user's prompt. Top: the session name, the current step and a one-line approval banner with 'show more' and 'close' buttons.">
+  <img src="docs/images/hero-light.png" alt="AnyTaskView board. Left: session list grouped by project, with running conversations as cards (step progress bar, current step, this turn's edits and commands, the decision each waits for), with Claude and Codex logos and a 'past sessions' group (expanded here). Middle: a diagram the agent drew, with a rounded screen box, a decision diamond, a server box and a database cylinder joined by labelled arrows, a results table, a document box and a hexagon waiting for approval. Right: the plan with the current step pinned on top, and a timeline of commands, file edits, notes and the user's prompt. Top: the session name, the current step and a one-line approval banner with 'show more' and 'close' buttons.">
 </picture>
 
-**English summary.** anytaskview is a Linux plugin for coding agents (Claude Code and OpenAI Codex) that shows what the agent is doing on a live board in your local browser: the plan and its current step, a diagram the agent keeps extending while it works (finished groups fold into one box you can click open), notes and decisions, and facts collected automatically by hooks (file edits with their diffs, commands, subagents with a colored name tag you can click to follow one of them). Markdown and HTML documents the agent writes (plans, designs, manuals) gather in a Docs tab next to the plan and open rendered, Mermaid included, in place of the diagram; clicking a document box or an edit line opens the document at the changed paragraph. Work that spans several conversations is grouped into projects, each with a big-picture board that stays until the work is done. You can point at a box or a step on the board and send a comment or instruction back to the agent, search the board and past records, and drag shapes with Ctrl held to rearrange them. The board UI and agent-facing texts are in Korean, and so are the screenshots in this README.
+**English summary.** anytaskview is a Linux plugin for coding agents (Claude Code and OpenAI Codex) that shows what the agent is doing on a live board in your local browser: the plan and its current step, a diagram the agent keeps extending while it works (finished groups fold into one box you can click open), notes and decisions, and facts collected automatically by hooks (file edits with their diffs, commands, subagents with a colored name tag you can click to follow one of them). Markdown and HTML documents the agent writes (plans, designs, manuals) gather in a Docs tab next to the plan and open rendered, Mermaid included, in place of the diagram; clicking a document box or an edit line opens the document at the changed paragraph. Work that spans several conversations is grouped into projects; each conversation's row in the session list shows its current step and what it waits for, built from its own plans and notes. Session names use Claude Code's own summary title when there is one. You can point at a box or a step on the board and send a comment or instruction back to the agent, search the board and past records, and drag shapes with Ctrl held to rearrange them. The board UI and agent-facing texts are in Korean, and so are the screenshots in this README.
 
 - Supported agents: Claude Code (tested in the terminal `claude`) and OpenAI Codex (terminal `codex`, ChatGPT desktop app, VS Code). Other agents are not supported yet.
 - Requirements: Linux (macOS untested, Windows through WSL), Node.js 22.12 or later, a recent browser, and Claude Code or Codex with plugin support.
@@ -26,8 +26,9 @@
 - 에이전트가 만들거나 고친 md·html 문서(계획서·설계서·매뉴얼)는 계획 칸의 「문서」 탭에 모이고, 누르면 그림 자리에 렌더된 화면(Mermaid 그림 포함)으로 열립니다. 문서 상자나 타임라인의 수정 줄을 누르면 그 문서의 바뀐 문단으로 갑니다.
 - 하위 에이전트마다 맡은 일과 색 점으로 된 이름표가 계획 칸 위와 타임라인 줄 앞에 붙고, 누르면 그 에이전트의 줄만 보입니다. 하위 에이전트는 화판에 직접 그리지 않고, 결과를 받은 상위 에이전트가 그립니다.
 - 에이전트가 다른 LLM 에 일을 시키면(`codex exec`·`codex review`·Codex 플러그인 작업, `claude -p`, `gemini -p`, `opencode run`, `copilot -p`, `aider --message`, `ollama run`) 도는 동안 계획 칸 위와 세션 줄에 그 이름의 표와 걸린 시간이 보이고, 타임라인의 그 명령 줄에도 표가 붙습니다.
-- 여러 대화에 걸친 일은 프로젝트로 묶이고, 프로젝트마다 끝날 때까지 이어지는 큰 그림 화판이 있습니다.
-- 화판 탭이 30초 넘게 하나도 열려 있지 않으면 에이전트가 대화 화판에 그리는 호출을 건너뛰어 토큰을 아낍니다. 탭을 열면 다음 도구 호출이나 입력 때 지금 계획과 그림을 한 번에 다시 올립니다. 그 사이의 그림 변화는 재생에 남지 않습니다. 훅이 올리는 사실과 프로젝트 큰 그림은 계속 쌓입니다.
+- 세션 목록의 진행 중인 대화는 카드로 보입니다. 카드에는 단계 진척 막대와 「지금: 단계」, 이번 차례(마지막 입력 뒤)에 고친 파일·명령 수와 실패한 명령, 브랜치, 기다리는 결정이나 막힌 까닭, 마지막 요청·답이 붙습니다(긴 글은 눌러서 펼침). 모두 각 대화의 기록으로 자동으로 만들어서, 에이전트가 따로 그리지 않습니다. 여러 대화에 걸친 일은 프로젝트로 묶입니다.
+- 세션 이름은 Claude Code 가 붙인 요약 제목이 있으면 그것을 쓰고, 없으면 첫 입력을 씁니다(첫 입력은 마우스를 올리면 보임).
+- 화판 탭이 30초 넘게 하나도 열려 있지 않으면 에이전트가 대화 화판에 그리는 호출을 건너뛰어 토큰을 아낍니다. 탭을 열면 다음 도구 호출이나 입력 때 지금 계획과 그림을 한 번에 다시 올립니다. 그 사이의 그림 변화는 재생에 남지 않습니다. 훅이 올리는 사실은 계속 쌓입니다.
 - 화판의 상자나 단계를 가리켜 그 자리에서 에이전트에 의견·지시를 보낼 수 있습니다.
 
 ## 지원하는 에이전트
@@ -142,25 +143,25 @@ Codex 로만 설치했다면 플러그인 폴더가 `~/.codex/plugins/cache/anyt
 
 세션은 프로젝트별로 묶이고, Claude·Codex 로고로 어느 에이전트의 세션인지 보입니다. 작업 중인 세션은 파란 띠·바탕에 「작업 중」 글자가 반짝이고, 입력이 필요한 세션은 주황 띠·바탕에 「입력 필요」 글자가 반짝입니다. 지금 보는 세션이 일하는 동안에는 계획의 「지금」 줄도 반짝입니다. 상자나 단계에 마우스를 올리면 뜨는 「보내기」 로 그 자리에 대해 의견·지시를 보냅니다.
 
-### 프로젝트 큰 그림
+### 세션 카드와 프로젝트
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/project-dark.png">
-  <img src="docs/images/project-light.png" alt="프로젝트 큰 그림: 작업 단위의 간트 차트, 남은 결정 표, 계획의 작업 단위(하나는 승인 대기), 프로젝트에 든 대화의 이력.">
+  <img src="docs/images/project-light.png" alt="세션 목록의 프로젝트 묶음에 든 두 대화 카드: 상태·시각·폴더, 단계 진척 막대와 「지금: 단계」, 이번 차례의 파일·명령·실패한 명령, 결정 대기 글과 펼친 마지막 요청·답.">
 </picture>
 
-여러 대화에 걸친 일은 프로젝트의 큰 그림 화판에 작업 단위(끝난 것·지금·다음에 할 것을 차례대로 이은 그림)·남은 결정·대화 이력으로 남습니다.
+세션 목록의 진행 중인 대화는 카드로 보입니다. 카드에는 상태·마지막 활동·폴더·브랜치(⎇), 단계 진척 막대와 「지금: 단계」, 이번 차례(마지막 입력 뒤)에 고친 파일·명령 수와 실패한 명령이 붙습니다. 결정을 기다리거나 막혀 있으면 그 글이 한 줄 붙고, 「마지막 요청·답」 으로 쉬는 대화가 무엇을 하다 멈췄는지 봅니다(둘 다 한 줄로 접혀 있고 눌러서 펼침). 이어받기 문구로 이어진 대화는 「← 키」 가 보입니다. 모두 각 대화의 기록으로 자동으로 만들어서 따로 그리지 않고 늘 최신입니다. 끝난 대화는 한 줄로 남습니다. 여러 대화에 걸친 일은 프로젝트로 묶이고, 프로젝트 이름을 누르면 그 묶음을 펴고 접으며, 세션 화판 맨 위의 「프로젝트 …」 를 누르면 목록의 그 묶음으로 갑니다. 목록은 경계선을 끌어 560px 까지 넓힐 수 있습니다.
 
 ### 화면 구성
 
-- 왼쪽: 세션 목록. 프로젝트별로 묶이고, 목록 위 정렬 단추(처음에는 「시작순 ▾」)에서 시작순·활동순·이름순을 고르거나 끝난 세션을 숨깁니다. 끝난 지 하루가 지난 대화는 「지난 세션」 에 접혀 들어갑니다. 프로젝트 이름을 누르면 큰 그림이 열립니다.
+- 왼쪽: 세션 목록. 프로젝트별로 묶이고, 목록 위 정렬 단추(처음에는 「시작순 ▾」)에서 시작순·활동순·이름순을 고르거나 끝난 세션을 숨깁니다. 끝난 지 하루가 지난 대화는 「지난 세션」 에 접혀 들어갑니다. 진행 중인 대화는 카드(위 「세션 카드와 프로젝트」)로 보입니다. 프로젝트 이름을 누르면 그 묶음을 펴고 접습니다.
 - 가운데: 에이전트가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 파일 위치가 붙은 상자를 누르면 이 세션에서 그 파일을 고친 바뀐 줄(diff)이 창으로 열리고, 바뀐 줄이 남은 수정이 없으면 파일 경로를 복사합니다. md·html 을 가리키는 상자(「문서」 표)는 누르면 문서가 열리고, 「수정됨」 표를 누르면 바뀐 줄이 열립니다. `Ctrl` 을 누른 채 도형을 끌면 원하는 자리로 옮기고, 놓은 자리는 기록에 남습니다(그림 위 「자동 배치로」 로 모두 되돌림). 그림이 지금 작업의 계획보다 먼저 그린 것이면 그림 위에 「지난 작업 때 그린 그림」 이 붙습니다. 같은 일의 뒤 작업은 그림을 지우지 않고 새 묶음으로 덧붙이고, 끝난 묶음은 상자 하나로 접혀 누르면 펼쳐집니다.
 - 오른쪽: [계획 | 문서] 탭(지금 단계는 위에 고정)과 타임라인(사실·메모·보낸 글). 「문서」 탭에는 이 작업(화판 프로젝트면 그 프로젝트 전체)에서 만들거나 고친 md·html 이 모입니다. 탭에는 중요 문서(이름·제목에 설계·계획·매뉴얼·design·plan·spec·guide·README 같은 말이 든 문서, 그림에 걸린 문서, 📌 고정)만 보이고 나머지는 「모든 문서」 에 있으며, 아직 열어 보지 않은 변경에는 점이 붙습니다. 문서는 그림 자리에 열리고(목차, 문서 안 링크 따라가기, 고쳐지면 읽던 자리를 지켜 다시 그림), 「← 그림으로」 나 `Esc` 로 닫으며, 「↗ 새 창」 으로 문서만 넓게 봅니다. html 은 화판과 분리된 틀 안에서 그 모양 그대로 보입니다. 타임라인은 「새 창」 으로 떼어 볼 수 있습니다. 「수정」 줄을 누르면 그 수정의 바뀐 줄(diff)이 창으로 열리고, md·html 의 수정 줄은 문서가 열려 그 수정이 바꾼 문단에 색 띠가 붙습니다.
 - 아래: 재생 막대. 지난 상태를 처음부터 다시 봅니다. ▶ 를 누르면 기록이 차례로 흘러가고(빠르기 1×·4×·16×), 끝에서 멈춥니다.
 - 맨 위 주의 띠(입력 필요·승인 대기·막힘·실패, 끝난 묶음 안의 실패는 빼고)는 한 줄로 접혀 「외 N개」 로 펴고, 「닫기」 로 숨깁니다(새 알림이 오면 다시 보임). 그림이 칸보다 크면 마우스로 잡아 끌어 옮깁니다.
 - 맨 위 「찾기」(`/` 또는 `Ctrl+K`)는 이 화판의 그림·계획, 이 세션의 타임라인(옛 기록까지), 세션·프로젝트, 다른 세션의 기록에서 찾고, 고르면 그 자리로 갑니다.
 - 상자나 단계에 마우스를 올리거나 초점을 두면 「보내기」 가 뜹니다. 여러 글을 「모아 두기」 로 모았다가 한꺼번에 보낼 수도 있습니다. 쓰다 둔 글과 모은 글은 브라우저를 닫아도 남습니다.
-- 맨 위 「설정」 에서 이어받기 문구(예: `이어서 <키>`)를 정하면, 그 문구로 시작한 대화를 같은 키의 앞 대화와 프로젝트에 잇습니다. 기본은 꺼져 있습니다.
+- 맨 위 「설정」 에서 이어받기 문구(예: `이어서 <키>`)를 정하면, 그 문구로 시작한 대화를 같은 키의 앞 대화와, 그 키를 가진 프로젝트에 잇습니다(키를 가진 프로젝트가 없으면 새로 만들지 않습니다). 기본은 꺼져 있습니다.
 - 끝난 뒤 30일이 지난 대화는 휴지통(`~/.local/state/anytaskview/trash/`, 30일 뒤 비움)으로 옮깁니다. 진행 중인 프로젝트에 든 대화는 남깁니다. 날수는 「설정」 에서 바꾸거나 끕니다.
 - 자세한 사용법은 화면의 「도움말」(`?` 키)에 있습니다.
 
