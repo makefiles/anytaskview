@@ -8,16 +8,21 @@ export const TALK_W = 1280, TALK_H = 800;
 const FONT = '"Nanum Pen Script", "Pretendard Variable", sans-serif';
 export const fontReady = () => document.fonts.load('28px "Nanum Pen Script"').catch(() => {});
 
-const C = { ink: "#22283a", red: "#d4372f", mut: "#7a828e", hl: "#ffe14a", memo: "#ffe98c", memoEdge: "#e3c34a", frame: "#c5c9cf", bulb: "#f2b400" };
-const PALETTE = ["#1f5fbf", "#1f8a4c", "#e07816", "#7040b8"]; // 파랑·초록·주황·보라
+// 색 두 벌: 밝은 테마는 흰 화이트보드, 어두운 테마는 어두운 판에 밝은 마커(전자 칠판 화면처럼). 포스트잇은 두 벌 모두 노란 종이다.
+// board: 판 바탕(색 칠한 머리표·번호 위 글자에도 씀), memoInk: 포스트잇 위 글씨, core: 가운데와 가지 틀의 가운데 타원, pal: 칸마다 마커 색(파랑·초록·주황·보라)
+const LIGHT = { ink: "#22283a", red: "#d4372f", mut: "#7a828e", hl: "#ffe14a", memo: "#ffe98c", memoEdge: "#e3c34a", memoInk: "#22283a", frame: "#c5c9cf", bulb: "#f2b400",
+  board: "#fdfdfb", core: "#fff3c4", shadow: "#00000012", pal: ["#1f5fbf", "#1f8a4c", "#e07816", "#7040b8"] };
+const DARK = { ink: "#e8e6e1", red: "#ff6b5f", mut: "#9aa2ad", hl: "#544610", memo: "#ffe98c", memoEdge: "#e3c34a", memoInk: "#22283a", frame: "#4a5058", bulb: "#f2b400",
+  board: "#24272d", core: "#3d3624", shadow: "#00000066", pal: ["#6ea8ff", "#5ccb8a", "#ffa04a", "#b48cff"] };
 const M = 46;
 const NS = "http://www.w3.org/2000/svg";
 const line = (l) => (typeof l === "string" ? { t: l } : l);
 const pad2 = (n) => String(n).padStart(2, "0");
 
-// 장 하나를 svg 에 그린다. rec = {key, task, t, ord, page}
-export function drawTalk(svg, rec) {
+// 장 하나를 svg 에 그린다. rec = {key, task, t, ord, page}, dark: 어두운 테마의 색으로
+export function drawTalk(svg, rec, dark = false) {
   const B = rec.page;
+  const C = dark ? DARK : LIGHT, PALETTE = C.pal;
   const rc = rough.svg(svg);
   let seed = 0;
   const root = document.createElementNS(NS, "g"), back = document.createElementNS(NS, "g"), front = document.createElementNS(NS, "g");
@@ -69,7 +74,7 @@ export function drawTalk(svg, rec) {
   };
   function badge(cx, cy, r, label, color) {
     put(rc.circle(cx, cy, r * 2, opt(color, 2, { fill: color, fillStyle: "solid", roughness: 0.4 })));
-    text(cx, cy + r * 0.48, label, { size: r * 1.55, bold: true, color: "#fff", anchor: "middle" });
+    text(cx, cy + r * 0.48, label, { size: r * 1.55, bold: true, color: C.board, anchor: "middle" });
   }
   function arrowHead(x, y, ang, color) {
     const h = 16;
@@ -301,16 +306,16 @@ export function drawTalk(svg, rec) {
     g.setAttribute("transform", `rotate(-1.4 ${x + w / 2} ${y + h / 2})`);
     front.append(g);
     curFront = g;
-    put(rc.rectangle(x + 6, y + 7, w, h, { fill: "#00000012", fillStyle: "solid", stroke: "none", roughness: 0.3, seed: ++seed }));
+    put(rc.rectangle(x + 6, y + 7, w, h, { fill: C.shadow, fillStyle: "solid", stroke: "none", roughness: 0.3, seed: ++seed }));
     put(rc.rectangle(x, y, w, h, opt(C.memoEdge, 1.6, { fill: C.memo, fillStyle: "solid", roughness: 0.4 })));
     let ty = y + 42;
     if (m.head) {
-      const t = text(x + 20, ty, m.head, { size: 31, bold: true });
+      const t = text(x + 20, ty, m.head, { size: 31, bold: true, color: C.memoInk });
       const b = t.getBBox();
-      put(rc.line(b.x, b.y + b.height + 1, b.x + b.width, b.y + b.height, opt(C.ink, 2)));
+      put(rc.line(b.x, b.y + b.height + 1, b.x + b.width, b.y + b.height, opt(C.memoInk, 2)));
       ty += 44;
     }
-    for (const r of rows) { if (ty > y + h) break; text(x + 20, ty, r, { size: 27 }); ty += 33; }
+    for (const r of rows) { if (ty > y + h) break; text(x + 20, ty, r, { size: 27, color: C.memoInk }); ty += 33; }
     curFront = front;
   }
 
@@ -327,7 +332,7 @@ export function drawTalk(svg, rec) {
   function drawSummary(x, y, w, h, s) {
     put(rc.path(rr(x, y, w, h, 16), opt(C.ink, 3)));
     put(rc.path(rr(x + 20, y - 20, 92, 40, 10), opt(C.ink, 2, { fill: C.ink, fillStyle: "solid", roughness: 0.4 })));
-    text(x + 66, y + 10, "정리", { size: 30, bold: true, color: "#fff", anchor: "middle" });
+    text(x + 66, y + 10, "정리", { size: 30, bold: true, color: C.board, anchor: "middle" });
     let size = 34, rows = wrap(s, size, w - 50, true);
     while ((rows.length > 3 || rows.length * size * 1.25 > h - 24) && size > 20) rows = wrap(s, --size, w - 50, true);
     const lh = size * 1.25, top = y + h / 2 - ((rows.length - 1) * lh) / 2 + size * 0.38;
@@ -428,7 +433,7 @@ export function drawTalk(svg, rec) {
     // 셋째 가지가 있으면 가운데를 위로 줄인다. 아래 줄(포스트잇·정리)이 있어 판 칸이 낮으면 가지 칸에 더 준다
     const third = kids.length > 2, coreH = third ? h * (h < 500 ? 0.38 : 0.42) : h, cx = mx + mw / 2, cy = y + coreH / 2, below = h < 500 ? 26 : 40;
     const slots = [[x, y, sideW, h], [x + w - sideW, y, sideW, h], [mx - 60, y + coreH + below, mw + 120, h - coreH - below]];
-    put(rc.ellipse(cx, cy, mw + 40, coreH, opt(C.ink, 3, { fill: "#fff3c4", fillStyle: "solid", roughness: 0.5 })));
+    put(rc.ellipse(cx, cy, mw + 40, coreH, opt(C.ink, 3, { fill: C.core, fillStyle: "solid", roughness: 0.5 })));
     fitIn(() => {
       let ty = 0;
       for (const s of wrap(core.head, 38, mw * 0.7, true)) { text(cx, ty + 34, s, { size: 38, bold: true, anchor: "middle" }); ty += 42; }
@@ -451,7 +456,7 @@ export function drawTalk(svg, rec) {
 
   // 화이트보드 테두리(알루미늄 틀)
   const frame = document.createElementNS(NS, "rect");
-  for (const [k, v] of Object.entries({ x: 5, y: 5, width: TALK_W - 10, height: TALK_H - 10, rx: 10, fill: "#fdfdfb", stroke: C.frame, "stroke-width": 10 })) frame.setAttribute(k, v);
+  for (const [k, v] of Object.entries({ x: 5, y: 5, width: TALK_W - 10, height: TALK_H - 10, rx: 10, fill: C.board, stroke: C.frame, "stroke-width": 10 })) frame.setAttribute(k, v);
   back.append(frame);
 
   // 제목·부제, 오른쪽 위에 받은 시각

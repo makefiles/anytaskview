@@ -201,7 +201,7 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 .tv-bar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); min-width: 0; }
 #tv-task { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #tv-scroll { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
-/* 화이트보드는 어두운 테마에서도 흰 판이다(판 안의 색은 web/talk.js 가 정한다) */
+/* 판 안의 색은 web/talk.js 가 테마에 맞춰 정한다(밝은 테마는 흰 화이트보드, 어두운 테마는 어두운 판) */
 #talk-svg { display: block; width: 100%; max-width: 1600px; height: auto; margin: 0 auto; border-radius: 10px; box-shadow: 0 2px 8px rgba(0, 0, 0, .12); }
 #talk-svg .tk path { stroke-linecap: round; stroke-linejoin: round; }
 #talk-svg .hl path { stroke-linecap: butt; }

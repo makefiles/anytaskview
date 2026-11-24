@@ -2475,6 +2475,14 @@ async function main() {
       }
       expect(await evaluate(inside), `${input.layout}: 판 밖으로 나간 글이 있음`);
     }
+    // 45: 테마를 바꾸면 판서를 그 테마의 색으로 다시 그린다(어두운 테마는 어두운 판). 끝나면 처음 테마로 돌린다
+    const board = `document.querySelector('#talk-svg .tk rect')?.getAttribute('fill')`;
+    const was = await evaluate(`document.documentElement.dataset.theme || ''`), before = await evaluate(board);
+    const themeTo = async (t) => { for (let i = 0; i < 3 && (await evaluate(`document.documentElement.dataset.theme || ''`)) !== t; i++) await evaluate(`document.getElementById('theme').click()`); };
+    await themeTo("dark");
+    await waitFor(`${board} === '#24272d'`);
+    await themeTo(was);
+    await waitFor(`${board} === ${JSON.stringify(before)}`);
     await evaluate(`document.getElementById('tab-canvas').click()`);
     await waitFor(`document.getElementById('talk-view').hidden`);
   });

@@ -735,13 +735,13 @@ function renderTalk(scene) {
   }
   $("talk-svg").toggleAttribute("hidden", !shown); // svg 요소에는 hidden 속성 값(프로퍼티)이 없다
   if (!shown) { talkSig = ""; return; }
-  // 같은 장을 다시 그리지 않는다. 글 폭을 재므로 손글씨 글꼴을 받은 뒤에 그린다
-  const sig = `${state.sid}|${shown.key}|${shown.t}|${shown.ord}`;
+  // 같은 장을 다시 그리지 않는다(테마가 바뀌면 다시 그린다). 글 폭을 재므로 손글씨 글꼴을 받은 뒤에 그린다
+  const dark = theme() === "dark", sig = `${state.sid}|${shown.key}|${shown.t}|${shown.ord}|${dark}`;
   if (sig === talkSig) return;
   talkSig = sig;
   fontReady().then(() => {
     if (talkSig !== sig) return;
-    if (talkOn()) drawTalk($("talk-svg"), shown);
+    if (talkOn()) drawTalk($("talk-svg"), shown, dark);
     else talkSig = ""; // 글꼴을 받는 사이 그림으로 돌아갔다: 다음에 다시 그린다
   });
 }
@@ -2634,7 +2634,9 @@ $("settings-form").addEventListener("submit", async (ev) => {
 });
 
 // 다른 창(뗀 타임라인)에서 테마를 바꾸면 따라간다
-window.addEventListener("storage", (ev) => { if (ev.key === "atv.theme") applyTheme(ev.newValue || ""); });
+window.addEventListener("storage", (ev) => { if (ev.key === "atv.theme") { applyTheme(ev.newValue || ""); canvas.invalidate(); queueRender("view"); } });
+// 테마가 자동이면 시스템 설정을 따른다. 판서와 Mermaid 는 색을 직접 칠하므로 다시 그린다
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!document.documentElement.dataset.theme) canvas.invalidate(); queueRender("view"); });
 
 // 타임라인·계획의 위치 복사
 side.addEventListener("click", (ev) => {
