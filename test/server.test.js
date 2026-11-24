@@ -453,6 +453,108 @@ test("프로젝트: 만들기·넣기·이름·끝·풀기, 파일에 남고, /c
   assert.deepEqual(f.board.projects, { projects: {}, members: {} });
 });
 
+test("프로젝트 신호: 설정으로 이어짐·이어받기 문구·Claude 판단을 끄면 그 길로 들지 않고, 틀린 값은 거절, 다시 띄워도 남는다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const pid = process.pid, other = (n) => ({ pid: (1 << 22) + n });
+  assert.equal((await board(f, { op: "config-set", resume: null, signals: { thread: "no" } })).status, 400);
+  assert.equal((await board(f, { op: "config-set", resume: null, signals: { hand: false } })).status, 400, "손으로 옮기기는 설정에 없다");
+  assert.equal((await board(f, { op: "config-set", resume: { phrase: "핸드온 <키>" }, signals: { thread: false, phrase: false, claude: false } })).status, 200);
+  await f.restart();
+  assert.deepEqual(f.board.config.signals, { thread: false, phrase: false, claude: false, repo: true }, "설정 파일에 남는다(보내지 않은 신호는 켬)");
+  await f.hook("T1", { f: "start", cwd: "/w" }, { pid });
+  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
+  await board(f, { op: "proj-set", sids: ["T1"], pid: A });
+  // 이어짐 끔: /clear 로 이어져도 물려받지 않는다
+  await f.hook("T1", { f: "end", reason: "clear" }, { pid });
+  await f.hook("T2", { f: "start", source: "clear", cwd: "/w" }, { pid });
+  assert.equal(f.board.projects.members.T2, undefined);
+  // 사용자가 뺀 기록은 이어짐을 꺼도 넘긴다(손으로 정한 것은 설정과 상관없다)
+  await board(f, { op: "proj-set", sids: ["T2"], pid: null });
+  await f.hook("T2", { f: "end", reason: "clear" }, { pid });
+  await f.hook("T2b", { f: "start", source: "clear", cwd: "/w" }, { pid });
+  assert.deepEqual(f.board.projects.members.T2b, { pid: null, why: "hand" });
+  // 이어받기 문구 끔: 문구는 남아 있어도 키를 읽지 않는다
+  await f.hook("T3", { f: "start", cwd: "/w" }, other(3));
+  await f.hook("T3", { f: "prompt", text: "핸드온 k1 이어서" }, other(3));
+  assert.ok(!f.board.sessions.get("T3").scene.meta.handon);
+  // Claude 판단 끔: 새 대화에 후보를 싣지 않고 join·create 는 거부
+  const quiet = JSON.parse((await f.hook("T4", { f: "start", cwd: "/w" }, other(4))).text).out || "";
+  assert.ok(!quiet.includes("project {action"), quiet);
+  const refused = await f.mcp("project", { action: "join", id: A }, { env: "T4", ...other(4) });
+  assert.match(refused.text, /거부: .*Claude 판단을 꺼/);
+  assert.equal(f.board.projects.members.T4, undefined);
+  // 다시 켜면 둘 다 돌아온다
+  assert.equal((await board(f, { op: "config-set", resume: { phrase: "핸드온 <키>" }, signals: { phrase: true, claude: true } })).status, 200);
+  assert.match(JSON.parse((await f.hook("T5", { f: "start", cwd: "/w" }, other(5))).text).out || "", /project \{action/);
+  await f.hook("T5", { f: "prompt", text: "핸드온 k1 이어서" }, other(5));
+  assert.equal(f.board.sessions.get("T5").scene.meta.handon, "k1");
+});
+
+test("저장소 신호: 등록한 저장소의 파일을 고친, 아직 소속이 없는 대화가 그 프로젝트에 든다(작업 트리도). 소속·뺌·끝난 프로젝트·등록 안 한 저장소·신호 끔은 아니다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const git = (dir) => { fs.mkdirSync(path.join(dir, ".git"), { recursive: true }); fs.writeFileSync(path.join(dir, ".git", "HEAD"), "ref: refs/heads/main\n"); };
+  const r1 = path.join(f.dir, "r1"), r2 = path.join(f.dir, "r2"), wt = path.join(f.dir, "wt");
+  git(r1);
+  git(r2);
+  const wtGit = path.join(r1, ".git", "worktrees", "wt");
+  fs.mkdirSync(wtGit, { recursive: true });
+  fs.writeFileSync(path.join(wtGit, "HEAD"), "ref: refs/heads/feat\n");
+  fs.writeFileSync(path.join(wtGit, "commondir"), "../..\n");
+  fs.mkdirSync(wt);
+  fs.writeFileSync(path.join(wt, ".git"), `gitdir: ${wtGit}\n`);
+  // 모든 대화를 한 폴더(f.dir, 저장소 아님)에서 시작한다
+  const P = (n) => ({ pid: (1 << 22) + n });
+  const start = (sid, n) => f.hook(sid, { f: "start", cwd: f.dir }, P(n));
+  const edit = (sid, n, file) => f.hook(sid, { f: "edit", tool: "Edit", path: file }, P(n));
+  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
+  const B = JSON.parse((await board(f, { op: "proj-new", name: "나" })).text).pid;
+  await start("S0", 0);
+  await board(f, { op: "proj-set", sids: ["S0"], pid: A });
+  await edit("S0", 0, path.join(r1, "a.js"));
+  // 후보: 그 프로젝트 대화들이 고친 저장소
+  const list = JSON.parse((await board(f, { op: "proj-repo-list", pid: A })).text).repos;
+  assert.deepEqual(list.map((x) => [x.name, x.n, x.on]), [["r1", 1, false]]);
+  assert.equal((await board(f, { op: "proj-repos", pid: A, repos: [list[0].repo] })).status, 200);
+  assert.deepEqual(JSON.parse((await board(f, { op: "proj-repo-list", pid: A })).text).repos.map((x) => x.on), [true]);
+  await start("S1", 1);
+  await edit("S1", 1, path.join(r1, "b.js"));
+  assert.deepEqual(f.board.projects.members.S1, { pid: A, why: "repo" });
+  // Claude 가 나가면 나간 기록이 남아 다음 수정에서 다시 넣지 않는다
+  assert.doesNotMatch((await f.mcp("project", { action: "leave" }, { env: "S1", ...P(1) })).text, /거부/);
+  await edit("S1", 1, path.join(r1, "b2.js"));
+  assert.deepEqual(f.board.projects.members.S1, { pid: null, why: "claude" });
+  await start("S2", 2);
+  await edit("S2", 2, path.join(wt, "c.js"));
+  assert.equal(f.board.projects.members.S2?.pid, A, "작업 트리는 원래 저장소로 맞는다");
+  await start("S3", 3);
+  await edit("S3", 3, path.join(r2, "d.js"));
+  assert.equal(f.board.projects.members.S3, undefined, "등록 안 한 저장소");
+  await board(f, { op: "proj-set", sids: ["S3"], pid: B });
+  await edit("S3", 3, path.join(r1, "e.js"));
+  assert.equal(f.board.projects.members.S3.pid, B, "이미 든 대화는 옮기지 않는다");
+  await start("S4", 4);
+  await board(f, { op: "proj-set", sids: ["S4"], pid: null });
+  await edit("S4", 4, path.join(r1, "f.js"));
+  assert.deepEqual(f.board.projects.members.S4, { pid: null, why: "hand" }, "사용자가 뺀 대화");
+  // 한 저장소는 한 프로젝트에만
+  await board(f, { op: "proj-repos", pid: B, repos: [list[0].repo] });
+  assert.equal(f.board.projects.projects[A].repos, undefined);
+  assert.deepEqual(f.board.projects.projects[B].repos, [list[0].repo]);
+  await board(f, { op: "proj-done", pid: B, done: true });
+  await start("S5", 5);
+  await edit("S5", 5, path.join(r1, "g.js"));
+  assert.equal(f.board.projects.members.S5, undefined, "끝난 프로젝트");
+  await board(f, { op: "proj-done", pid: B, done: false });
+  await board(f, { op: "config-set", resume: null, signals: { repo: false } });
+  await start("S6", 6);
+  await edit("S6", 6, path.join(r1, "h.js"));
+  assert.equal(f.board.projects.members.S6, undefined, "신호 끔");
+  assert.equal((await board(f, { op: "proj-repos", pid: A, repos: ["rel/path"] })).status, 400);
+  assert.equal((await board(f, { op: "proj-repos", pid: A, repos: Array.from({ length: 9 }, (_, i) => `/r${i}`) })).status, 400);
+});
+
 test("메시지: 검사, 기다리는 훅에 한 번만, 새 기다림이 옛 것을 끝내고, 세션이 끝나면 만료, 다시 띄워도 대기열이 남는다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
@@ -992,7 +1094,7 @@ test("project 도구: list·join·create·leave, 손·이어받기 문구가 정
   assert.match(await call("project", { action: "join", id: "g00000000" }), /^거부/);
   assert.match(await call("project", { action: "create" }), /^거부/);
   assert.match(await call("project", { action: "leave" }), /어느 프로젝트에도 속하지 않습니다/);
-  assert.equal(f.board.projects.members.S1, undefined);
+  assert.deepEqual(f.board.projects.members.S1, { pid: null, why: "claude" }, "나간 기록을 남긴다(1.9.0: 저장소 신호가 다시 넣지 않게)");
   // 사용자가 화판에서 넣으면 다음 도구 결과에 한 번만 알린다
   await board(f, { op: "proj-set", sids: ["S1"], pid: A });
   r = await call("plan", { steps: [{ id: "s1", title: "일" }] });

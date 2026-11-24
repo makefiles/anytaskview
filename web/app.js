@@ -14,7 +14,7 @@ const RUN_KO = { running: "실행 중", done: "끝", fail: "실패", wait: "승�
 const NOTE_KO = { why: "이유", decision: "결정", blocked: "막힘", wait: "승인 대기" };
 const MSG_KIND_KO = { comment: "의견", instruction: "지시" };
 const MSG_STATE_KO = { queued: "대기", sent: "보냄", expired: "만료" };
-const WHY_KO = { thread: "앞 대화에서 이어짐", claude: "Claude 가 고름", phrase: "이어받기 문구", hand: "사용자가 넣음" };
+const WHY_KO = { thread: "앞 대화에서 이어짐", claude: "Claude 가 고름", repo: "저장소", phrase: "이어받기 문구", hand: "사용자가 넣음" };
 const STALL_MS = 5 * 60_000;
 const ONLY_TL = new URLSearchParams(location.search).get("only") === "tl";
 const ONLY_DOC = new URLSearchParams(location.search).get("only") === "doc"; // 문서 창의 ↗ 새 창: 문서만 넓게
@@ -2604,7 +2604,8 @@ function docOnRes(res) {
   if (res.some((r) => (r.k === "put" && r.v?.kind !== "step") || r.k === "del")) { docView.dirty = true; $("dv-canvas-dot").hidden = false; }
 }
 
-// ---- 설정: 이어받기 문구, 지난 세션 정리, 수정 diff 보관 크기 ----
+// ---- 설정: 프로젝트에 넣는 신호와 이어받기 문구, 지난 세션 정리, 수정 diff 보관 크기 ----
+const SIGNALS = ["thread", "phrase", "claude", "repo"]; // 서버 lib/scene.js 의 SIGNALS 와 같다
 const settings = $("settings");
 // 슬라이더 값이 곧 KB 다(0~512, 16KB 단위, 서버 lib/scene.js 의 DIFF_KB_* 와 같음)
 const diffLabel = () => {
@@ -2615,19 +2616,21 @@ const diffLabel = () => {
 $("cfg-diff").addEventListener("input", diffLabel);
 $("settings-open").addEventListener("click", () => {
   const r = state.config.resume;
+  for (const k of SIGNALS) $(`sig-${k}`).checked = state.config.signals?.[k] !== false;
   $("cfg-phrase").value = r?.phrase || "";
   $("cfg-doc").value = r?.doc || "";
   $("cfg-trash").value = state.config.trashDays ?? "";
   $("cfg-diff").value = String(state.config.diffKB ?? 16);
   diffLabel();
   settings.showModal();
-  $("cfg-phrase").focus();
+  $("sig-thread").focus();
 });
 $("settings-close").addEventListener("click", () => settings.close());
 $("settings-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const phrase = $("cfg-phrase").value.trim(), doc = $("cfg-doc").value.trim(), days = $("cfg-trash").value.trim();
-  const out = await boardOp({ op: "config-set", resume: phrase ? { phrase, doc } : null, trashDays: days ? Number(days) : null, diffKB: Number($("cfg-diff").value) });
+  const signals = Object.fromEntries(SIGNALS.map((k) => [k, $(`sig-${k}`).checked]));
+  const out = await boardOp({ op: "config-set", resume: phrase ? { phrase, doc } : null, signals, trashDays: days ? Number(days) : null, diffKB: Number($("cfg-diff").value) });
   if (!out.ok) return;
   settings.close();
   toast(out.msg);
@@ -2768,6 +2771,29 @@ function openProjectMenu(pid, anchor) {
   const up = shift("위로 옮기기", at > 0 && near[at - 1], false);
   const down = shift("아래로 옮기기", at >= 0 && near[at + 1], true);
   const done = item(pr.done ? "다시 진행으로 두기" : "끝으로 표시", () => { closeGroupMenu(); boardOp({ op: "proj-done", pid, done: !pr.done }); });
+  // 저장소 신호에 쓸 저장소 고르기: 후보(그 프로젝트 대화들이 고친 저장소와 지금 등록한 것)를 켜기 칸으로 보이고 「저장」 으로 한 번에 바꾼다
+  const repos = item("저장소…", async () => {
+    const out = await boardOp({ op: "proj-repo-list", pid });
+    if (!out.ok || gmenu.hidden) return;
+    const boxes = out.repos.map((r) => {
+      const b = item(r.n ? `${r.name} · 대화 ${r.n}` : r.name, () => b.setAttribute("aria-checked", String(b.getAttribute("aria-checked") !== "true")));
+      b.setAttribute("role", "menuitemcheckbox");
+      b.setAttribute("aria-checked", String(r.on));
+      b.title = r.repo;
+      b.dataset.repo = r.repo;
+      return b;
+    });
+    const save = item("저장", async () => {
+      const picked = boxes.filter((b) => b.getAttribute("aria-checked") === "true").map((b) => b.dataset.repo);
+      if (picked.length > 8) { toast("저장소는 8개까지 고를 수 있습니다"); return; } // 서버 MAX_REPOS 와 같다. 고른 칸을 남긴다
+      closeGroupMenu();
+      const r = await boardOp({ op: "proj-repos", pid, repos: picked });
+      if (r.ok) toast(r.msg);
+    });
+    const hint = el("div", "gm-hint", boxes.length ? "고른 저장소의 파일을 고친 대화가 이 프로젝트에 듭니다(아직 프로젝트가 없는 대화만, 설정의 「저장소」 신호)" : "이 프로젝트의 대화가 고친 저장소가 아직 없습니다");
+    showMenu(anchor, () => $("sess-body").querySelector(`.pmenu[data-pid="${CSS.escape(pid)}"]`), [el("div", "gm-title", `${pr.name} · 저장소`), hint, ...boxes, el("hr", "gm-sep"), save], "저장소");
+    (boxes[0] || save).focus();
+  });
   const drop = item("지우기", () => {
     if (!drop.classList.contains("armed")) { drop.classList.add("armed"); drop.textContent = "한 번 더 누르면 지웁니다(대화는 남습니다)"; return; }
     closeGroupMenu();
@@ -2784,7 +2810,7 @@ function openProjectMenu(pid, anchor) {
     if (out.ok) toast(out.msg);
   }, "gm-del");
   purge.title = "프로젝트와 그 안의 끝난 대화를 지웁니다. 진행 중인 대화는 「프로젝트 없음」 으로 가고, 지운 기록은 상태 폴더의 trash 에 30일 동안 남습니다";
-  showMenu(anchor, () => $("sess-body").querySelector(`.pmenu[data-pid="${CSS.escape(pid)}"]`), [el("div", "gm-title", pr.name), rename, up, down, done, el("hr", "gm-sep"), drop, purge]);
+  showMenu(anchor, () => $("sess-body").querySelector(`.pmenu[data-pid="${CSS.escape(pid)}"]`), [el("div", "gm-title", pr.name), rename, up, down, done, repos, el("hr", "gm-sep"), drop, purge]);
   rename.focus();
 }
 // 지난 세션 머리의 ⋯: 그 묶음의 지난 세션(이어진 대화 포함, 끝난 것만)을 모두 휴지통으로. 두 번 눌러야 지운다

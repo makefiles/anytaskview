@@ -475,6 +475,9 @@ body.only-tl #side { grid-template-rows: minmax(0, 1fr); }
 #settings input { padding: 4px 8px; width: 100%; }
 #settings input[type="range"] { padding: 0; margin: 0; } /* 여백이 있으면 트랙이 다른 입력 칸보다 안쪽에서 시작한다 */
 #help p, #settings p { margin: 0; }
+#settings .sigs { margin: 8px 0; }
+#settings .sig { display: flex; gap: 8px; align-items: baseline; margin: 6px 0; }
+#settings .sig input { width: auto; flex: none; }
 #settings dl.fields { display: grid; grid-template-columns: 11em minmax(0, 1fr); align-items: center; gap: 8px 16px; margin: 10px 0; }
 #settings dl.fields dt { font-weight: 600; }
 #settings dl.fields dd { margin: 0; }
@@ -570,6 +573,9 @@ body.pdragging .gsec.drop-after { box-shadow: 0 2px 0 var(--accent); }
 #group-menu .gm-item:has(> svg) { display: flex; }
 #group-menu .gm-item:hover, #group-menu .gm-item:focus-visible { background: var(--panel-2); }
 #group-menu .gm-item[aria-checked="true"]::before { content: "✓ "; }
+#group-menu .gm-item[role="menuitemcheckbox"]::before { content: "☐ "; }
+#group-menu .gm-item[role="menuitemcheckbox"][aria-checked="true"]::before { content: "☑ "; }
+#group-menu .gm-hint { font-size: 12px; line-height: 16px; color: var(--muted); padding: 0 8px 4px; max-width: 300px; }
 #group-menu input { width: 100%; }
 #group-menu .gm-sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 #group-menu .gm-del { color: var(--s-fail); }

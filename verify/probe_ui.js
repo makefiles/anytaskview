@@ -657,15 +657,34 @@ async function main() {
     await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((b) => b.textContent === '다시 진행으로 두기').click()`);
     await waitFor(`document.getElementById('group-menu').hidden && document.querySelector('#sessions .dhead') === null`);
     await evaluate(`localStorage.removeItem('atv.doneOpen')`);
+    // 46: ⋯ 「저장소…」 는 그 프로젝트 대화들이 고친(작업 폴더) 저장소를 켜기 칸으로 보이고, 「저장」 으로 등록한다. 등록을 풀어 둔다
+    const repoMenu = async () => {
+      await evaluate(`document.querySelector('#sessions .pmenu[data-pid="${pid}"]').click()`);
+      await waitFor(`!document.getElementById('group-menu').hidden`);
+      await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((b) => b.textContent === '저장소…').click()`);
+      await waitFor(`document.querySelector('#group-menu .gm-title')?.textContent.endsWith('· 저장소') && document.activeElement?.getAttribute('role') === 'menuitemcheckbox'`);
+    };
+    const pickSave = async () => {
+      await evaluate(`document.activeElement.click()`);
+      await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((b) => b.textContent === '저장').click()`);
+    };
+    await repoMenu();
+    expect(await evaluate(`document.activeElement.getAttribute('aria-checked') === 'false'`), "처음 저장소는 등록 안 됨");
+    await pickSave();
+    await waitFor(`document.getElementById('group-menu').hidden && (window.__atv.projects.projects['${pid}'].repos || []).length === 1`);
+    await repoMenu();
+    expect(await evaluate(`document.activeElement.getAttribute('aria-checked') === 'true'`), "등록한 저장소가 켜져 보이지 않음");
+    await pickSave();
+    await waitFor(`document.getElementById('group-menu').hidden && !window.__atv.projects.projects['${pid}'].repos`);
     // 다음 검사들이 처음 목록 모양을 쓰므로 다시 뺀다
     await evaluate(`document.querySelector('#sessions .sess.sel').parentElement.querySelector('.smenu').click()`);
     await waitFor(`!document.getElementById('group-menu').hidden`);
     await evaluate(`[...document.querySelectorAll('#group-menu .gm-item')].find((b) => b.textContent === '프로젝트 없음').click()`);
     await waitFor(`document.getElementById('proj-link').textContent === '프로젝트 없음'`);
   });
-  await check("설정: 이어받기 문구를 저장하면 서버 설정이 바뀌고, 틀린 문구는 알림만 뜨고 창이 남으며, 비우면 끔", async () => {
+  await check("설정: 이어받기 문구를 저장하면 서버 설정이 바뀌고, 틀린 문구는 알림만 뜨고 창이 남으며, 비우면 끔. 프로젝트 신호 켜기 칸을 끄고 켬", async () => {
     await evaluate(`document.getElementById('settings-open').click()`);
-    await waitFor(`document.getElementById('settings').open && document.activeElement?.id === 'cfg-phrase'`);
+    await waitFor(`document.getElementById('settings').open && document.activeElement?.id === 'sig-thread' && ['thread', 'phrase', 'claude', 'repo'].every((k) => document.getElementById('sig-' + k).checked)`);
     const logged = logErrors.length;
     await evaluate(`(() => { document.getElementById('cfg-phrase').value = '<키> 이어서'; document.getElementById('settings-form').requestSubmit(); })()`);
     await waitFor(`!document.getElementById('toast').hidden && document.getElementById('toast').textContent.includes('앞에 글') && document.getElementById('settings').open`);
@@ -682,6 +701,14 @@ async function main() {
     await waitFor(`document.getElementById('settings').open && document.getElementById('cfg-phrase').value === 'continue <키>'`);
     await evaluate(`(() => { document.getElementById('cfg-phrase').value = ''; document.getElementById('settings-form').requestSubmit(); })()`);
     await waitFor(`!document.getElementById('settings').open && window.__atv.config.resume === null`);
+    // 46: Claude 판단을 끄고 저장하면 서버 설정에 남고, 다시 열면 꺼져 보인다. 켜 둔다
+    for (const on of [false, true]) {
+      await evaluate(`document.getElementById('settings-open').click()`);
+      await waitFor(`document.getElementById('settings').open && document.getElementById('sig-claude').checked === ${!on}`);
+      await evaluate(`(() => { document.getElementById('sig-claude').checked = ${on}; document.getElementById('settings-form').requestSubmit(); })()`);
+      await waitFor(`!document.getElementById('settings').open && window.__atv.config.signals?.claude === ${on}`);
+      expect(board.config.signals?.claude === on, "서버 설정에 신호가 남지 않음");
+    }
   });
   await check("세션 줄에 초점이 있어도 목록이 다시 그려질 때 스크롤 자리가 그대로임", async () => {
     await evaluate(`(() => {
