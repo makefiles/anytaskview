@@ -1,9 +1,10 @@
 // 화면: 세션 목록, 맨 위 한 줄, 주의 띠, 가운데 그림, 작업 칸(단계 나무), 타임라인, 재생 막대.
 // 서버가 SSE 로 보내는 결과(res)를 lib/scene.js 의 applyRes 로 적용한다. 재생도 같은 함수로 처음부터 다시 적용한다.
 // 패널 폭·접힘·배율·거르기처럼 이 브라우저에만 남는 값은 localStorage 에 두고, 읽을 때 범위로 자른다.
-import { newScene, applyRes, currentStep, own, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK, refPath, normPath, agentsRunning, llmRunning, llmSince } from "/lib/scene.js";
+import { newScene, applyRes, currentStep, own, explainKey, MSG_LIMITS, entryText, itemText, searchTerms, matchAll, snippet, drawingStale, DRAW_SLACK, refPath, normPath, agentsRunning, llmRunning, llmSince } from "/lib/scene.js";
 import { createCanvas, safeRef, groupSummary, inFinishedGroup, DOC_RE, isDocRef } from "/canvas.js";
 import { renderMd, changedLines, blocksAt } from "/doc.js";
+import { drawTalk, fontReady } from "/talk.js";
 
 const ST_KO = { todo: "할 일", doing: "진행", done: "끝", fail: "실패", blocked: "막힘", wait: "승인 대기" };
 const ST_ICO = { todo: "○", doing: "▶", done: "✓", fail: "✗", blocked: "‼", wait: "…" };
@@ -101,6 +102,8 @@ const state = {
   dragging: null,        // 목록에서 끌고 있는 세션 id
   tlAgent: null,         // 타임라인을 이 하위 에이전트의 줄만 보이게 거르는 중(이름표를 눌렀을 때)
   planOpen: new Map(),   // 작업 칸에서 사용자가 펼치거나 접은 줄: 키 → true(펼침)·false(접음). 세션을 바꾸면 비운다
+  talkKey: null,         // 판서 칸에서 보고 있는 장(작업 키). 처음 보일 때 정하고, 사용자가 넘길 때만 바꾼다. 세션을 바꾸면 비운다
+  talkAsked: null,       // 「판서 부탁」 을 보낸 「세션|작업 키」. 그 작업의 장이 올 때까지 단추를 끈다
 };
 
 function theme() {
@@ -413,6 +416,10 @@ function connect(sid) {
   state.tlFocus = null;
   state.planReveal = null;
   state.planOpen = new Map();
+  state.talkKey = null;
+  state.talkAsked = null;
+  talkSeen = sid ? store.json(`atv.talkSeen.${sid}`, {}) : {};
+  talkSig = "";
   state.markerSeq = sid ? Number(store.get(`atv.seen.${sid}`) || 0) : null;
   if (sid) history.replaceState(null, "", `${location.search}#s=${encodeURIComponent(sid)}`);
   const es = openEvents(sid);
@@ -459,7 +466,7 @@ function connect(sid) {
     const ids = JSON.parse(ev.data);
     for (const id of ids) {
       state.sessions.delete(id);
-      try { localStorage.removeItem(`atv.seen.${id}`); } catch { /* 저장이 막혀도 화면은 돈다 */ }
+      try { localStorage.removeItem(`atv.seen.${id}`); localStorage.removeItem(`atv.talkSeen.${id}`); } catch { /* 저장이 막혀도 화면은 돈다 */ }
     }
     if (ask && ids.includes(ask.sid)) closeComposer(false);
     // 지운 대화의 초안은 버린다(사용자가 지운 것). 모은 글은 자동으로 버리지 않고 띠에 「받을 대화가 없음」 으로 둔다
@@ -639,15 +646,129 @@ function render({ list = true, view = true } = {}) {
   const hasParts = Object.values(scene.items).some((it) => it.kind !== "step");
   $("empty").hidden = hasParts;
   renderStale(scene, hasParts, now);
+  if (!ONLY_TL && !ONLY_DOC) renderTalk(scene);
   $("empty").textContent = `아직 그림이 없습니다. ${agentName(state.sessions.get(state.sid))} 가 draw 로 그리면 여기에 나타납니다.`;
   applyFocus(false);
-  if (!ONLY_TL) canvas.render(scene).then(() => {
+  if (!ONLY_TL && !talkOn()) canvas.render(scene).then(() => {
     for (const p of $("canvas").querySelectorAll(".part[data-id]")) markSend(p, "상자");
     if (state.focus?.part) applyFocus(true); else followNow(); // 찾기로 고른 부품이 있으면 따라가기보다 앞선다
     placeComposer();
   }).catch((e) => console.error("그림 실패", e));
+  else placeComposer();
   markSeen();
 }
+
+// ---- 가운데 칸: 그림 | 판서(39) ----
+// 판서는 explain 도구가 작업마다 한 장씩 보낸 화이트보드다(lib/scene.js evalExplain, 그리기는 web/talk.js).
+// 어느 쪽을 보는지는 이 브라우저에 하나로 기억한다. 새 장이 오거나 장이 바뀌어도 보던 칸·장을 바꾸지 않고
+// 「판서」 탭(그림을 보는 중)이나 ▶(앞 장을 보는 중)에 점을 붙인다(사용자 결정 2026-11-23). 본 때는 장마다 이 브라우저에 둔다
+const talkOn = () => store.get("atv.center") === "talk";
+let talkSeen = {}, talkSig = "";
+const talkPages = (scene) => Object.values(scene.explains || {}).sort((a, b) => a.ord - b.ord);
+const TALK_ASK = "지금 작업의 핵심을 판서(explain 도구)로 한 장 그려 주세요.";
+// 판서를 보는 동안 그림은 그리지 않으므로(render), 그림으로 돌아올 때 처음부터 다시 잰다
+function setCenter(which, focus = false) {
+  if (which === "canvas" && talkOn()) canvas.invalidate();
+  store.set("atv.center", which);
+  queueRender("view");
+  if (focus) $(which === "talk" ? "tab-talk" : "tab-canvas").focus();
+}
+// 그림 부품으로 가야 할 때(띠 「보기」·찾기) 판서를 보고 있으면 그림으로 돌린다. 돌렸으면 참(그림을 다시 그린 뒤에 가야 한다)
+function showCanvas() {
+  if (!talkOn()) return false;
+  canvas.invalidate();
+  store.set("atv.center", "canvas");
+  renderTalk(viewScene());
+  return true;
+}
+// 보일 장: 고른 장, 없으면 지금 작업의 장, 그것도 없으면 마지막 장
+function talkShown(scene, pages) {
+  if (!pages.length) return null;
+  return pages.find((p) => p.key === state.talkKey) || pages.find((p) => p.key === explainKey(scene)) || pages.at(-1);
+}
+function renderTalk(scene) {
+  const on = talkOn(), pages = talkPages(scene);
+  $("canvas-wrap").classList.toggle("talk-on", on);
+  $("talk-view").hidden = !on;
+  for (const [id, sel] of [["tab-canvas", !on], ["tab-talk", on]]) { $(id).setAttribute("aria-selected", String(sel)); $(id).tabIndex = sel ? 0 : -1; }
+  $("talk-n").textContent = pages.length ? ` ${pages.length}` : "";
+  const shown = on ? talkShown(scene, pages) : null;
+  if (shown && !state.replay) {
+    state.talkKey ??= shown.key; // 처음 보인 장에 머문다
+    // 본 때는 창이 보일 때만 적고, 다른 탭이 적은 값과 합친다
+    if ((talkSeen[shown.key] || 0) < shown.t && document.visibilityState === "visible") {
+      talkSeen = { ...store.json(`atv.talkSeen.${state.sid}`, {}), ...talkSeen, [shown.key]: shown.t };
+      store.set(`atv.talkSeen.${state.sid}`, JSON.stringify(talkSeen));
+    }
+  }
+  const unseen = (p) => !state.replay && (talkSeen[p.key] || 0) < p.t;
+  $("talk-dot").hidden = on || !pages.some(unseen);
+  $("tab-talk").title = !on && pages.some(unseen) ? "판서: 아직 보지 않은 장이 있습니다" : "판서: 작업마다 에이전트가 핵심을 한 장으로 정리한 화이트보드";
+  if (!on) { talkSig = ""; return; } // 돌아오면 다시 그린다
+  const i = shown ? pages.indexOf(shown) : -1;
+  $("tv-no").textContent = pages.length ? `${i + 1} / ${pages.length}` : "";
+  $("tv-prev").disabled = i <= 0;
+  $("tv-next").disabled = i < 0 || i >= pages.length - 1;
+  $("tv-next-dot").hidden = !pages.slice(i + 1).some(unseen);
+  $("tv-prev-dot").hidden = !pages.slice(0, Math.max(0, i)).some(unseen); // 앞 작업의 장이 바뀐 경우
+  $("tv-task").textContent = !shown ? "" : shown.key ? `작업: ${own(scene.items, shown.key)?.title || shown.task || shown.key}` : "이 대화";
+  // 「판서 부탁」: 지금 작업의 장이 없을 때(재생 중·쓰기 열쇠 없음·끝난 대화는 뺀다)
+  const sess = state.sessions.get(state.sid), askable = sendable() && !!sess && sess.status !== "ended";
+  const curKey = explainKey(scene), hasCur = pages.some((p) => p.key === curKey);
+  // 이 작업에 이미 부탁했으면(보내는 중 포함) 장이 올 때까지 단추를 끈다(같은 지시를 거듭 보내지 않게)
+  const asked = state.talkAsked === `${state.sid}|${curKey}`;
+  $("tv-ask").hidden = !askable || !pages.length || hasCur;
+  $("tv-empty").hidden = !!pages.length;
+  $("tv-ask-empty").hidden = !askable;
+  for (const id of ["tv-ask", "tv-ask-empty"]) {
+    $(id).disabled = asked;
+    $(id).textContent = asked ? "부탁함" : "판서 부탁";
+  }
+  $("talk-svg").toggleAttribute("hidden", !shown); // svg 요소에는 hidden 속성 값(프로퍼티)이 없다
+  if (!shown) { talkSig = ""; return; }
+  // 같은 장을 다시 그리지 않는다. 글 폭을 재므로 손글씨 글꼴을 받은 뒤에 그린다
+  const sig = `${state.sid}|${shown.key}|${shown.t}|${shown.ord}`;
+  if (sig === talkSig) return;
+  talkSig = sig;
+  fontReady().then(() => {
+    if (talkSig !== sig) return;
+    if (talkOn()) drawTalk($("talk-svg"), shown);
+    else talkSig = ""; // 글꼴을 받는 사이 그림으로 돌아갔다: 다음에 다시 그린다
+  });
+}
+function stepTalk(d) {
+  const scene = viewScene(), pages = talkPages(scene), i = pages.indexOf(talkShown(scene, pages));
+  const next = pages[i + d];
+  if (!next) return;
+  state.talkKey = next.key;
+  // 끝 장에 닿아 누른 단추가 꺼지면 초점이 문서 밖으로 빠지므로 판서 칸으로 옮긴다
+  const btn = document.activeElement;
+  queueRender("view");
+  requestAnimationFrame(() => requestAnimationFrame(() => { if ((btn?.id === "tv-prev" || btn?.id === "tv-next") && btn.disabled) $("tv-scroll").focus(); }));
+}
+async function askTalk() {
+  const scene = viewScene(), mark = `${state.sid}|${explainKey(scene)}`;
+  if (!sendable() || state.talkAsked === mark) return;
+  state.talkAsked = mark;
+  queueRender("view");
+  const out = await boardOp({ op: "send", sid: state.sid, kind: "instruction", text: TALK_ASK, target: null, cid: newCid() });
+  if (out.ok) toast("판서를 부탁했습니다");
+  else if (state.talkAsked === mark) { state.talkAsked = null; queueRender("view"); } // 못 보냈으면 다시 누를 수 있게
+}
+$("tab-canvas").addEventListener("click", () => setCenter("canvas"));
+$("tab-talk").addEventListener("click", () => setCenter("talk"));
+$("center-tabs").addEventListener("keydown", (ev) => {
+  if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+  ev.preventDefault();
+  setCenter(talkOn() ? "canvas" : "talk", true);
+});
+$("tv-prev").addEventListener("click", () => stepTalk(-1));
+$("tv-next").addEventListener("click", () => stepTalk(1));
+$("tv-scroll").addEventListener("keydown", (ev) => {
+  if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { ev.preventDefault(); stepTalk(ev.key === "ArrowLeft" ? -1 : 1); }
+});
+$("tv-ask").addEventListener("click", askTalk);
+$("tv-ask-empty").addEventListener("click", askTalk);
 
 // 그림이 지금 작업(새 단계 묶음)보다 먼저 그린 것이면 그림 위 막대에 알린다.
 // 같은 메시지의 draw 가 올 틈(DRAW_SLACK)은 기다렸다가 보인다. 그사이 다른 사건이 없어도 보이게 그때 한 번 다시 본다
@@ -1197,6 +1318,8 @@ function reveal(id, isStep) {
   closeDoc(false); // 문서 창이 그림을 덮고 있으면 걷는다
   let p = own(viewScene().items, id);
   for (let i = 0; p && p.kind === "item" && i < 10; i++) p = own(viewScene().items, p.in);
+  // 판서를 보고 있었으면 그림을 다시 그린 뒤에 간다(찾기의 그림 부품과 같은 길)
+  if (p && showCanvas()) { state.focus = { sid: state.sid, part: p.id }; queueRender("view"); return; }
   if (p) revealPart(p.id);
 }
 
@@ -3432,6 +3555,7 @@ function chooseFound(i) {
 function applyFocus(afterCanvas) {
   const f = state.focus;
   if (!f || f.sid !== state.sid || !state.snapped) return;
+  if (f.part && !afterCanvas) showCanvas(); // 판서를 보고 있으면 그림으로 돌린다(이어서 그림을 그린 뒤 그 부품으로 간다)
   const flashIt = (e) => { e.classList.remove("flash"); void e.offsetWidth; e.classList.add("flash"); };
   if (f.seq != null) {
     const li = $("tl-body").querySelector(f.key ? `li[data-key="${CSS.escape(f.key)}"]` : `li[data-seq="${f.seq}"]`);

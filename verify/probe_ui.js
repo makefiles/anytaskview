@@ -2361,6 +2361,31 @@ async function main() {
   });
   await open(sid);
 
+  // ---- 39: 판서 ----
+  await check("판서: explain 한 장을 「판서」 칸에 손글씨로 그리고, 그림을 보는 중에는 탭에 점, 「그림」 으로 돌아오면 그림 칸", async () => {
+    await mcp("explain", { title: "원인은 빈 줄", parts: [{ id: "a", head: "문제", icon: "bug", lines: ["빈 줄에서 멈춤"] }, { id: "b", head: "해결", icon: "check", lines: [{ t: "경계값 고침", mark: "underline" }] }], arrows: [{ from: "a", to: "b", label: "그래서" }], summary: "빈 줄은 건너뛴다" });
+    await waitFor(`!document.getElementById('talk-dot').hidden`);
+    await evaluate(`document.getElementById('tab-talk').click()`);
+    await waitFor(`(() => { const s = document.getElementById('talk-svg'); return !s.hasAttribute('hidden') && [...s.querySelectorAll('text')].some((t) => t.textContent === '원인은 빈 줄'); })()`);
+    expect(await evaluate(`getComputedStyle(document.getElementById('canvas-scroll')).display === 'none' && document.getElementById('talk-dot').hidden`), "판서를 열었는데 그림 칸이 보이거나 점이 남음");
+    expect(await evaluate(`document.querySelector('#talk-svg text').getAttribute('font-family').includes('Nanum Pen Script') && document.fonts.check('28px "Nanum Pen Script"')`), "손글씨 글꼴을 받지 못함");
+    const no = await evaluate(`document.getElementById('tv-no').textContent`);
+    // 판서를 보는 동안 그림에 상자가 늘어도, 그림으로 돌아오면 제 크기로 배치된다(숨은 칸에서 재지 않음)
+    await mcp("draw", { ops: [{ id: "talk-box", kind: "box", label: "판서 보는 동안 더한 상자", status: "wait" }] });
+    await sleep(300);
+    await evaluate(`document.getElementById('tab-canvas').click()`);
+    await waitFor(`getComputedStyle(document.getElementById('canvas-scroll')).display !== 'none' && document.getElementById('talk-view').hidden`);
+    await waitFor(`(() => { const e = document.querySelector('#canvas .part[data-id="talk-box"]'); return !!e && e.offsetWidth > 60 && e.offsetHeight > 20; })()`);
+    // 판서를 보는 중 띠 「보기」 로 그림 부품을 고르면 그림으로 돌아가 그 부품으로 간다
+    await evaluate(`document.getElementById('tab-talk').click()`);
+    await waitFor(`!document.getElementById('talk-view').hidden`);
+    await waitFor(`[...document.querySelectorAll('#band .bi')].some((r) => r.textContent.includes('판서 보는 동안 더한 상자'))`);
+    await evaluate(`[...document.querySelectorAll('#band .bi')].find((r) => r.textContent.includes('판서 보는 동안 더한 상자')).querySelector('button').click()`);
+    await waitFor(`document.getElementById('talk-view').hidden && getComputedStyle(document.getElementById('canvas-scroll')).display !== 'none'`);
+    await mcp("draw", { ops: [{ id: "talk-box", del: true }] });
+    return no;
+  });
+
   for (const theme of ["light", "dark"]) {
     await check(`${theme} 테마의 모든 버튼·범위 입력 대비가 4.5 이상임`, async () => {
       await evaluate(`(() => {

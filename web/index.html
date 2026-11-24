@@ -84,6 +84,7 @@
   <div class="split v" id="split-left" role="separator" aria-orientation="vertical" aria-label="세션 목록 폭" tabindex="0"></div>
   <section id="canvas-wrap" aria-label="그림">
     <div id="zoombar" role="toolbar" aria-label="그림 배율">
+      <div id="center-tabs" class="ptabs" role="tablist" aria-label="가운데 칸"><button id="tab-canvas" class="ptab" role="tab" type="button" aria-selected="true" aria-controls="canvas-scroll">그림</button><button id="tab-talk" class="ptab" role="tab" type="button" aria-selected="false" aria-controls="talk-view" tabindex="-1" title="판서: 작업마다 에이전트가 핵심을 한 장으로 정리한 화이트보드">판서<span id="talk-n"></span><span id="talk-dot" class="udot" hidden></span></button></div>
       <button id="zoom-out" class="mini" type="button" title="축소">−</button>
       <button id="zoom-fit" class="mini" type="button" title="화면에 맞추기">맞춤</button>
       <button id="zoom-100" class="mini" type="button" title="100% 로 되돌리기">원래 크기</button>
@@ -97,6 +98,20 @@
       <div id="zoom-sizer"><div id="canvas"></div></div>
       <p id="empty">아직 그림이 없습니다. Claude 가 draw 로 그리면 여기에 나타납니다.</p>
     </div>
+    <section id="talk-view" role="tabpanel" aria-labelledby="tab-talk" hidden>
+      <div class="tv-bar">
+        <button id="tv-prev" class="mini" type="button" aria-label="앞 장">◀<span id="tv-prev-dot" class="udot" hidden title="앞 장이 바뀌었습니다"></span></button>
+        <span id="tv-no" class="muted"></span>
+        <button id="tv-next" class="mini" type="button" aria-label="다음 장">▶<span id="tv-next-dot" class="udot" hidden title="뒤 장이 새로 왔거나 바뀌었습니다"></span></button>
+        <span id="tv-task" class="muted"></span>
+        <span class="grow"></span>
+        <button id="tv-ask" class="mini" type="button" hidden title="에이전트에게 지금 작업의 판서를 그려 달라고 보냅니다(쉬고 있으면 깨웁니다)">판서 부탁</button>
+      </div>
+      <div id="tv-scroll" tabindex="0" aria-label="판서">
+        <svg id="talk-svg" viewBox="0 0 1280 800" role="img" aria-label="판서" hidden></svg>
+        <div id="tv-empty" hidden><p>아직 판서가 없습니다. 작업에 결론이 나면 에이전트가 핵심을 한 장으로 정리합니다.</p><button id="tv-ask-empty" class="mini" type="button">판서 부탁</button></div>
+      </div>
+    </section>
     <section id="doc-view" hidden aria-label="문서">
       <div class="dv-bar">
         <button id="dv-canvas" class="mini" type="button" title="문서를 닫고 그림으로 돌아갑니다(Esc)">← 그림으로<span id="dv-canvas-dot" class="udot" hidden title="문서를 여는 동안 그림이 바뀌었습니다"></span></button>
@@ -176,6 +191,7 @@
     <dt>그림 화면 옮기기</dt><dd>그림이 칸보다 크면 빈 곳을 마우스로 잡고 끌어 상하좌우로 봅니다. 「맞춤」 을 누르면 그림 전체가 칸에 들어갑니다.</dd>
     <dt>그림 글자 복사</dt><dd>상자·표·선 이름·Mermaid 의 글자 위에서 끌어 고른 뒤 <kbd>Ctrl</kbd> + <kbd>C</kbd> 로 복사합니다. 글자를 고른 끝의 클릭은 상자를 누른 것으로 치지 않습니다.</dd>
     <dt>긴 글 전체 보기</dt><dd>타임라인에서 3줄로 접힌 사용자 입력·차례 끝 답·화판 글을 누르면(<kbd>Enter</kbd> 도) 전체가 창으로 열립니다.</dd>
+    <dt>판서 보기</dt><dd>그림 위 「그림 | 판서」 에서 「판서」 를 누르면, 에이전트가 작업마다 핵심을 한 장으로 정리한 화이트보드가 보입니다(작업에 결론이 날 때 그립니다). ◀ ▶(판서에 초점이 있으면 <kbd>←</kbd> <kbd>→</kbd>)로 작업마다의 장을 넘깁니다. 새 장이 와도 보던 화면은 그대로이고, 「판서」 탭이나 ▶ 에 점이 붙습니다. 지금 작업의 판서가 없으면 「판서 부탁」 을 눌러 에이전트에 부탁합니다(쉬는 대화는 깨웁니다).</dd>
     <dt>문서 보기</dt><dd>작업 칸 머리의 「문서」 탭에 에이전트가 만들거나 고친 md·html 과 그림 상자가 가리키는 문서가 모입니다(화판 프로젝트에 든 대화면 그 프로젝트 전체). 탭에는 중요 문서만 보입니다: 이름이나 제목에 설계·계획·매뉴얼·design·plan·spec·guide·README 같은 말이 든 문서, 그림 상자가 가리키는 문서, 📌 고정한 문서입니다. 나머지는 「모든 문서 N개」 에 있고 거르기 칸으로 찾습니다. 다른 문서도 타임라인의 수정 줄이나 문서 상자를 누르면 열립니다. 점은 아직 열어 보지 않은 변경입니다. 줄을 누르면 그림 자리에 문서가 열립니다: md 는 렌더된 화면(Mermaid 그림 포함)과 목차로, html 은 화판과 분리된 틀 안에서 그 모양 그대로 보입니다. 타임라인의 md·html 「수정」 줄을 누르면 그 수정이 바꾼 문단으로 옮겨 가 색 띠를 달고, 문서 상자(<span class="badge doc">문서</span>)를 누르면 그 문서가 열립니다. 문서 안 링크는 같은 저장소의 문서면 그 자리에서 열리고 「◀ 뒤로」 로 돌아옵니다. 열어 둔 문서는 고쳐지면 읽던 자리를 지켜 다시 그려집니다. 「← 그림으로」 나 <kbd>Esc</kbd> 로 닫고, 「↗ 새 창」 으로 문서만 넓게 봅니다. 줄에 마우스를 올리면 나오는 📌 로 맨 위에 고정하고, ✕ 로 목록에서 숨깁니다(맨 아래 「숨긴 문서」 에서 되살림).</dd>
     <dt>바뀐 줄(diff) 보기</dt><dd>타임라인의 「수정」 줄에 <code>+3 −1</code> 처럼 줄 수가 붙어 있으면, 누르면(<kbd>Enter</kbd> 도) 그 수정의 바뀐 줄이 창으로 열립니다(md·html 은 문서가 열리고, 바뀐 줄은 문서 창 위 「바뀐 줄」 로 봅니다). 같은 파일을 잇달아 고쳐 한 줄로 묶인 것은 옛것부터 차례로 보입니다. 그림에서 파일 위치가 붙은 상자·항목을 눌러도 이 세션에서 그 파일을 고친 바뀐 줄이 옛것부터 열리고, 상자의 「수정됨」 표를 누르면 문서 상자에서도 바뀐 줄이 열립니다. 경로는 창 위의 「경로 복사」 로 복사합니다. 남기는 크기는 「설정」 에서 바꿉니다.</dd>
     <dt>하위 에이전트 따라 보기</dt><dd>하위 에이전트가 도는 동안 작업 칸 위에 그 이름표(색 점 · 맡은 일 · 걸린 시간)가 보이고, 타임라인의 그 에이전트 줄 앞에도 같은 이름표가 붙습니다. 이름표를 누르면 타임라인이 그 에이전트의 줄만 보이고, 다시 누르거나 거르기 줄의 「✕」 를 누르면 풀립니다. 하위 에이전트는 화판에 직접 그리지 않고, 결과를 받은 상위 에이전트가 그립니다.</dd>
@@ -377,6 +393,7 @@
 <button id="ask" type="button" hidden><svg class="logo" aria-hidden="true"><use href="#logo-claude"/></svg>보내기</button>
 <div id="toast" role="status" hidden></div>
 <script src="/vendor/elk.js"></script>
+<script src="/vendor/rough.js"></script>
 <script type="module" src="/app.js"></script>
 </body>
 </html>

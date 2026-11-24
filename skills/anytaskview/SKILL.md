@@ -1,6 +1,6 @@
 ---
 name: anytaskview
-description: Detailed guide for drawing your work on the anytaskview live progress board (plan, draw, note, ids tools). Use when you start a multi-step task and want to plan or draw it well, when the user asks how to open or use the board, or when you are unsure what to draw.
+description: Detailed guide for drawing your work on the anytaskview live progress board (plan, draw, note, explain, ids tools). Use when you start a multi-step task and want to plan or draw it well, when the user asks how to open or use the board, or when you are unsure what to draw.
 ---
 
 # anytaskview board guide
@@ -15,6 +15,7 @@ Board calls ride along with your work: put them first in the same message as you
 
 - **plan**: tasks and their steps. Each request or work unit is a top-level step (the task); its work (investigate, design, implement, verify) goes in sub-steps with `parent` set to the task. Add tasks you already know will follow (for example the remaining items of a handoff) as `todo` top-level steps. One call with all steps after you form a plan; later calls send only changed statuses. Set the old step `done` and the new one `doing` in the same call, and mark a task `done` with its last step. The board shows each finished task as one line, the current task as a card with its steps, and the next tasks below it.
 - **draw**: the structure of the *problem* (features, suspects, call paths, data flow, decisions). Not folder layouts, not every file you touch: hooks already post edits, commands and subagents.
+- **explain**: one whiteboard page (판서) with the gist of a task, sent when the task reaches a conclusion or the user asks for one. See "Explain (판서)" below.
 - **note**: one timeline line for a reason (`why`), a decision (`decision`), being stuck (`blocked`) or waiting for approval (`wait`). `on` attaches it to a step or part.
 - **ids**: only when you lost track of ids, for example after compaction.
 - **project**: work spanning several conversations. A `[anytaskview 프로젝트]` line at session start lists candidates; join one with `{action:"join", id}` when the user's work matches. Create one (`{action:"create", name, purpose}`) only when the user starts work meant to span conversations. The user's own choice (drag on the board, their resume phrase) wins; a refusal is not an error to retry.
@@ -57,6 +58,32 @@ Pick the form that fits each part of the problem and mix two or three in a view.
 Keep each group small: about 8 boxes, short tables and diagrams.
 
 The user wants to see the whole work at a glance, not a new picture per task. Draw each task inside one `group` titled with the task; inside it you have three more levels (for example an area group, a list in it, the list's items). In a long conversation each new task (a new set of plan steps) in the same work adds its own `group` to the existing drawing, sent with that plan, and may link it to earlier parts with edges; routine steps such as commit and push need none. Give a finished task's parts their final status (the group folds once nothing in it is doing, blocked or wait) in the message with your last tool calls for that task, not in a board-only message. The board folds a finished group into one box (the user clicks it to unfold), so the drawing stays readable as it grows. Use `clear` only when the subject changes completely (another project or problem); `del` parts that turned out wrong. If the drawing is still from before the task's steps, the board marks it as an earlier task's drawing and the next plan result says so once.
+
+## Explain (판서)
+
+A 판서 is the lecture-style summary of one task: what the user should remember after reading it once. Send it when a task reaches a conclusion (findings, the option chosen, work finished), with that task's last tool calls (alone, right before your answer, if nothing else is left to call), and when the user asks for 판서. Like other board calls it is skipped while no board tab is open. One page per task, where a task is a top-level plan step with sub-steps; with no plan or a flat plan the conversation has a single page. A second call for the same task replaces the page, so resend it whole. The page goes to the plan's current task: when the same message's plan call already moved to the next task, set `task` to the finished task's id. You send words only; the board picks positions, marker colors, hand lettering and icons' look.
+
+Before writing it, decide in this order (taken from visual-explainer-skill's analysis step):
+
+1. The one core idea. It becomes `title` (a question works well) and, if needed, `sub`.
+2. Two to four parts that carry it. Each is a `head` of a word or two and up to five short lines (about 20 characters, so they stay large).
+3. How the parts relate: cause or sequence → `arrows` between neighbouring parts with a one-word `label`; options → one part each and `mark:"pick"` on the chosen one; actors and ordered actions → parts for the actors and `steps` with `by` set to the acting part's id; a decision inside one part → `flow:true` with `shape` box, diamond or bubble and `via` on the arrow into a line.
+4. One analogy if it helps (`like`), one side remark that answers "why?" (`memo`), and the one-line takeaway (`summary`). With `steps` there is no room for `like`, and `summary` fits only with up to four steps.
+5. Emphasis last, and little of it: `em` for red text, `mark` underline, circle, highlight or box on the one or two lines that matter.
+
+`icon` takes the draw icon names plus check, cross, bulb and chat. Avoid special symbols such as arrows or triangles inside text; write words. Parts without `id` get `p1`, `p2`, … by position (skipping ids other parts use).
+
+```json
+explain: {"title":"쿠폰이 두 번 깎인다?","sub":"합계가 바뀔 때마다 할인을 다시 적용하던 길",
+  "parts":[{"id":"p","head":"문제","icon":"monitor","lines":["쿠폰 1장에",{"t":"2,000원 할인","em":true}],"note":"기대는 1,000원"},
+    {"id":"c","head":"원인","flow":true,"lines":[{"t":"합계가 바뀜","shape":"bubble"},{"t":"이미 적용됐나?","shape":"diamond"},{"t":"다시 할인","via":"안 봄","mark":"circle"}]},
+    {"id":"s","head":"해결","icon":"check","lines":["할인은 서버 값만",{"t":"화면은 다시 안 셈","mark":"underline"}]}],
+  "arrows":[{"from":"p","to":"c","label":"왜?"},{"from":"c","to":"s","label":"그래서"}],
+  "memo":{"head":"왜 서버 값만?","lines":["화면과 서버가 따로 세면 어긋날 수 있음"]},
+  "summary":"할인 계산은 서버 한 곳에서만 하고, 화면은 그 값을 보여 주기만 한다"}
+```
+
+Options: `{"title":"캐시냐 색인이냐","parts":[{"head":"색인 추가","mark":"pick","lines":["응답 -70%","쓰기 조금 느림"]},{"head":"캐시","lines":["응답 -90%",{"t":"옛 값 위험","em":true}]}],"like":{"lines":["자주 찾는 책에 책갈피를 꽂는 셈"]},"summary":"위험이 작은 색인부터 넣는다"}`. Actors in order: parts LLM, 서버, 화면 and `"steps":[{"t":"결론이 나면 explain 을 부름","by":"p1"},{"t":"작업마다 한 장으로 저장","by":"p2"}]`.
 
 ## Example
 

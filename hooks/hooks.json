@@ -67,7 +67,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "mcp__.*anytaskview.*__(plan|draw|note|ids|project)",
+        "matcher": "mcp__.*anytaskview.*__(plan|draw|note|explain|ids|project)",
         "hooks": [
           {
             "type": "command",

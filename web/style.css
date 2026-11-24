@@ -191,6 +191,22 @@ main.fold-left .sess { padding: 6px 0; text-align: center; }
 #stale .i { flex: none; width: 12px; height: 12px; }
 #canvas-scroll { position: relative; overflow: auto; min-height: 0; }
 #canvas-scroll { grid-row: 2; grid-column: 1; }
+/* 가운데 칸 「그림 | 판서」(39). 판서를 고르면 그림 칸과 그림 막대의 단추를 숨기고 판서 칸을 같은 자리에 둔다 */
+@font-face { font-family: "Nanum Pen Script"; font-style: normal; font-display: block; src: url("/vendor/NanumPenScript.woff2?v=1") format("woff2"); }
+#center-tabs { margin-right: 10px; flex: none; }
+#zoombar { flex-wrap: wrap; row-gap: 4px; } /* 탭이 더해져 좁은 그림 칸(창 반쪽 폭)에서는 막대가 넘치지 않고 두 줄이 된다 */
+#canvas-wrap.talk-on > #zoombar > :not(#center-tabs) { display: none; }
+#canvas-wrap.talk-on > #canvas-scroll { display: none; }
+#talk-view { grid-row: 2; grid-column: 1; display: flex; flex-direction: column; min-height: 0; background: var(--panel-2); }
+.tv-bar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); min-width: 0; }
+#tv-task { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#tv-scroll { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+/* 화이트보드는 어두운 테마에서도 흰 판이다(판 안의 색은 web/talk.js 가 정한다) */
+#talk-svg { display: block; width: 100%; max-width: 1600px; height: auto; margin: 0 auto; border-radius: 10px; box-shadow: 0 2px 8px rgba(0, 0, 0, .12); }
+#talk-svg .tk path { stroke-linecap: round; stroke-linejoin: round; }
+#talk-svg .hl path { stroke-linecap: butt; }
+#tv-empty { margin: 18% auto 0; max-width: 420px; text-align: center; color: var(--muted); }
+#tv-empty p { margin: 0 0 12px; }
 #zoom-sizer { position: relative; }
 #canvas { position: absolute; left: 16px; top: 16px; transform-origin: 0 0; }
 #empty { position: absolute; inset: 40% 0 auto; text-align: center; color: var(--muted); }

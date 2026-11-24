@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// stdio MCP 서버: LLM 의 plan·draw·note·ids 호출을 화판 서버에 넘기고 한 줄 결과를 돌려준다.
+// stdio MCP 서버: LLM 의 plan·draw·note·explain·ids 호출을 화판 서버에 넘기고 한 줄 결과를 돌려준다.
 // 어느 세션의 것인지는 부모 프로세스(claude) 번호와 CLAUDE_CODE_SESSION_ID 로 화판 서버가 가린다.
 // Codex 는 호출마다 _meta 에 세션 id 를 싣는다. 데스크톱 앱·VS Code 는 한 프로세스에 세션이 여럿이라 그 id 를 앞세운다.
 // 설치할 때 npm 이 필요 없도록 MCP SDK 없이 줄 단위 JSON-RPC 를 직접 읽고 쓴다(시험은 SDK 클라이언트로 한다).

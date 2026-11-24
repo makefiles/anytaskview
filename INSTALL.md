@@ -164,6 +164,9 @@ approval_mode = "approve"
 [plugins."anytaskview@anytaskview".mcp_servers.anytaskview.tools.note]
 approval_mode = "approve"
 
+[plugins."anytaskview@anytaskview".mcp_servers.anytaskview.tools.explain]
+approval_mode = "approve"
+
 [plugins."anytaskview@anytaskview".mcp_servers.anytaskview.tools.ids]
 approval_mode = "approve"
 
@@ -171,7 +174,7 @@ approval_mode = "approve"
 approval_mode = "approve"
 ```
 
-이 다섯 도구는 화판에 그림·작업·메모를 쓰기만 하고, 파일이나 명령에는 손대지 않습니다. 허용 범위도 이 다섯 도구로 한정됩니다.
+이 여섯 도구는 화판에 그림·작업·메모·판서를 쓰기만 하고, 파일이나 명령에는 손대지 않습니다. 허용 범위도 이 여섯 도구로 한정됩니다. 1.8.0 에서 판서 도구(`explain`)가 늘었으므로, 그 전 판에서 갱신했다면 `explain` 표만 더 붙입니다.
 
 확인: `codex plugin list` 가 오류 없이 `anytaskview@anytaskview` 를 찍습니다(설정 파일을 읽을 수 있다는 뜻).
 
@@ -211,7 +214,7 @@ Codex 는 플러그인의 훅을 사용자가 검토하고 믿기 전에는 돌�
 codex plugin marketplace upgrade anytaskview
 ```
 
-`upgrade` 하나로 설치된 사본까지 바뀝니다(0.163·0.164 확인). 새 세션을 열면 그 세션이 떠 있던 옛 판 서버를 내리고 새 판으로 다시 띄웁니다(이 기능이 들어가기 전 판에서 처음 갱신할 때만 열린 화판 탭을 모두 한 번씩 새로 고칩니다). 훅 정의가 바뀌었으면 `/hooks` 에서 다시 믿습니다. Claude Code 플러그인도 쓰면 위 「갱신」 으로 같은 판에 맞춥니다. 서버가 바뀌지 않으면 `"$HOME/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv" board --stop` 으로 내립니다.
+`upgrade` 하나로 설치된 사본까지 바뀝니다(0.163·0.164 확인). 새 세션을 열면 그 세션이 떠 있던 옛 판 서버를 내리고 새 판으로 다시 띄웁니다(이 기능이 들어가기 전 판에서 처음 갱신할 때만 열린 화판 탭을 모두 한 번씩 새로 고칩니다). 훅 정의가 바뀌었으면 `/hooks` 에서 다시 믿습니다. 1.8.0 전 판에서 갱신하면 C2 의 `explain` 표를 `config.toml` 에 더 붙입니다(판서 도구). Claude Code 플러그인도 쓰면 위 「갱신」 으로 같은 판에 맞춥니다. 서버가 바뀌지 않으면 `"$HOME/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv" board --stop` 으로 내립니다.
 
 ```sh
 "$HOME/.codex/plugins/cache/anytaskview/anytaskview/local/scripts/atv" board --stop

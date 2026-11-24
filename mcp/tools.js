@@ -1,14 +1,18 @@
 // MCP 도구 정의와 서버 안내문. 세션마다 LLM 맥락에 실리므로 짧은 영어로 쓴다(한국어보다 토큰이 덜 든다).
 // 화판에 보이는 이름표·글은 사용자 언어로 쓰라고 안내한다.
-import { STATUSES, NOTE_KINDS, DRAW_KINDS, SHAPES, ICONS } from "../lib/scene.js";
+import { STATUSES, NOTE_KINDS, DRAW_KINDS, SHAPES, ICONS, EXPLAIN_ICONS } from "../lib/scene.js";
 
 const str = { type: "string" };
 const strOrNull = { type: ["string", "null"] };
 const status = { type: ["string", "null"], enum: [...STATUSES, null] };
+const bool = { type: "boolean" };
+const mark = { type: "string", enum: ["underline", "circle", "highlight", "box"] };
+// 판서의 줄 한 개: 글, 또는 강조를 붙인 {t, …}
+const talkLine = (more = {}) => ({ anyOf: [str, { type: "object", properties: { t: str, em: bool, mark, ...more }, required: ["t"] }] });
 
-export const INSTRUCTIONS = `anytaskview: live progress board. Tools plan, draw, note, ids, project.
+export const INSTRUCTIONS = `anytaskview: live progress board. Tools plan, draw, note, explain, ids, project.
 The user watches this board in a browser tab to follow your work. Hooks already post file edits, commands and subagents, so never draw those.
-Board calls ride along: put them first in the same message as your other tool calls. A message holding only board calls costs a whole extra turn (the full context is read again), so do not send one, except the wait or blocked note below.
+Board calls ride along: put them first in the same message as your other tool calls. A message holding only board calls costs a whole extra turn (the full context is read again), so do not send one, except the wait or blocked note below or a task's explain when nothing else is left to call.
 When to call (at these moments, not on every tool call):
 - After you form a plan: plan once with all steps, in the same message as your first draw and the first tool calls of the work.
 - When a step starts or ends: plan with only the changed statuses, in the message that starts the next work. The current step is the step most recently set to doing, so set the old one done and the new one doing in the same call.
@@ -74,6 +78,35 @@ export const TOOLS = [
       type: "object",
       properties: { text: str, kind: { type: "string", enum: NOTE_KINDS }, on: str, ref: str },
       required: ["text"],
+    },
+  },
+  {
+    name: "explain",
+    description: "Draw the gist of a task as one whiteboard page (판서) the user can switch to from the diagram. Send words only; the board lays it out in hand-drawn marker style, so no coordinates or colors. Call it once when a task reaches a conclusion (findings, the option chosen, work finished), with that task's last tool calls, and when the user asks for 판서. One page per task (a top-level plan step with sub-steps; with no plan or a flat plan the conversation has one page): calling again for the same task replaces it. The page goes to the plan's current task; if a plan call already moved on, set task to the finished task's id. Keep only the core: 2-4 parts, each a short head and a few short lines. arrows (between neighbouring parts) for cause or sequence; mark:\"pick\" on the chosen option; steps for ordered actions (by = the acting part's id); memo for a why; like for an analogy (not drawn with steps); summary for the one-line takeaway (with at most 4 steps). In lines, em makes red text and mark adds underline, circle, highlight or box; flow:true draws a part's lines as linked boxes (shape box, diamond or bubble; via labels the arrow into a line). Avoid special symbols: the hand font may lack them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: str,
+        sub: str,
+        parts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: str, head: str, icon: { type: "string", enum: EXPLAIN_ICONS }, flow: bool, mark: { type: "string", enum: ["pick"] }, note: str,
+              lines: { type: "array", items: talkLine({ shape: { type: "string", enum: ["box", "diamond", "bubble"] }, via: str }) },
+            },
+            required: ["head"],
+          },
+        },
+        arrows: { type: "array", items: { type: "object", properties: { from: str, to: str, label: str, dash: bool }, required: ["from", "to"] } },
+        steps: { type: "array", items: talkLine({ by: str }) },
+        memo: { type: "object", properties: { head: str, lines: { type: "array", items: str } } },
+        like: { type: "object", properties: { lines: { type: "array", items: str } } },
+        summary: str,
+        task: str,
+      },
+      required: ["title", "parts"],
     },
   },
   {

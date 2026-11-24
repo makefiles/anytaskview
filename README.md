@@ -7,14 +7,14 @@
   <img src="docs/images/hero-light.png" alt="AnyTaskView board. Left: session list grouped by project, with running conversations as cards (step progress bar, current step, this turn's edits and commands, the decision each waits for), with Claude and Codex logos and a 'past sessions' group (expanded here). Middle: a diagram the agent drew, with a rounded screen box, a decision diamond, a server box and a database cylinder joined by labelled arrows, a results table, a document box and a hexagon waiting for approval. Right: the plan with the current step pinned on top, and a timeline of commands, file edits, notes and the user's prompt. Top: the session name, the current step and a one-line approval banner with 'show more' and 'close' buttons.">
 </picture>
 
-**English summary.** anytaskview is a Linux plugin for coding agents (Claude Code and OpenAI Codex) that shows what the agent is doing on a live board in your local browser: the plan and its current step, a diagram the agent keeps extending while it works (finished groups fold into one box you can click open), notes and decisions, and facts collected automatically by hooks (file edits with their diffs, commands, subagents with a colored name tag you can click to follow one of them). Markdown and HTML documents the agent writes (plans, designs, manuals) gather in a Docs tab next to the plan and open rendered, Mermaid included, in place of the diagram; clicking a document box or an edit line opens the document at the changed paragraph. Work that spans several conversations is grouped into projects; each conversation's row in the session list shows its current step and what it waits for, built from its own plans and notes. Session names use Claude Code's own summary title when there is one. You can point at a box or a step on the board and send a comment or instruction back to the agent, search the board and past records, and drag shapes with Ctrl held to rearrange them. The board UI and agent-facing texts are in Korean, and so are the screenshots in this README.
+**English summary.** anytaskview is a Linux plugin for coding agents (Claude Code and OpenAI Codex) that shows what the agent is doing on a live board in your local browser: the plan and its current step, a diagram the agent keeps extending while it works (finished groups fold into one box you can click open), notes and decisions, and facts collected automatically by hooks (file edits with their diffs, commands, subagents with a colored name tag you can click to follow one of them). When a task reaches a conclusion the agent can also sum it up as a whiteboard page (판서): it sends only the words, and the board draws them in hand-drawn marker style, one page per task, next to the diagram. Markdown and HTML documents the agent writes (plans, designs, manuals) gather in a Docs tab next to the plan and open rendered, Mermaid included, in place of the diagram; clicking a document box or an edit line opens the document at the changed paragraph. Work that spans several conversations is grouped into projects; each conversation's row in the session list shows its current step and what it waits for, built from its own plans and notes. Session names use Claude Code's own summary title when there is one. You can point at a box or a step on the board and send a comment or instruction back to the agent, search the board and past records, and drag shapes with Ctrl held to rearrange them. The board UI and agent-facing texts are in Korean, and so are the screenshots in this README.
 
 - Supported agents: Claude Code (tested in the terminal `claude`) and OpenAI Codex (terminal `codex`, ChatGPT desktop app, VS Code). Other agents are not supported yet.
 - Requirements: Linux (macOS untested, Windows through WSL), Node.js 22.12 or later, a recent browser, and Claude Code or Codex with plugin support.
 - Install: `claude plugin marketplace add makefiles/anytaskview`, then `claude plugin install anytaskview@anytaskview`. Step-by-step guide that an LLM agent can also follow: [INSTALL.md](INSTALL.md). Agents given only this repository URL should follow INSTALL.md from the top; the two commands alone do not start or open the board. To open the board later, ask the agent to open it, or run `scripts/atv board --open` from the plugin folder (it opens your default browser without printing the key).
-- OpenAI Codex (CLI, desktop app, VS Code) works too: `codex plugin marketplace add makefiles/anytaskview`, `codex plugin add anytaskview@anytaskview`, allow the five board tools in `~/.codex/config.toml`, and trust the hooks in `/hooks`. See the Codex part of [INSTALL.md](INSTALL.md).
+- OpenAI Codex (CLI, desktop app, VS Code) works too: `codex plugin marketplace add makefiles/anytaskview`, `codex plugin add anytaskview@anytaskview`, allow the six board tools in `~/.codex/config.toml`, and trust the hooks in `/hooks`. See the Codex part of [INSTALL.md](INSTALL.md).
 - Security: the board listens on 127.0.0.1 only and every request needs a token; nothing is sent off the machine. Details and limits: [SECURITY.md](SECURITY.md).
-- License: Apache-2.0. Bundled browser libraries and the font keep their own licenses (ELK: EPL-2.0, Mermaid: MIT, Pretendard: SIL OFL 1.1).
+- License: Apache-2.0. Bundled browser libraries and fonts keep their own licenses (ELK: EPL-2.0, Mermaid: MIT, Rough.js: MIT, Pretendard and Nanum Pen Script: SIL OFL 1.1).
 - Trademarks: Claude and the Claude logo are trademarks of Anthropic, PBC; Codex, ChatGPT and the OpenAI logo are trademarks of OpenAI. The board shows these logos (the OpenAI logo recoloured blue for Codex sessions) only to tell which agent a session belongs to. anytaskview is not affiliated with or endorsed by either company.
 
 ---
@@ -23,6 +23,7 @@
 
 - 에이전트가 작업과 그 단계, 문제 구조 그림, 이유·결정 메모를 짧은 도구 호출로 올립니다.
 - 파일 수정, 명령, 하위 에이전트, 입력 필요 같은 사실은 에이전트의 훅이 자동으로 올립니다. 사실은 그때의 단계에 붙고, 그림 속 상자의 파일이 수정되면 그 상자에 「수정됨」 이 붙습니다.
+- 작업에 결론이 나면 에이전트가 그 핵심을 판서 한 장으로 정리합니다. 에이전트는 제목·칸·짧은 줄·강조만 보내고, 화판이 화이트보드에 보드마커로 쓴 것처럼 그립니다. 판서는 작업마다 한 장이고, 그림 위 「그림 | 판서」 로 바꿔 봅니다.
 - 에이전트가 만들거나 고친 md·html 문서(계획서·설계서·매뉴얼)는 작업 칸의 「문서」 탭에 모이고, 누르면 그림 자리에 렌더된 화면(Mermaid 그림 포함)으로 열립니다. 문서 상자나 타임라인의 수정 줄을 누르면 그 문서의 바뀐 문단으로 갑니다.
 - 하위 에이전트마다 맡은 일과 색 점으로 된 이름표가 작업 칸 위와 타임라인 줄 앞에 붙고, 누르면 그 에이전트의 줄만 보입니다. 하위 에이전트는 화판에 직접 그리지 않고, 결과를 받은 상위 에이전트가 그립니다.
 - 에이전트가 다른 LLM 에 일을 시키면(`codex exec`·`codex review`·Codex 플러그인 작업, `claude -p`, `gemini -p`, `opencode run`, `copilot -p`, `aider --message`, `ollama run`) 도는 동안 작업 칸 위와 세션 줄에 그 이름의 표와 걸린 시간이 보이고, 타임라인의 그 명령 줄에도 표가 붙습니다.
@@ -76,7 +77,7 @@ codex plugin add anytaskview@anytaskview
 
 설치한 뒤 두 가지를 더 합니다.
 
-- 그리기 도구 다섯을 사용자 Codex 설정 `~/.codex/config.toml` 에서 늘 허용합니다(붙일 줄은 INSTALL.md 「C2」). 허용하지 않으면 도구를 부를 때마다 승인을 묻고, `codex exec` 에서는 호출이 실패합니다.
+- 그리기 도구 여섯을 사용자 Codex 설정 `~/.codex/config.toml` 에서 늘 허용합니다(붙일 줄은 INSTALL.md 「C2」). 허용하지 않으면 도구를 부를 때마다 승인을 묻고, `codex exec` 에서는 호출이 실패합니다.
 - `codex` 를 띄워 `/hooks` 에서 `anytaskview@anytaskview` 의 훅을 믿어 줍니다. 믿기 전에는 명령·파일 수정 같은 사실이 화판에 오르지 않고, 화판에서 글을 보낼 수 없습니다.
 
 터미널 `codex`, ChatGPT 데스크톱 앱, VS Code 의 Codex 가 같은 설치를 씁니다. 자세한 순서와 확인 방법, 갱신·삭제는 [INSTALL.md](INSTALL.md) 의 「Codex 에 설치」 에 있습니다.
@@ -130,6 +131,15 @@ Codex 로만 설치했다면 플러그인 폴더가 `~/.codex/plugins/cache/anyt
 
 에이전트는 상태를 고쳐 갈 부분은 상자(둥근 네모·마름모·원통·문서·육각형 모양과 아이콘)와 선으로, 비교·결과는 표로, 호출 순서·비율·일정은 Mermaid 다이어그램과 차트로 그립니다. 상자의 테두리 색과 기호가 진행·끝·실패·막힘·승인 대기를 보입니다.
 
+### 판서: 작업의 핵심을 한 장으로
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/talk-dark.png">
+  <img src="docs/images/talk-light.png" alt="판서 한 장: 화이트보드에 손글씨로 쓴 제목 「쿠폰이 두 번 깎인다?」 와 부제, 파랑·초록·주황 둥근 상자 셋(문제·원인·해결)과 그 사이의 「왜?」 · 「그래서」 화살표. 원인 칸은 말풍선·마름모·상자를 잇는 흐름이고 「다시 할인」 에 빨간 동그라미, 해결 칸에 초록 체크와 빨간 밑줄. 아래에 노란 포스트잇 「왜 서버 값만?」 과 「정리」 상자.">
+</picture>
+
+작업에 결론이 나면(조사 결과, 고른 안, 끝낸 일) 에이전트가 그 작업의 핵심을 한 장으로 정리합니다. 에이전트는 제목·칸(2~4개)·짧은 줄·강조만 보내고, 자리와 색, 손그림 선과 손글씨는 화판이 정합니다. 칸마다 마커 색이 하나씩이고 빨강은 강조(빨간 글·밑줄·동그라미)에만 씁니다. 형광펜, 고른 안 표시, 번호 단계, 노란 포스트잇, 「이를테면…」 비유 칸, 「정리」 상자도 씁니다. 판서는 작업마다 한 장이고 같은 작업에서 다시 그리면 그 장이 바뀝니다. 그림 위 「그림 | 판서」 로 바꿔 보고 ◀ ▶ 로 장을 넘깁니다. 새 장이 와도 보던 화면은 그대로이고 「판서」 탭이나 ▶ 에 점이 붙습니다. 지금 작업의 판서가 없으면 「판서 부탁」 으로 에이전트에 부탁합니다(쉬는 대화는 깨웁니다). 화이트보드는 어두운 테마에서도 흰 판입니다.
+
 ### 세션 목록 · 가리키고 보내기
 
 <picture>
@@ -155,7 +165,7 @@ Codex 로만 설치했다면 플러그인 폴더가 `~/.codex/plugins/cache/anyt
 ### 화면 구성
 
 - 왼쪽: 세션 목록. 프로젝트별로 묶이고, 목록 위 정렬 단추(처음에는 「시작순 ▾」)에서 시작순·활동순·이름순을 고르거나 끝난 세션을 숨깁니다. 끝난 지 하루가 지난 대화는 「지난 세션」 에 접혀 들어갑니다. 진행 중인 대화는 카드(위 「세션 카드와 프로젝트」)로 보입니다. 프로젝트 이름을 누르면 그 묶음을 펴고 접습니다.
-- 가운데: 에이전트가 그린 그림. 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 파일 위치가 붙은 상자를 누르면 이 세션에서 그 파일을 고친 바뀐 줄(diff)이 창으로 열리고, 바뀐 줄이 남은 수정이 없으면 파일 경로를 복사합니다. md·html 을 가리키는 상자(「문서」 표)는 누르면 문서가 열리고, 「수정됨」 표를 누르면 바뀐 줄이 열립니다. `Ctrl` 을 누른 채 도형을 끌면 원하는 자리로 옮기고, 놓은 자리는 기록에 남습니다(그림 위 「자동 배치로」 로 모두 되돌림). 그림이 지금 작업의 단계보다 먼저 그린 것이면 그림 위에 「지난 작업 때 그린 그림」 이 붙습니다. 같은 일의 뒤 작업은 그림을 지우지 않고 새 묶음으로 덧붙이고, 끝난 묶음은 상자 하나로 접혀 누르면 펼쳐집니다.
+- 가운데: 에이전트가 그린 그림과 판서(위 「그림 | 판서」 로 바꿈, 위 「판서」 절). 내용에 맞춰 상자(모양·아이콘)와 선, 표, Mermaid 다이어그램·차트(시퀀스·상태·간트·타임라인·원·막대 등)를 섞어 그립니다. 파일 위치가 붙은 상자를 누르면 이 세션에서 그 파일을 고친 바뀐 줄(diff)이 창으로 열리고, 바뀐 줄이 남은 수정이 없으면 파일 경로를 복사합니다. md·html 을 가리키는 상자(「문서」 표)는 누르면 문서가 열리고, 「수정됨」 표를 누르면 바뀐 줄이 열립니다. `Ctrl` 을 누른 채 도형을 끌면 원하는 자리로 옮기고, 놓은 자리는 기록에 남습니다(그림 위 「자동 배치로」 로 모두 되돌림). 그림이 지금 작업의 단계보다 먼저 그린 것이면 그림 위에 「지난 작업 때 그린 그림」 이 붙습니다. 같은 일의 뒤 작업은 그림을 지우지 않고 새 묶음으로 덧붙이고, 끝난 묶음은 상자 하나로 접혀 누르면 펼쳐집니다.
 - 오른쪽: [작업 | 문서] 탭(지금 단계는 위에 고정)과 타임라인(사실·메모·보낸 글). 「작업」 탭은 위 단계 = 작업, 그 아래 = 단계인 나무 하나로, 지금 작업은 카드로 펼쳐 보이고 끝난 작업은 한 줄씩(오래된 것은 한 줄로 접힘), 다음 작업은 그 아래에 보입니다. /clear·이어받기 문구로 이어진 앞 대화도 맨 위에 한 줄씩 보이고, 누르면 그 대화의 단계가 펼쳐집니다. 「문서」 탭에는 이 작업(화판 프로젝트면 그 프로젝트 전체)에서 만들거나 고친 md·html 이 모입니다. 탭에는 중요 문서(이름·제목에 설계·계획·매뉴얼·design·plan·spec·guide·README 같은 말이 든 문서, 그림에 걸린 문서, 📌 고정)만 보이고 나머지는 「모든 문서」 에 있으며, 아직 열어 보지 않은 변경에는 점이 붙습니다. 문서는 그림 자리에 열리고(목차, 문서 안 링크 따라가기, 고쳐지면 읽던 자리를 지켜 다시 그림), 「← 그림으로」 나 `Esc` 로 닫으며, 「↗ 새 창」 으로 문서만 넓게 봅니다. html 은 화판과 분리된 틀 안에서 그 모양 그대로 보입니다. 타임라인은 「새 창」 으로 떼어 볼 수 있습니다. 「수정」 줄을 누르면 그 수정의 바뀐 줄(diff)이 창으로 열리고, md·html 의 수정 줄은 문서가 열려 그 수정이 바꾼 문단에 색 띠가 붙습니다.
 - 아래: 재생 막대. 지난 상태를 처음부터 다시 봅니다. ▶ 를 누르면 기록이 차례로 흘러가고(빠르기 1×·4×·16×), 끝에서 멈춥니다.
 - 맨 위 주의 띠(입력 필요·승인 대기·막힘·실패, 끝난 묶음 안의 실패는 빼고)는 한 줄로 접혀 「외 N개」 로 펴고, 「닫기」 로 숨깁니다(새 알림이 오면 다시 보임). 그림이 칸보다 크면 마우스로 잡아 끌어 옮깁니다.
@@ -194,6 +204,6 @@ claude --plugin-dir .        # 이 폴더를 한 세션에만 붙여 시험
 
 ## 라이선스
 
-Apache License 2.0 ([LICENSE](LICENSE)). `web/vendor/` 의 ELK(EPL-2.0), Mermaid(MIT), 글꼴 Pretendard(SIL OFL 1.1)는 각자의 라이선스를 따릅니다([web/vendor/README.md](web/vendor/README.md)).
+Apache License 2.0 ([LICENSE](LICENSE)). `web/vendor/` 의 ELK(EPL-2.0), Mermaid(MIT), Rough.js(MIT), 글꼴 Pretendard·나눔손글씨 펜(SIL OFL 1.1)은 각자의 라이선스를 따릅니다([web/vendor/README.md](web/vendor/README.md)).
 
 Claude 와 Claude 로고는 Anthropic, PBC 의, Codex·ChatGPT 와 OpenAI 로고는 OpenAI 의 상표입니다. 화판은 세션이 어느 에이전트의 것인지 알아보게 하려고만 이 로고를 보이며(Codex 세션에는 OpenAI 로고를 파란색으로 칠해 씁니다), anytaskview 는 두 회사와 관계가 없고 두 회사의 보증을 받지 않았습니다.

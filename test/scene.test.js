@@ -1,7 +1,7 @@
 // 장면 규칙 시험: 명령 검사, 지금 단계, 훅 사실의 순서 처리, 재생이 실시간과 같은지
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, overview, recent, evalDeliver, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs, drawingStale, DRAW_SLACK, agentsRunning, llmRunning, llmCounts } from "../lib/scene.js";
+import { newScene, applyRes, evalPlan, evalDraw, evalNote, evalFact, idsLine, overview, recent, evalDeliver, evalMove, entryText, itemText, searchTerms, matchAll, snippet, currentStep, resumeRule, checkResume, LEGACY_RESUME, evalSend, expireMsgs, drawingStale, DRAW_SLACK, agentsRunning, llmRunning, llmCounts, evalExplain, explainKey, EXPLAIN_LIMITS } from "../lib/scene.js";
 
 // 서버처럼: 검사 → 기록(JSON) → 기록을 되읽어 적용
 function harness(resume) {
@@ -913,4 +913,109 @@ test("조용함: 끝을 잃은 명령은 두 시간 뒤 기다리지 않고, 승
   l.fact({ f: "prompt", text: "x" }, 1000);
   assert.equal(l.fact({ f: "quiet" }, 9000, 500), "그대로", "상태를 바꾸지 못하면 기록하지 않는다");
   assert.equal(l.scene.sess.status, "working");
+});
+
+test("판서(explain): 작업마다 한 장, 같은 작업이면 바꾸고 순서는 지킴, 평평한 계획·계획 없음은 대화에 한 장", () => {
+  const s = newScene();
+  let t = 1000;
+  const plan = (steps) => applyRes(s, evalPlan(s, { steps }, { t: t++ }).res);
+  const ex = (input) => { const r = evalExplain(s, input, { t: t++ }); applyRes(s, r.res); return r.msg; };
+  const one = (title) => ({ title, parts: [{ head: "칸" }] });
+  assert.equal(ex(one("계획 없음")), "판서 1/1장 새로");
+  assert.equal(explainKey(s), "");
+  plan([{ id: "a", title: "평평", status: "doing" }]);
+  assert.equal(ex(one("평평한 계획")), "판서 1/1장 바꿈", "하위 단계가 없는 계획은 대화에 한 장");
+  plan([{ id: "w1", title: "작업 하나", status: "doing" }, { id: "s1", title: "일", parent: "w1", status: "doing" }]);
+  assert.equal(explainKey(s), "w1");
+  assert.equal(ex(one("첫 작업")), "판서 2/2장 새로 · 작업 「작업 하나」");
+  plan([{ id: "s1", status: "done" }, { id: "w1", status: "done" }, { id: "w2", title: "작업 둘", status: "doing" }, { id: "s2", title: "일", parent: "w2", status: "doing" }]);
+  assert.equal(ex(one("둘째 작업")), "판서 3/3장 새로 · 작업 「작업 둘」");
+  // 하위 단계만 바꿔도 같은 작업이다
+  plan([{ id: "s2", status: "done" }, { id: "s3", title: "일 둘", parent: "w2", status: "doing" }]);
+  assert.equal(ex(one("둘째 작업 고침")), "판서 3/3장 바꿈 · 작업 「작업 둘」");
+  const pages = Object.values(s.explains).sort((a, b) => a.ord - b.ord);
+  assert.deepEqual(pages.map((p) => [p.key, p.page.title]), [["", "평평한 계획"], ["w1", "첫 작업"], ["w2", "둘째 작업 고침"]]);
+  // 재생: 결과만 다시 적용해도 같은 장
+  const re = newScene();
+  for (const p of pages) applyRes(re, [{ k: "explain", v: p }]);
+  assert.deepEqual(re.explains, s.explains);
+});
+
+test("판서(explain) 입력 검사: 틀린 필드는 버리고 긴 글은 자르며 알림, title·parts 가 없거나 크면 거부", () => {
+  const s = newScene();
+  const ex = (input) => evalExplain(s, input, { t: 1 });
+  assert.equal(ex(null).msg, "입력이 객체가 아님");
+  assert.equal(ex({ parts: [{ head: "a" }] }).msg, "title 이 필요함");
+  assert.match(ex({ title: "x", parts: [{ lines: ["머리 없음"] }] }).msg, /^parts 가 1개 이상 필요함/);
+  assert.match(ex({ title: "x", parts: [{ head: "a", lines: ["y".repeat(20000)] }] }).msg, /^입력은 8192바이트 이하/);
+  const r = ex({
+    title: "제목", sub: "부제",
+    parts: [
+      { id: "a", head: "문제", icon: "folder", lines: ["짧은 줄", { t: "강조", em: true, mark: "circle" }, { t: "틀린 표시", mark: "wave" }], note: "메모" },
+      { id: "a", head: "id 겹침", flow: true, lines: [{ t: "흐름", shape: "diamond", via: "없음" }, { t: "모양", shape: "star" }] },
+      { id: "c", head: "x".repeat(30), icon: "rocket", mark: "pick" },
+      { head: "넷" }, { head: "다섯은 버림" },
+    ],
+    arrows: [{ from: "a", to: "p2", label: "왜?" }, { from: "a", to: "c" }, { from: "nope", to: "a" }],
+    steps: ["하나", { t: "둘", by: "c" }, { t: "셋", by: "없는칸" }],
+    memo: { head: "왜", lines: ["곁말"] }, like: { lines: [] }, summary: "정리",
+  });
+  const [put] = r.res, page = put.v.page;
+  assert.equal(page.parts.length, 4);
+  assert.deepEqual(page.parts.map((p) => p.id), ["a", "p2", "c", "p4"], "겹친 id 는 자리 번호로");
+  assert.deepEqual(page.parts[0].lines, [{ t: "짧은 줄" }, { t: "강조", em: true, mark: "circle" }, { t: "틀린 표시" }]);
+  assert.deepEqual(page.parts[1].lines, [{ t: "흐름", shape: "diamond", via: "없음" }, { t: "모양" }]);
+  assert.equal(page.parts[2].head.length, EXPLAIN_LIMITS.head);
+  assert.ok(page.parts[2].head.endsWith("…"));
+  assert.equal(page.parts[2].icon, undefined);
+  assert.equal(page.parts[2].mark, "pick");
+  assert.deepEqual(page.arrows, [{ from: "a", to: "p2", label: "왜?" }], "이웃한 칸끼리만");
+  assert.deepEqual(page.steps, [{ t: "하나" }, { t: "둘", by: "c" }, { t: "셋" }]);
+  assert.deepEqual(page.memo, { lines: ["곁말"], head: "왜" });
+  assert.equal(page.like, undefined);
+  assert.match(r.msg, /잘림: parts\[2\]\.head/);
+  assert.match(r.msg, /버림: .*parts\[4~\]/);
+  // 그림 부품·단계는 건드리지 않는다
+  assert.deepEqual(r.res.map((x) => x.k), ["explain"]);
+});
+
+test("판서(explain): 대화마다 장 한도", () => {
+  const s = newScene();
+  for (let i = 0; i < EXPLAIN_LIMITS.pages; i++) applyRes(s, [{ k: "explain", v: { key: `k${i}`, task: "", t: i, ord: i + 1, page: { title: "x", parts: [] } } }]);
+  assert.match(evalExplain(s, { title: "넘침", parts: [{ head: "a" }] }, { t: 1 }).msg, /100장까지/);
+});
+
+test("판서(explain) 검토 고침: task 인자, 지운 작업, id 다시 쓴 작업, 칸 id 자리 번호, 짝 글자, 단계와 비유·정리", () => {
+  const s = newScene();
+  let t = 1000;
+  const plan = (steps) => applyRes(s, evalPlan(s, { steps }, { t: t++ }).res);
+  const ex = (input) => { const r = evalExplain(s, input, { t: t++ }); applyRes(s, r.res); return r; };
+  plan([{ id: "w1", title: "하나", status: "doing" }, { id: "a", title: "일", parent: "w1", status: "doing" }]);
+  // 같은 메시지에서 plan 이 다음 작업으로 옮긴 뒤 끝난 작업의 판서: task 로 그 작업에 붙인다
+  plan([{ id: "a", status: "done" }, { id: "w1", status: "done" }, { id: "w2", title: "둘", status: "doing" }, { id: "b", title: "일", parent: "w2", status: "doing" }]);
+  assert.equal(ex({ title: "하나의 결론", task: "w1", parts: [{ head: "칸" }] }).msg, "판서 1/1장 새로 · 작업 「하나」");
+  assert.match(ex({ title: "x", task: "b", parts: [{ head: "칸" }] }).msg, /작업 「둘」 · 버림: task\(/, "하위 단계 id 는 버리고 지금 작업으로");
+  // 마지막 작업이 지워지면 지금 단계의 작업으로(대화 한 장으로 가지 않음)
+  plan([{ id: "w3", title: "셋", status: "doing" }, { id: "c", title: "일", parent: "w3", status: "doing" }]);
+  plan([{ id: "w3", del: true }, { id: "c", del: true }, { id: "b", status: "doing" }]);
+  assert.equal(explainKey(s), "w2");
+  // 끝난 작업의 id 를 새 제목으로 다시 쓰면 옛 장은 비켜 두고 새 장
+  plan([{ id: "b", status: "done" }, { id: "w2", status: "done" }, { id: "w1", title: "하나 다시", status: "doing" }, { id: "a", title: "새 일", parent: "w1", status: "doing" }]);
+  const r = ex({ title: "새 하나", parts: [{ head: "칸" }] });
+  assert.equal(r.msg, "판서 3/3장 새로 · 작업 「하나 다시」");
+  const keys = Object.values(s.explains).sort((x, y) => x.ord - y.ord).map((p) => [p.key.replace(/@\d+$/, "@t"), p.task, p.page.title]);
+  assert.deepEqual(keys, [["w1@t", "하나", "하나의 결론"], ["w2", "둘", "x"], ["w1", "하나 다시", "새 하나"]]);
+  // 자리 번호는 다른 칸이 쓴 id 를 건너뛴다
+  const ids = ex({ title: "id", parts: [{ id: "p2", head: "A" }, { head: "B" }, { head: "C" }] }).res.at(-1).v.page.parts.map((p) => p.id);
+  assert.deepEqual(ids, ["p2", "p3", "p4"]);
+  // 짝 글자(이모지)는 반으로 자르지 않는다
+  const head = ex({ title: "😀".repeat(50), parts: [{ head: "칸" }] }).res.at(-1).v.page.title;
+  assert.equal(Array.from(head).length, EXPLAIN_LIMITS.title);
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(head), "외짝 글자가 남음");
+  // 번호 단계와 비유·정리
+  const one = ex({ title: "단계", parts: [{ head: "A" }], steps: ["1", "2", "3", "4", "5"], like: { lines: ["비유"] }, summary: "정리" });
+  assert.equal(one.res.at(-1).v.page.like, undefined);
+  assert.equal(one.res.at(-1).v.page.summary, undefined);
+  assert.match(one.msg, /like\(steps 와 함께 못 씀\).*summary\(steps 5개부터 못 씀\)/);
+  assert.equal(ex({ title: "단계 넷", parts: [{ head: "A" }], steps: ["1", "2", "3", "4"], summary: "정리" }).res.at(-1).v.page.summary, "정리");
 });

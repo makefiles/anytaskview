@@ -22,13 +22,13 @@ async function connect(env) {
 }
 const text = (r) => r.content.map((c) => c.text).join("");
 
-test("도구 5개, 안내문은 4,096자 안, 부르면 한 줄 결과", async (t) => {
+test("도구 6개, 안내문은 4,096자 안, 부르면 한 줄 결과", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
   const client = await connect({ ANYTASKVIEW_HOME: f.home, ANYTASKVIEW_PORT: String(f.port), CLAUDE_CODE_SESSION_ID: "M1" });
   t.after(() => client.close());
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((x) => x.name), ["plan", "draw", "note", "ids", "project"]);
+  assert.deepEqual(tools.map((x) => x.name), ["plan", "draw", "note", "explain", "ids", "project"]);
   const instructions = client.getInstructions();
   assert.ok(instructions.length <= 4096, `안내문 ${instructions.length}자`);
   // 큰 그림 화판은 없어졌다(1.6.0): 그리기 도구에 project 인자가 없고 안내문도 그것을 시키지 않는다
@@ -41,6 +41,7 @@ test("도구 5개, 안내문은 4,096자 안, 부르면 한 줄 결과", async (
   assert.equal(text(await client.callTool({ name: "draw", arguments: { ops: [{ id: "a", kind: "box", label: "parser.c" }] } })), "적용 1");
   assert.equal(text(await client.callTool({ name: "note", arguments: { text: "원인은 경계값", kind: "why", on: "a" } })), "기록");
   assert.equal(text(await client.callTool({ name: "ids", arguments: {} })), 'plan: s1 "원인" doing | draw: a "parser.c" box');
+  assert.equal(text(await client.callTool({ name: "explain", arguments: { title: "원인", parts: [{ head: "문제", lines: ["빈 줄에서 멈춤"] }] } })), "판서 1/1장 새로");
   const scene = (await f.read("/api/sessions/M1/snapshot")).json.scene;
   assert.equal(scene.meta.cwd, process.cwd());
 });

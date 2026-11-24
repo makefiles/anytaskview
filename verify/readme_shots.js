@@ -148,6 +148,18 @@ async function main() {
   ] });
   await mcp(A, shop, "note", { kind: "why", text: "합계가 바뀔 때마다 훅이 쿠폰을 다시 적용합니다", on: "dup" });
   await mcp(A, shop, "note", { kind: "decision", text: "할인은 서버 계산값만 쓰고 화면에서는 다시 계산하지 않기로 함" });
+  // 판서: 지금 작업(쿠폰 중복 할인 고치기)의 핵심 한 장
+  await mcp(A, shop, "explain", {
+    title: "쿠폰이 두 번 깎인다?", sub: "합계가 바뀔 때마다 할인을 다시 적용하던 길",
+    parts: [
+      { id: "p", head: "문제", icon: "monitor", lines: ["쿠폰 1장에", { t: "2,000원 할인", em: true }], note: "기대는 1,000원" },
+      { id: "c", head: "원인", flow: true, lines: [{ t: "합계가 바뀜", shape: "bubble" }, { t: "이미 적용됐나?", shape: "diamond" }, { t: "다시 할인", via: "안 봄", mark: "circle" }] },
+      { id: "s", head: "해결", icon: "check", lines: ["할인은 서버 값만", { t: "화면은 다시 안 셈", mark: "underline" }], note: "회귀 시험 추가" },
+    ],
+    arrows: [{ from: "p", to: "c", label: "왜?" }, { from: "c", to: "s", label: "그래서" }],
+    memo: { head: "왜 서버 값만?", lines: ["화면과 서버가 따로 세면 둘이 어긋날 수 있음"] },
+    summary: "할인 계산은 서버 한 곳에서만 하고, 화면은 그 값을 보여 주기만 한다",
+  });
   let n = 0;
   for (const [cmd, ok] of [["npm test -- coupon", false], ["rg applyCoupon src", true], ["npm test -- coupon", true]]) {
     const id = `r${++n}`;
@@ -255,6 +267,16 @@ async function main() {
     await sleep(200);
     const group = await ev(`(() => { const r = document.querySelector('#sessions .gsec[data-pid]').getBoundingClientRect(); return { x: Math.max(0, r.left - 4), y: Math.max(0, r.top - 4), width: r.width + 8, height: r.height + 8 }; })()`);
     await shot("project", theme, group);
+    // 판서: 가운데 칸을 「판서」 로 바꿔 찍고 그림으로 되돌린다(고른 칸은 이 브라우저에 남는다).
+    // 줄이면 손글씨가 읽히지 않으므로 창을 넓혀 판(최대 1600px)만 자른다
+    await viewport(2200, 1400);
+    await open(A, theme);
+    await ev(`document.getElementById('tab-talk').click()`);
+    await until(`(() => { const s = document.getElementById('talk-svg'); return !s.hasAttribute('hidden') && s.querySelector('text') !== null; })()`);
+    await sleep(300);
+    await shot("talk", theme, await rectOf("#talk-svg", 10));
+    await ev(`document.getElementById('tab-canvas').click()`);
+    await viewport(W, H);
   }
 }
 
