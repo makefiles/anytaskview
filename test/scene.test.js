@@ -84,6 +84,21 @@ test("이번 차례(recent): 차례를 연 입력·화판 글과 같은 ms 에 �
   assert.deepEqual([recent(h.scene).ask, recent(h.scene).ans], ["화판 지시 C", ""], "화판 글을 넘긴 ms 의 앞 답");
 });
 
+test("이번 차례(recent): 차례 도중에 받은 화판 글은 차례를 열지 않고, 쉬는 동안 한 번에 받은 글 여럿은 모두 싣는다", () => {
+  const h = harness();
+  h.fact({ f: "prompt", text: "요청 A" }, 1000);
+  h.fact({ f: "edit", tool: "Edit", path: "/w/a.js" }, 1100);
+  applyRes(h.scene, evalSend(h.scene, { kind: "comment", text: "화판 의견 B" }, { t: 1150, seq: 900 }, "m1").res);
+  applyRes(h.scene, evalDeliver(h.scene, { t: 1200, seq: 901 }).res); // 앞 차례의 Stop 훅이 아직 기다리다가 작업 중에 받아 감
+  h.fact({ f: "edit", tool: "Edit", path: "/w/b.js" }, 1300);
+  assert.deepEqual([recent(h.scene).files, recent(h.scene).ask], [2, "요청 A"], "차례 도중에 받은 글");
+  h.fact({ f: "stop", last: "답 A" }, 1400);
+  applyRes(h.scene, evalSend(h.scene, { kind: "instruction", text: "지시 C\n둘째 줄" }, { t: 1500, seq: 902 }, "m2").res);
+  applyRes(h.scene, evalSend(h.scene, { kind: "instruction", text: "지시 D" }, { t: 1510, seq: 903 }, "m3").res);
+  applyRes(h.scene, evalDeliver(h.scene, { t: 1600, seq: 904 }).res);
+  assert.deepEqual(recent(h.scene), { files: 0, cmds: 0, fails: 0, failName: "", ask: "지시 C · 지시 D", ans: "" }, "쉬는 동안 한 번에 받은 두 글");
+});
+
 test("plan: 작업을 하위 단계보다 뒤에 진행으로 두어도 지금 단계는 그 아래의 진행 중인 하위 단계", () => {
   const h = harness();
   h.plan({ steps: [{ id: "a", title: "작업 A" }, { id: "a1", title: "조사", parent: "a" }, { id: "a2", title: "고치기", parent: "a" }] });
@@ -261,13 +276,12 @@ test("옛 그림: 새 작업은 새 단계 둘 이상으로 지금 단계가 옮
   h.draw({ ops: [{ id: "x", kind: "box", label: "상자", status: "doing" }] }, 2000);
   assert.equal(h.scene.view.taskT, 1000);
   h.plan({ steps: [{ id: "s1", status: "done" }, { id: "s2", status: "doing" }, { id: "s3", title: "시험 추가" }, { id: "s4", title: "문서" }] }, 300_000); // 진행 중에 덧붙임
-  h.plan({ steps: [{ id: "s2a", title: "A-1", parent: "s2", status: "doing" }, { id: "s2b", title: "A-2", parent: "s2" }] }, 400_000); // 지금 단계를 나눔
   h.plan({ steps: [{ id: "s3", title: "시험 추가(파서)", status: "doing" }, { id: "s5", title: "하나 더" }] }, 500_000); // 열린 단계 제목 다듬기
   h.plan({ steps: [{ id: "n1", title: "새것", status: "doing" }, { id: "n1", title: "새것 다시" }] }, 600_000); // 같은 id 두 번
   h.plan({ steps: [{ id: "n2", title: "새것2", status: "doing" }, { id: "n3", title: "잘못된 부모", parent: "없음" }] }, 650_000); // 거부된 단계
   assert.equal(h.scene.view.taskT, 1000);
   // 끝난 단계의 id 를 새 제목으로 다시 쓰고 지금 단계를 옮기면 새 작업
-  h.plan({ steps: ["s1", "s2", "s2a", "s2b", "s3", "s4", "s5", "n1", "n2"].map((id) => ({ id, status: "done" })) }, 700_000);
+  h.plan({ steps: ["s1", "s2", "s3", "s4", "s5", "n1", "n2"].map((id) => ({ id, status: "done" })) }, 700_000);
   h.plan({ steps: [{ id: "s1", title: "다른 작업 읽기", status: "doing" }, { id: "s2", title: "다른 작업 고치기" }] }, 800_000);
   assert.equal(h.scene.view.taskT, 800_000);
   // 한계: 앞 작업 단계를 진행 중으로 버려 둔 채 새 단계를 todo 로만 올리면 놓친다
@@ -276,6 +290,11 @@ test("옛 그림: 새 작업은 새 단계 둘 이상으로 지금 단계가 옮
   // 버려 둔 단계가 있어도 새 단계를 진행으로 두면 새 작업이다
   h.plan({ steps: [{ id: "k1", title: "새 작업", status: "doing" }, { id: "k2", title: "검증" }] }, 1_000_000);
   assert.equal(h.scene.view.taskT, 1_000_000);
+  // 지금 단계를 하위 단계로 나눔(나눈 뒤로는 작업으로 짠 계획이라 위 단계를 옮기면 새 작업이므로 따로 본다)
+  const s = harness();
+  s.plan({ steps: [{ id: "s1", title: "읽기", status: "doing" }, { id: "s2", title: "고치기" }] }, 1000);
+  s.plan({ steps: [{ id: "s1a", title: "A-1", parent: "s1", status: "doing" }, { id: "s1b", title: "A-2", parent: "s1" }] }, 2000);
+  assert.equal(s.scene.view.taskT, 1000, "지금 단계를 나눔");
 });
 
 test("끝난 단계의 id 를 새 제목으로 다시 쓰면 같은 자리의 새 단계다(상태·시각·메모를 새로, 열린 단계의 제목 다듬기는 그대로)", () => {
@@ -455,6 +474,29 @@ test("남은 단계(작업 = 위 단계): 위 단계를 할 일로 둔 채 하�
   assert.equal(h.scene.view.taskT, 3000);
   assert.match(msg, /Steps still open from earlier work: a2 todo "남은 일"\. /);
   assert.doesNotMatch(msg.split("Steps still open")[1], /\b(t1|t2|t3|b1|b2)\b/);
+});
+
+test("새 작업(작업 = 위 단계): 미리 올린 다음 작업을 위 단계만 먼저 진행으로 열고 하위 단계를 다음 호출에 붙여도 연 때가 새 작업", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "t1", title: "앞 작업", status: "doing" }, { id: "t1a", title: "하나", parent: "t1", status: "doing" }, { id: "t1b", title: "남은 일", parent: "t1" }, { id: "t2", title: "뒤 작업" }, { id: "t3", title: "그 뒤 작업" }] }, 1000);
+  const msg = h.plan({ steps: [{ id: "t1a", status: "done" }, { id: "t1", status: "done" }, { id: "t2", status: "doing" }] }, 2000);
+  assert.equal(h.scene.view.taskT, 2000, "위 단계만 먼저 연 작업");
+  assert.match(msg, /Steps still open from earlier work: t1b todo "남은 일"\. /);
+  assert.doesNotMatch(msg.split("Steps still open")[1], /\b(t1|t2|t3|t1a)\b/);
+  h.plan({ steps: [{ id: "t2a", title: "가", parent: "t2", status: "doing" }, { id: "t2b", title: "나", parent: "t2" }] }, 3000);
+  assert.equal(h.scene.view.taskT, 2000, "하위 단계를 붙인 것은 같은 작업");
+});
+
+test("남은 단계(작업으로 짠 계획): 지금 작업 앞에 건너뛰고 남긴 할 일은 알린다(지금 작업 뒤에 미리 올린 작업을 빼는 것은 위 시험)", () => {
+  // phase2 README 사례: 평평한 계획에서 한 단계만 나눈 뒤 셋째 단계를 할 일로 남기고 새 일을 시작
+  const h = harness();
+  h.plan({ steps: [{ id: "s1", title: "읽기", status: "doing" }, { id: "s2", title: "고치기" }, { id: "s3", title: "README 갱신" }] }, 1000);
+  h.plan({ steps: [{ id: "s1a", title: "가", parent: "s1", status: "doing" }, { id: "s1b", title: "나", parent: "s1" }] }, 1500);
+  h.plan({ steps: [{ id: "s1a", status: "done" }, { id: "s1b", status: "done" }, { id: "s1", status: "done" }, { id: "s2", status: "doing" }] }, 2000);
+  h.plan({ steps: [{ id: "s2", status: "done" }] }, 2500);
+  const msg = h.plan({ steps: [{ id: "l1", title: "새 일", status: "doing" }, { id: "l2", title: "검증" }, { id: "l3", title: "그 뒤 작업" }] }, 3000);
+  assert.equal(h.scene.view.taskT, 3000);
+  assert.match(msg, /Steps still open from earlier work: s3 todo "README 갱신"\. /);
 });
 
 test("note: 막힘·승인 대기는 단계 상태를 바꾸고, 지금 단계는 그대로 남는다", () => {

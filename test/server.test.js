@@ -492,6 +492,20 @@ test("메시지: 검사, 기다리는 훅에 한 번만, 새 기다림이 옛 �
   assert.equal((await send({ text: "끝난 뒤" })).status, 400);
 });
 
+test("화판 글 전달: 기다리던 훅이 글을 받아 가면 세션 요약을 다시 보내 카드의 이번 차례가 그 글로 바뀐다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  await f.hook("D1", { f: "start", cwd: "/w" }, { pid: process.pid });
+  await f.hook("D1", { f: "prompt", text: "요청 A" }, { pid: process.pid });
+  await f.hook("D1", { f: "stop", last: "답 A" }, { pid: process.pid });
+  await board(f, { op: "send", sid: "D1", kind: "instruction", text: "화판 지시 B" });
+  const s = sse(f, "/events", t);
+  await s.until((ev) => ev.some((e) => e.ev === "list"));
+  assert.equal((await f.write("/api/inbox", { sid: "D1", wait: 5000 })).status, 200);
+  const asks = (ev) => ev.filter((e) => e.ev === "sess" && e.data.id === "D1").map((e) => e.data.turn.ask);
+  assert.equal(asks(await s.until((ev) => asks(ev).includes("화판 지시 B"))).at(-1), "화판 지시 B", "받아 간 뒤의 요약");
+});
+
 test("모아 보내기: 여러 글을 기록 한 줄에 모두 넣거나, 하나라도 틀리면 하나도 넣지 않고 몇 번째인지 알린다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());
@@ -1069,6 +1083,35 @@ test("SessionStart 답: 소속이 있으면 프로젝트 상태, 없으면 후�
   assert.equal(await start("N2", r2, 4, "resume"), "", "뺀 대화에는 후보를 싣지 않는다");
   await board(f, { op: "proj-done", pid: B, done: true });
   assert.ok(!(await start("N5", r2, 7)).includes(`${B} 「나」`), "끝난 프로젝트는 후보가 아니다");
+});
+
+test("프로젝트 후보: 다른 대화가 고친 파일 폴더의 브랜치도 작업 폴더처럼 30초가 지나면 다시 읽는다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  const realNow = Date.now;
+  let skew = 0;
+  Date.now = () => realNow() + skew;
+  t.after(() => { Date.now = realNow; });
+  const r = path.join(f.dir, "r");
+  for (const d of ["a", "b", "n1", "n2"]) fs.mkdirSync(path.join(r, d), { recursive: true });
+  const head = (b) => { fs.mkdirSync(path.join(r, ".git"), { recursive: true }); fs.writeFileSync(path.join(r, ".git", "HEAD"), `ref: refs/heads/${b}\n`); };
+  head("feat");
+  const start = async (sid, cwd, n) => JSON.parse((await f.hook(sid, { f: "start", source: "startup", cwd }, { pid: (1 << 22) + n })).text).out || "";
+  await start("SA", "/nowhere", 1);
+  await start("SB", "/nowhere", 2);
+  const A = JSON.parse((await board(f, { op: "proj-new", name: "가" })).text).pid;
+  const B = JSON.parse((await board(f, { op: "proj-new", name: "나" })).text).pid;
+  await board(f, { op: "proj-set", sids: ["SA"], pid: A });
+  await board(f, { op: "proj-set", sids: ["SB"], pid: B });
+  await f.hook("SA", { f: "edit", tool: "Edit", path: path.join(r, "a", "x.js") }, { pid: (1 << 22) + 1 });
+  await start("N1", path.join(r, "n1"), 3); // A 가 고친 폴더의 브랜치(feat)를 읽어 둔다
+  head("main");
+  skew = 31_000;
+  await f.hook("SB", { f: "edit", tool: "Edit", path: path.join(r, "b", "y.js") }, { pid: (1 << 22) + 2 });
+  await f.hook("SA", { f: "prompt", text: "A 가 더 최근" }, { pid: (1 << 22) + 1 });
+  const out = await start("N2", path.join(r, "n2"), 4);
+  const a = out.indexOf(`${A} 「가」`), b = out.indexOf(`${B} 「나」`);
+  assert.ok(a >= 0 && b > a, `둘 다 같은 브랜치(main)면 최근 순서: ${out}`);
 });
 
 test("이어받기 키: 키가 있는 대화를 손으로 다른 프로젝트에 옮기면 키도 옮겨 가, 다음에 그 문구로 이어받는 대화는 옮긴 프로젝트로 간다", async (t) => {
