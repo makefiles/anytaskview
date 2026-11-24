@@ -240,9 +240,12 @@ async function main() {
     await open(A, theme);
     await shot("hero", theme);
     // 그림 형식: 표·원 차트·시퀀스·모양 상자. 줄이면 글이 읽히지 않으므로 창을 넓혀 원래 크기로 찍고 그림 자리만 자른다
-    await viewport(2200, 1400);
+    await viewport(2600, 1400);
     await open(B, theme, false);
-    await shot("forms", theme, await rectOf("#canvas", 12));
+    // 그림 요소는 보이는 칸보다 넓을 수 있어 둘이 겹치는 자리만 찍는다(넘치면 오른쪽 칸이 잘려 들어온다)
+    const c = await rectOf("#canvas"), s = await rectOf("#canvas-scroll");
+    const fx = Math.max(c.x, s.x), fy = Math.max(c.y, s.y);
+    await shot("forms", theme, { x: fx, y: fy, width: Math.min(c.x + c.width, s.x + s.width) - fx, height: Math.min(c.y + c.height, s.y + s.height) - fy });
     await viewport(W, H);
     // 세션 목록: 프로젝트 묶음, Claude·Codex 로고, 펼친 지난 세션
     await open(A, theme);

@@ -1,6 +1,6 @@
 # anytaskview 내부 동작
 
-사용법은 [README](../README.md), 설치는 [INSTALL](../INSTALL.md), 보안은 [SECURITY](../SECURITY.md) 에 있다. 여기에는 구조와 동작의 자세한 규칙을 적는다.
+사용법은 [README](../README.md) 와 화면의 「도움말」, 설치는 [INSTALL](../INSTALL.md), 보안은 [SECURITY](../SECURITY.md) 에 있다. 여기에는 구조와 동작의 자세한 규칙을 적는다.
 
 ## 구성
 
