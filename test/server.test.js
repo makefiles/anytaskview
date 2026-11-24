@@ -220,6 +220,13 @@ test("단계만 읽기: 작업 칸이 앞 대화를 펼칠 때 그 대화의 단
   assert.equal((await f.request("GET", "/api/sessions/ST/steps")).status, 401);
 });
 
+test("세션 목록의 단계 진척은 하위 단계가 있는 단계(작업)를 빼고 센다", async (t) => {
+  const f = await boardFixture();
+  t.after(() => f.close());
+  await f.mcp("plan", { steps: [{ id: "t1", title: "작업", status: "doing" }, { id: "t1a", title: "일 하나", parent: "t1", status: "done" }, { id: "t1b", title: "일 둘", parent: "t1", status: "doing" }, { id: "t2", title: "다음 작업" }] }, { env: "SP" });
+  assert.deepEqual((await f.read("/api/sessions")).json.find((s) => s.id === "SP").steps, [1, 3]);
+});
+
 test("압축 직후 SessionStart 에 이미 있는 이름표를 돌려준다", async (t) => {
   const f = await boardFixture();
   t.after(() => f.close());

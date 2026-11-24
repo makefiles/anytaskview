@@ -180,24 +180,26 @@ const projOf = (sid) => {
 };
 
 // ---- 패널 폭·접힘 ----
-// left 는 px, right·plan 은 비율. 화면 크기가 바뀌어도 같은 느낌이 나게 하고, 쓸 때마다 범위로 자른다
+// left 는 px, right·plan 은 비율. 화면 크기가 바뀌어도 같은 느낌이 나게 하고, 쓸 때마다 범위로 자른다.
+// layout 에는 사용자가 고른 값을 두고 자른 값은 shown 에만 둔다(좁은 창에서 줄어든 폭이 저장되면 창을 넓혀도 돌아오지 않는다)
 const LAYOUT_DEFAULT = { left: 300, right: 0.3, plan: 0.4, foldLeft: false, foldPlan: false, foldTl: false };
 const layout = { ...LAYOUT_DEFAULT, ...store.json("atv.layout", {}) };
+const shown = { left: LAYOUT_DEFAULT.left, right: LAYOUT_DEFAULT.right, plan: LAYOUT_DEFAULT.plan }; // 지금 화면에 쓴 값
 const main = document.querySelector("main"), side = $("side");
 
 function applyLayout() {
   const W = main.clientWidth || window.innerWidth, H = side.clientHeight || 400;
   // 목록은 560px 까지 넓히되, 오른쪽 칸(최소 300px)과 그림 칸(화면 30%)이 들어갈 자리를 남긴다
-  layout.left = clamp(num(layout.left, LAYOUT_DEFAULT.left), 160, Math.max(160, Math.min(560, W - 312 - 0.3 * W)));
-  const left = layout.foldLeft ? 40 : layout.left;
+  shown.left = clamp(num(layout.left, LAYOUT_DEFAULT.left), 160, Math.max(160, Math.min(560, W - 312 - 0.3 * W)));
+  const left = layout.foldLeft ? 40 : shown.left;
   // 오른쪽: 300px~화면 60%, 그림 칸은 화면 30% 이상 남긴다
   const rightMax = Math.max(300, Math.min(0.6 * W, W - left - 12 - 0.3 * W));
-  const right = clamp(num(layout.right, 0.3) * W, 300, rightMax);
-  layout.right = right / W;
-  layout.plan = clamp(num(layout.plan, 0.4), 0.1, 0.9);
-  main.style.setProperty("--w-left", `${layout.left}px`);
+  const right = clamp(num(layout.right, LAYOUT_DEFAULT.right) * W, 300, rightMax);
+  shown.right = right / W;
+  shown.plan = clamp(num(layout.plan, LAYOUT_DEFAULT.plan), 0.1, 0.9);
+  main.style.setProperty("--w-left", `${shown.left}px`);
   main.style.setProperty("--w-right", `${Math.round(right)}px`);
-  side.style.setProperty("--h-plan", `${Math.round(clamp(layout.plan * H, 80, Math.max(80, H - 86)))}px`);
+  side.style.setProperty("--h-plan", `${Math.round(clamp(shown.plan * H, 80, Math.max(80, H - 86)))}px`);
   main.classList.toggle("fold-left", !!layout.foldLeft);
   side.classList.toggle("fold-plan", !!layout.foldPlan);
   side.classList.toggle("fold-tl", !!layout.foldTl);
@@ -211,20 +213,23 @@ function applyLayout() {
 }
 const saveLayout = () => store.set("atv.layout", JSON.stringify(layout));
 
-// 경계선: 끌기, 두 번 눌러 기본값, 화살표 키로 16px 씩
-function splitter(id, { onMove, reset, step }) {
+// 경계선: 끌기, 두 번 눌러 기본값, 화살표 키로 16px 씩. 끌기·화살표 키는 화면에 보이는 값에서 시작하고,
+// 끝나면 보이는 값(범위 안)을 고른 값으로 남긴다. key 는 이 경계선이 바꾸는 layout 값이다
+function splitter(id, key, { onMove, reset, step }) {
   const bar = $(id);
+  const commit = () => { layout[key] = shown[key]; saveLayout(); };
   bar.addEventListener("pointerdown", (ev) => {
     if (ev.button !== 0) return;
     bar.setPointerCapture(ev.pointerId);
     bar.classList.add("drag");
     // 누른 자리에서 움직인 거리만큼만 바꾼다(손잡이 가운데를 잡아도 폭이 튀지 않게)
-    const start = { x: ev.clientX, y: ev.clientY, ...layout };
-    const move = (e) => { onMove(e.clientX - start.x, e.clientY - start.y, start); applyLayout(); };
+    const start = { x: ev.clientX, y: ev.clientY, ...shown };
+    let moved = false; // 누르기만 하고 떼면(초점만 옮김) 고른 값을 그대로 둔다
+    const move = (e) => { moved = true; onMove(e.clientX - start.x, e.clientY - start.y, start); applyLayout(); };
     const up = () => {
       bar.classList.remove("drag");
       bar.removeEventListener("pointermove", move);
-      saveLayout();
+      if (moved) commit();
       queueRender();
     };
     bar.addEventListener("pointermove", move);
@@ -236,22 +241,23 @@ function splitter(id, { onMove, reset, step }) {
     const d = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[ev.key];
     if (!d) return;
     ev.preventDefault();
+    layout[key] = shown[key];
     step(d * 16);
     applyLayout();
-    saveLayout();
+    commit();
   });
 }
-splitter("split-left", {
+splitter("split-left", "left", {
   onMove: (dx, dy, s) => { layout.left = s.left + dx; },
   reset: () => { layout.left = LAYOUT_DEFAULT.left; },
   step: (d) => { layout.left += d; },
 });
-splitter("split-right", {
+splitter("split-right", "right", {
   onMove: (dx, dy, s) => { layout.right = s.right - dx / (main.clientWidth || 1); },
   reset: () => { layout.right = LAYOUT_DEFAULT.right; },
   step: (d) => { layout.right -= d / (main.clientWidth || 1); },
 });
-splitter("split-side", {
+splitter("split-side", "plan", {
   onMove: (dx, dy, s) => { layout.plan = s.plan + dy / (side.clientHeight || 1); },
   reset: () => { layout.plan = LAYOUT_DEFAULT.plan; },
   step: (d) => { layout.plan += d / (side.clientHeight || 1); },
@@ -1210,7 +1216,8 @@ function renderThreadNav(s) {
   $("thread-prev").disabled = at === 0;
   $("thread-next").disabled = at === th.length - 1;
 }
-// 세션 화판의 맨 위: 이 대화의 프로젝트(누르면 세션 목록의 그 묶음으로), 없으면 「프로젝트 없음」(누르면 넣을 곳을 고르는 ⋯ 메뉴)
+// 세션 화판의 맨 위: 이 대화의 프로젝트, 없으면 「프로젝트 없음」. 누르면 넣을 곳을 고르는 ⋯ 메뉴(지금 프로젝트에 표시, 「프로젝트 없음」 으로 뺌).
+// 쓰기 열쇠가 없으면 고를 수 없으므로 프로젝트가 있을 때만 세션 목록의 그 묶음으로 간다
 function renderProjLink(s) {
   const b = $("proj-link"), pid = s && projOf(s.id);
   b.hidden = !s;
@@ -1219,16 +1226,17 @@ function renderProjLink(s) {
   b.classList.toggle("none", !pr);
   b.disabled = !pr && !canWrite();
   b.textContent = pr ? `프로젝트 ${pr.name}` : "프로젝트 없음";
-  b.title = pr ? `「${pr.name}」 의 대화들을 세션 목록에서 보기 · ${WHY_KO[state.projects.members[s.id]?.why] || ""}` : "이 대화를 넣을 프로젝트를 고릅니다";
+  const why = pr ? ` · ${WHY_KO[state.projects.members[s.id]?.why] || ""}` : "";
+  b.title = pr && !canWrite() ? `「${pr.name}」 의 대화들을 세션 목록에서 보기${why}` : pr ? `다른 프로젝트로 옮기거나 프로젝트에서 뺍니다${why}` : "이 대화를 넣을 프로젝트를 고릅니다";
   b.dataset.pid = pr ? pid : "";
 }
 $("proj-link").addEventListener("click", () => {
   const b = $("proj-link");
-  if (b.dataset.pid) showProject(b.dataset.pid);
-  else if (state.sessions.has(state.sid)) openGroupMenu(state.sid, b);
+  if (canWrite() && state.sessions.has(state.sid)) openGroupMenu(state.sid, b);
+  else if (b.dataset.pid) showProject(b.dataset.pid);
 });
 
-// 맨 위 단추·찾기에서 프로젝트를 고르면 세션 목록의 그 묶음으로 가서 편다(화면은 그대로). 목록 머리의 이름은 묶음을 펴고 접는다
+// 찾기에서 프로젝트를 고르면(쓰기 열쇠가 없을 때는 맨 위 단추도) 세션 목록의 그 묶음으로 가서 편다(화면은 그대로). 목록 머리의 이름은 묶음을 펴고 접는다
 function showProject(pid) {
   if (!isProj(pid)) return;
   if (gfold.delete(pid)) store.set("atv.gfold", JSON.stringify([...gfold]));
@@ -2728,7 +2736,7 @@ function openGroupMenu(sid, anchor) {
       if (out.ok) await setThreadProject(sid, out.pid);
     });
   }));
-  // 맨 위 「프로젝트 없음」 단추에서 열면 그 단추로, 목록 줄에서 열면 그 줄의 ⋯ 로 초점을 돌려준다
+  // 맨 위 「프로젝트 …」·「프로젝트 없음」 단추에서 열면 그 단추로, 목록 줄에서 열면 그 줄의 ⋯ 로 초점을 돌려준다
   const back = anchor.id ? () => anchor : () => $("sess-body").querySelector(`.smenu[data-sid="${CSS.escape(sid)}"]`);
   showMenu(anchor, back, [messageItem(sid), el("hr", "gm-sep"), el("div", "gm-title", "프로젝트로 옮기기"), ...items, make, el("hr", "gm-sep"), deleteItem(sid)]);
   (gmenu.querySelector('[aria-checked="true"]') || items[0]).focus();

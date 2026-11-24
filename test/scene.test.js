@@ -72,6 +72,46 @@ test("이번 차례(recent): 마지막 입력이나 화판에서 받은 글 뒤�
   assert.equal(recent({ ...h.scene, timeline: [...h.scene.timeline, { type: "fact", f: "stop", last: "긴 답 ".repeat(100), t: 3100 }] }).ans.length, 300, "긴 답은 300자에서 자른다");
 });
 
+test("이번 차례(recent): 차례를 연 입력·화판 글과 같은 ms 에 찍힌 앞 차례의 답은 싣지 않는다", () => {
+  const h = harness();
+  h.fact({ f: "prompt", text: "요청 A" }, 1000);
+  h.fact({ f: "stop", last: "답 A" }, 2000);
+  h.fact({ f: "prompt", text: "요청 B" }, 2000);
+  assert.deepEqual([recent(h.scene).ask, recent(h.scene).ans], ["요청 B", ""], "입력과 같은 ms 의 앞 답");
+  h.fact({ f: "stop", last: "답 B" }, 3000);
+  applyRes(h.scene, evalSend(h.scene, { kind: "instruction", text: "화판 지시 C" }, { t: 2900, seq: 900 }, "m1").res);
+  applyRes(h.scene, evalDeliver(h.scene, { t: 3000, seq: 901 }).res); // Stop 훅이 답을 올리고 같은 ms 에 글을 받아 감
+  assert.deepEqual([recent(h.scene).ask, recent(h.scene).ans], ["화판 지시 C", ""], "화판 글을 넘긴 ms 의 앞 답");
+});
+
+test("plan: 작업을 하위 단계보다 뒤에 진행으로 두어도 지금 단계는 그 아래의 진행 중인 하위 단계", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "a", title: "작업 A" }, { id: "a1", title: "조사", parent: "a" }, { id: "a2", title: "고치기", parent: "a" }] });
+  assert.match(h.plan({ steps: [{ id: "a1", status: "doing" }, { id: "a", status: "doing" }] }), /지금 a1/);
+  assert.deepEqual(overview(h.scene).cur, { title: "조사", status: "doing" });
+  h.plan({ steps: [{ id: "a1", status: "done" }, { id: "a2", status: "doing" }] });
+  assert.equal(currentStep(h.scene), "a2");
+  h.plan({ steps: [{ id: "a2", status: "done" }] });
+  assert.equal(currentStep(h.scene), "a", "하위 단계가 다 끝나면 진행 중인 작업");
+  h.plan({ steps: [{ id: "b", title: "작업 B", status: "doing" }] });
+  assert.equal(currentStep(h.scene), "b", "하위 단계가 없는 새 작업");
+  assert.deepEqual(h.replay().items, h.scene.items);
+});
+
+test("plan: 앞서 닫지 않고 남은 하위 단계는 그 작업을 다시 열어도 지금 단계가 되지 않고, 한 호출에서 아래부터 연 세 단은 맨 아래가 지금 단계", () => {
+  const h = harness();
+  h.plan({ steps: [{ id: "a", title: "작업 A", status: "doing" }, { id: "a1", title: "조사", parent: "a", status: "doing" }] }, 1000);
+  h.plan({ steps: [{ id: "a", status: "done" }, { id: "b", title: "작업 B", status: "doing" }] }, 2000); // a1 은 진행으로 남음
+  h.plan({ steps: [{ id: "b", status: "done" }] }, 3000);
+  h.plan({ steps: [{ id: "a", status: "doing" }] }, 4000);
+  assert.equal(currentStep(h.scene), "a", "남은 a1 이 아니라 다시 연 작업");
+  assert.match(h.note({ text: "확인 필요", kind: "wait" }, 4100), /· a 승인 대기/);
+  h.plan({ steps: [{ id: "c", title: "작업 C" }, { id: "c1", title: "일", parent: "c" }, { id: "c1x", title: "세부", parent: "c1" }] }, 5000);
+  h.plan({ steps: [{ id: "c1x", status: "doing" }, { id: "c1", status: "doing" }, { id: "c", status: "doing" }] }, 6000);
+  assert.equal(currentStep(h.scene), "c1x");
+  assert.deepEqual(h.replay().items, h.scene.items);
+});
+
 test("plan: 새 단계는 title 필요, 지금 단계는 가장 최근에 doing 이 된 단계", () => {
   const h = harness();
   assert.match(h.plan({ steps: [{ id: "s1" }] }), /새 단계는 title 필요/);

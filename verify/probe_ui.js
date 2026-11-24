@@ -388,6 +388,66 @@ async function main() {
     await evaluate(`document.getElementById('split-left').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
     return `${Math.round(before)} → ${Math.round(after)}px, 다시 열어도 ${Math.round(reloaded)}px`;
   });
+  await check("좁은 창에서 줄어든 목록·오른쪽 칸 폭이 저장돼도 창을 넓히면 고른 폭으로 돌아옴", async () => {
+    const bar = await rectOf("#split-left"), start = (await rectOf("#sessions")).w;
+    const x = bar.x + bar.w / 2, y = bar.y + 200;
+    await mouse("mousePressed", x, y);
+    await mouse("mouseMoved", x + 200, y);
+    await mouse("mouseReleased", x + 200, y);
+    const wide = { left: (await rectOf("#sessions")).w, right: (await rectOf("#side")).w };
+    // 960px: 900px 아래의 한 줄 배치가 아니면서 목록(최대 360px)과 오른쪽 칸(최소 300px)이 함께 잘리는 폭
+    const narrow = () => cdp.send("Emulation.setDeviceMetricsOverride", { width: 960, height: 1000, deviceScaleFactor: 1, mobile: false });
+    const back = async () => ({ left: (await rectOf("#sessions")).w, right: (await rectOf("#side")).w });
+    const near = (a) => Math.abs(a.left - wide.left) <= 2 && Math.abs(a.right - wide.right) <= 2;
+    try {
+      expect(Math.abs(wide.left - (start + 200)) <= 2, `넓힌 목록 폭 ${wide.left}`);
+      await narrow();
+      try {
+        await waitFor(`document.getElementById('sessions').getBoundingClientRect().width < ${wide.left - 100}`);
+        // 접기 단추는 지금 배치를 저장한다. 경계선을 누르기만 하고 떼도(움직이지 않음) 고른 폭을 덮지 않는다
+        await evaluate(`document.getElementById('fold-tl').click(); document.getElementById('fold-tl').click()`);
+        const b1 = await rectOf("#split-left");
+        await mouse("mousePressed", b1.x + b1.w / 2, y);
+        await mouse("mouseReleased", b1.x + b1.w / 2, y);
+      } finally {
+        await cdp.send("Emulation.clearDeviceMetricsOverride");
+      }
+      await waitFor(`document.getElementById('sessions').getBoundingClientRect().width > ${wide.left - 100}`).catch(() => {});
+      const widened = await back();
+      expect(near(widened), `넓힌 뒤 목록 ${widened.left}px·오른쪽 ${widened.right}px (고른 폭 ${wide.left}·${wide.right})`);
+      await evaluate("location.reload()");
+      await waitFor(`document.readyState === 'complete' && window.__atv?.sid === ${JSON.stringify(sid)} && document.querySelector('#sessions .sess.sel') !== null`);
+      const reloaded = await back();
+      expect(near(reloaded), `다시 연 뒤 목록 ${reloaded.left}px·오른쪽 ${reloaded.right}px`);
+      // 좁은 창에서 끌면 보이는 폭에서 시작한다(고른 폭 500px 에서 시작하면 40px 줄여도 최대 폭에 걸려 그대로다)
+      let stepped = 0;
+      await narrow();
+      try {
+        await waitFor(`document.getElementById('sessions').getBoundingClientRect().width < ${wide.left - 100}`);
+        const shown = (await rectOf("#sessions")).w, b2 = await rectOf("#split-left");
+        const x2 = b2.x + b2.w / 2;
+        await mouse("mousePressed", x2, y);
+        await mouse("mouseMoved", x2 - 40, y);
+        await mouse("mouseReleased", x2 - 40, y);
+        const dragged = (await rectOf("#sessions")).w;
+        expect(Math.abs(dragged - (shown - 40)) <= 2, `좁은 창에서 끈 폭 ${shown} → ${dragged}`);
+        // 화살표 키도 보이는 폭에서 16px 씩 움직인다
+        await evaluate(`document.getElementById('split-left').focus()`);
+        for (const type of ["keyDown", "keyUp"]) await cdp.send("Input.dispatchKeyEvent", { type, key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+        stepped = (await rectOf("#sessions")).w;
+        expect(Math.abs(stepped - (dragged - 16)) <= 2, `화살표 키 ${dragged} → ${stepped}`);
+      } finally {
+        await cdp.send("Emulation.clearDeviceMetricsOverride");
+      }
+      // 목록 경계선만 썼으므로 넓히면 목록은 좁은 창에서 고른 폭, 오른쪽 칸은 처음 고른 폭이다
+      await waitFor(`document.getElementById('side').getBoundingClientRect().width < ${wide.right + 2}`).catch(() => {});
+      const last = await back();
+      expect(Math.abs(last.left - stepped) <= 2 && Math.abs(last.right - wide.right) <= 2, `넓힌 뒤 목록 ${last.left}px(고른 ${stepped})·오른쪽 ${last.right}px(고른 ${wide.right})`);
+      return `목록 ${Math.round(wide.left)}px·오른쪽 ${Math.round(wide.right)}px 그대로, 좁은 창에서 끌기·화살표 키는 보이는 폭에서 움직임`;
+    } finally {
+      await evaluate(`for (const id of ['split-left', 'split-right']) document.getElementById(id).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    }
+  });
   await check("세션 목록·계획·타임라인을 접고 펼 수 있음", async () => {
     await evaluate(`document.getElementById('fold-sessions').click()`);
     await waitFor(`document.getElementById('sessions').getBoundingClientRect().width <= 41`);
@@ -546,7 +606,7 @@ async function main() {
     await key("Escape", "Escape", 27);
     await waitFor(`document.getElementById('group-menu').hidden && document.activeElement?.classList.contains('smenu')`);
   });
-  await check("프로젝트: 맨 위 「프로젝트 없음」 으로 넣을 곳을 고르고, 목록 줄에 「지금: 단계」 와 결정 대기 줄(눌러서 펼침)이 붙으며, 맨 위 「프로젝트 …」 는 목록의 그 묶음으로, 이름은 묶음을 펴고 접고, project 를 붙인 호출은 건너뜀", async () => {
+  await check("프로젝트: 맨 위 「프로젝트 없음」 으로 넣을 곳을 고르고, 목록 줄에 「지금: 단계」 와 결정 대기 줄(눌러서 펼침)이 붙으며, 이름은 묶음을 펴고 접고, 맨 위 「프로젝트 …」 도 고르는 메뉴를 열고, project 를 붙인 호출은 건너뜀", async () => {
     await waitFor(`document.getElementById('proj-link').textContent === '프로젝트 없음'`);
     await evaluate(`document.getElementById('proj-link').click()`);
     await waitFor(`!document.getElementById('group-menu').hidden && [...document.querySelectorAll('#group-menu .gm-item')].some((b) => b.textContent === '시험 프로젝트')`);
@@ -572,12 +632,17 @@ async function main() {
     // 사용자 입력으로 대기가 풀리면 결정 대기 줄이 빠진다
     await hook({ f: "prompt", text: "승인" });
     await waitFor(`!${row}.querySelector('.holdline')`);
-    // 프로젝트 이름은 보는 대화는 그대로 두고 묶음을 접고 편다. 맨 위 단추는 목록의 그 묶음 머리로 간다
+    // 프로젝트 이름은 보는 대화는 그대로 두고 묶음을 접고 편다
     const gname = `[...document.querySelectorAll('#sessions .gfold')].find((b) => b.dataset.pid === ${JSON.stringify(pid)})`;
     await evaluate(`${gname}.click()`);
     await waitFor(`window.__atv.sid === ${JSON.stringify(sid)} && ${gname}.getAttribute('aria-expanded') === 'false' && !document.querySelector('#sessions .sess.sel')`);
+    await evaluate(`${gname}.click()`);
+    await waitFor(`${gname}.getAttribute('aria-expanded') === 'true' && document.querySelector('#sessions .sess.sel') !== null`);
+    // 맨 위 「프로젝트 …」 도 「프로젝트 없음」 처럼 고르는 메뉴를 열고(지금 프로젝트에 표시), Esc 로 닫으면 초점이 그 단추로 돌아온다
     await evaluate(`document.getElementById('proj-link').click()`);
-    await waitFor(`${gname}.getAttribute('aria-expanded') === 'true' && document.activeElement === ${gname} && document.querySelector('#sessions .sess.sel') !== null`);
+    await waitFor(`!document.getElementById('group-menu').hidden && document.activeElement?.textContent === '시험 프로젝트' && document.activeElement.getAttribute('aria-checked') === 'true'`);
+    await key("Escape", "Escape", 27);
+    await waitFor(`document.getElementById('group-menu').hidden && document.activeElement?.id === 'proj-link'`);
     await mcp("plan", { steps: [{ id: "ov1", del: true }] });
     // ⋯ 「끝으로 표시」 뒤 초점은 접힌 「끝난 프로젝트」 머리로 간다. 다시 진행으로 돌려 둔다
     await evaluate(`document.querySelector('#sessions .pmenu[data-pid="${pid}"]').click()`);
