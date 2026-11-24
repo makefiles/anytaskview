@@ -1,6 +1,6 @@
 // MCP 도구 정의와 서버 안내문. 세션마다 LLM 맥락에 실리므로 짧은 영어로 쓴다(한국어보다 토큰이 덜 든다).
 // 화판에 보이는 이름표·글은 사용자 언어로 쓰라고 안내한다.
-import { STATUSES, NOTE_KINDS, DRAW_KINDS, SHAPES, ICONS, EXPLAIN_ICONS } from "../lib/scene.js";
+import { STATUSES, NOTE_KINDS, DRAW_KINDS, SHAPES, ICONS, EXPLAIN_ICONS, EXPLAIN_LAYOUTS } from "../lib/scene.js";
 
 const str = { type: "string" };
 const strOrNull = { type: ["string", "null"] };
@@ -82,12 +82,14 @@ export const TOOLS = [
   },
   {
     name: "explain",
-    description: "Draw the gist of a task as one whiteboard page (판서) the user can switch to from the diagram. Send words only; the board lays it out in hand-drawn marker style, so no coordinates or colors. Call it once when a task reaches a conclusion (findings, the option chosen, work finished), with that task's last tool calls, and when the user asks for 판서. One page per task (a top-level plan step with sub-steps; with no plan or a flat plan the conversation has one page): calling again for the same task replaces it. The page goes to the plan's current task; if a plan call already moved on, set task to the finished task's id. Keep only the core: 2-4 parts, each a short head and a few short lines. arrows (between neighbouring parts) for cause or sequence; mark:\"pick\" on the chosen option; steps for ordered actions (by = the acting part's id); memo for a why; like for an analogy (not drawn with steps); summary for the one-line takeaway (with at most 4 steps). In lines, em makes red text and mark adds underline, circle, highlight or box; flow:true draws a part's lines as linked boxes (shape box, diamond or bubble; via labels the arrow into a line). Avoid special symbols: the hand font may lack them.",
+    description: "Draw the gist of a task as one whiteboard page (판서) the user can switch to from the diagram. Send words only; the board lays it out in hand-drawn marker style, so no coordinates or colors. Call it once when a task reaches a conclusion (findings, the option chosen, work finished), with that task's last tool calls, and when the user asks for 판서. One page per task (a top-level plan step with sub-steps; with no plan or a flat plan the conversation has one page): calling again for the same task replaces it. The page goes to the plan's current task; if a plan call already moved on, set task to the finished task's id. Pick the layout that fits the conclusion instead of always 3-4 parts and a summary: row (default) for a cause or sequence across parts, with arrows between neighbouring parts; compare for options weighed (parts = options, rows = criteria, each part's lines give its value for each row in order, a word or short phrase each, mark:\"pick\" on the chosen one); before-after for what changed (two parts; one arrow from before to after whose label says what was changed); hub for one idea and its aspects (the first part is the core, drawn as an ellipse with its head and one or two short lines only; 2-3 more around it; one arrow at most between the core and each aspect). Keep only the core: 2-4 parts, each a short head and a few short lines. Use what fits: steps for ordered actions (row only; by = the acting part's id); flow:true draws a part's lines as linked boxes for a chain (shape box, diamond or bubble; via labels the arrow into a line); memo for a why; like for an analogy to an unfamiliar idea (not with steps); summary for the one-line takeaway (with at most 4 steps). In lines, em makes red text and mark adds underline, circle, highlight or box. Avoid special symbols: the hand font may lack them.",
     inputSchema: {
       type: "object",
       properties: {
         title: str,
         sub: str,
+        layout: { type: "string", enum: EXPLAIN_LAYOUTS },
+        rows: { type: "array", items: str },
         parts: {
           type: "array",
           items: {

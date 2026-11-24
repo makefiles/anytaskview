@@ -1019,6 +1019,51 @@ test("판서(explain) 입력 검사: 틀린 필드는 버리고 긴 글은 자�
   assert.deepEqual(r.res.map((x) => x.k), ["explain"]);
 });
 
+test("판서(explain) 틀: layout·rows 를 받고, 틀이 못 쓰는 필드는 버리며, 조건이 안 맞으면 기본 틀", () => {
+  const s = newScene();
+  let t = 1000;
+  const ex = (input) => { const r = evalExplain(s, input, { t: t++ }); applyRes(s, r.res); return { msg: r.msg, page: r.res.at(-1)?.v.page }; };
+  // 비교형: 칸마다 rows 보다 많은 줄, 화살표·번호 단계·흐름·아이콘은 버린다
+  let r = ex({ layout: "compare", title: "견줌", rows: ["속도", "위험"], parts: [{ id: "a", head: "색인", icon: "db", mark: "pick", lines: ["-70%", "작음", "넘침"] }, { id: "b", head: "캐시", flow: true, lines: ["-90%", "옛 값"] }], arrows: [{ from: "a", to: "b" }], steps: ["하나"] });
+  assert.equal(r.page.layout, "compare");
+  assert.deepEqual(r.page.rows, ["속도", "위험"]);
+  assert.deepEqual(r.page.parts.map((p) => [p.id, p.lines.length, p.icon, p.flow, p.mark]), [["a", 2, undefined, undefined, "pick"], ["b", 2, undefined, undefined, undefined]]);
+  assert.equal(r.page.arrows, undefined);
+  assert.equal(r.page.steps, undefined);
+  for (const d of ["parts[0].icon(compare 에서 안 씀)", "parts[0].lines[2~](rows 보다 많음)", "parts[1].flow(compare 에서 안 씀)", "arrows(compare 에서 안 씀)", "steps(compare 에서 안 씀)"]) assert.ok(r.msg.includes(d), `${d} 없음: ${r.msg}`);
+  r = ex({ layout: "compare", title: "x", parts: [{ head: "A" }, { head: "B" }] });
+  assert.equal(r.page.layout, undefined, "rows 가 없으면 기본 틀");
+  assert.match(r.msg, /layout\(compare 는 rows 와 칸 둘 이상이 필요함\)/);
+  // 전후형: 앞 두 칸만 쓰고 화살표 말은 그대로
+  r = ex({ layout: "before-after", title: "x", parts: [{ id: "b", head: "전" }, { id: "a", head: "후" }, { head: "셋" }], arrows: [{ from: "b", to: "a", label: "고침" }] });
+  assert.equal(r.page.layout, "before-after");
+  assert.equal(r.page.parts.length, 2);
+  assert.deepEqual(r.page.arrows, [{ from: "b", to: "a", label: "고침" }]);
+  assert.match(r.msg, /parts\[2~\]\(before-after 는 칸 둘\)/);
+  // 중심형: 화살표는 가운데(첫 칸)와 가지 사이만(떨어진 가지도 됨), 가지끼리는 버린다
+  r = ex({ layout: "hub", title: "x", parts: [{ id: "c", head: "핵심" }, { id: "k1", head: "하나" }, { id: "k2", head: "둘" }, { id: "k3", head: "셋" }], arrows: [{ from: "c", to: "k3", label: "멀어도 됨" }, { from: "k1", to: "k2" }] });
+  assert.equal(r.page.layout, "hub");
+  assert.deepEqual(r.page.arrows.map((a) => a.to), ["k3"]);
+  assert.match(r.msg, /arrows\[1\]\(가운데와 가지를 잇지 않음\)/);
+  r = ex({ layout: "hub", title: "x", parts: [{ head: "A" }, { head: "B" }] });
+  assert.equal(r.page.layout, undefined);
+  assert.match(r.msg, /layout\(hub 는 칸 셋 이상이 필요함\)/);
+  // 중심형: 가운데의 고른 표시·아이콘·흐름(줄의 모양 포함), 아래 가지의 아이콘, 같은 가지의 둘째 화살표는 버린다
+  r = ex({ layout: "hub", title: "x", parts: [{ id: "c", head: "핵심", mark: "pick", icon: "db", flow: true, note: "메모", lines: [{ t: "a", shape: "diamond", via: "왜" }] }, { id: "k1", head: "하나" }, { id: "k2", head: "둘" }, { id: "k3", head: "셋", icon: "gear" }], arrows: [{ from: "c", to: "k1" }, { from: "k1", to: "c", label: "둘째" }] });
+  assert.deepEqual([r.page.parts[0].mark, r.page.parts[0].icon, r.page.parts[0].flow, r.page.parts[0].note, r.page.parts[0].lines[0], r.page.parts[3].icon], [undefined, undefined, undefined, undefined, { t: "a" }, undefined]);
+  assert.equal(r.page.arrows.length, 1);
+  for (const d of ["parts[0].mark(hub 가운데에서 안 씀)", "parts[0].icon(hub 가운데에서 안 씀)", "parts[0].flow(hub 가운데에서 안 씀)", "parts[0].note(hub 가운데에서 안 씀)", "parts[3].icon(hub 아래 가지에서 안 씀)", "arrows[1](그 가지에 이미 화살표가 있음)"]) assert.ok(r.msg.includes(d), `${d} 없음: ${r.msg}`);
+  // 전후형: 전에서 후로 가는 화살표 하나만
+  r = ex({ layout: "before-after", title: "x", parts: [{ id: "b", head: "전" }, { id: "a", head: "후" }], arrows: [{ from: "a", to: "b", label: "거꾸로" }, { from: "b", to: "a", label: "하나", dash: true }, { from: "b", to: "a", label: "둘" }] });
+  assert.deepEqual(r.page.arrows, [{ from: "b", to: "a", label: "하나", dash: true }]);
+  assert.match(r.msg, /arrows\[0\]\(전에서 후로 가지 않음\).*arrows\[2\]\(화살표는 하나\)/);
+  // 모르는 틀 이름은 버리고 기본 틀, rows 는 비교형에서만
+  r = ex({ layout: "grid", title: "x", rows: ["a"], parts: [{ head: "A" }] });
+  assert.equal(r.page.layout, undefined);
+  assert.equal(r.page.rows, undefined);
+  assert.match(r.msg, /버림: layout, rows\(compare 에서만 씀\)/);
+});
+
 test("판서(explain): 대화마다 장 한도", () => {
   const s = newScene();
   for (let i = 0; i < EXPLAIN_LIMITS.pages; i++) applyRes(s, [{ k: "explain", v: { key: `k${i}`, task: "", t: i, ord: i + 1, page: { title: "x", parts: [] } } }]);

@@ -440,7 +440,8 @@ async function main() {
         await cdp.send("Emulation.clearDeviceMetricsOverride");
       }
       // 목록 경계선만 썼으므로 넓히면 목록은 좁은 창에서 고른 폭, 오른쪽 칸은 처음 고른 폭이다
-      await waitFor(`document.getElementById('side').getBoundingClientRect().width < ${wide.right + 2}`).catch(() => {});
+      // 좁은 창의 오른쪽 칸(300px)도 고른 폭보다 작으므로, 고른 폭에 닿을 때까지 기다린다
+      await waitFor(`Math.abs(document.getElementById('side').getBoundingClientRect().width - ${wide.right}) <= 2`).catch(() => {});
       const last = await back();
       expect(Math.abs(last.left - stepped) <= 2 && Math.abs(last.right - wide.right) <= 2, `넓힌 뒤 목록 ${last.left}px(고른 ${stepped})·오른쪽 ${last.right}px(고른 ${wide.right})`);
       return `목록 ${Math.round(wide.left)}px·오른쪽 ${Math.round(wide.right)}px 그대로, 좁은 창에서 끌기·화살표 키는 보이는 폭에서 움직임`;
@@ -2449,6 +2450,33 @@ async function main() {
     await waitFor(`document.getElementById('talk-view').hidden && getComputedStyle(document.getElementById('canvas-scroll')).display !== 'none'`);
     await mcp("draw", { ops: [{ id: "talk-box", del: true }] });
     return no;
+  });
+  // ---- 43: 판서 틀 ----
+  await check("판서 틀: 비교형·전후형·중심형을 그 틀로 그리고(읽을 글에 기준·전후·가운데), 글이 판 밖으로 나가지 않음", async () => {
+    const inside = `(() => { const s = document.getElementById('talk-svg'), r = s.getBoundingClientRect(); return [...s.querySelectorAll('text')].filter((t) => t.textContent && t.getBoundingClientRect().width > 0).every((t) => { const b = t.getBoundingClientRect(); return b.left >= r.left - 2 && b.right <= r.right + 2 && b.top >= r.top - 2 && b.bottom <= r.bottom + 2; }); })()`;
+    const pages = [
+      [{ layout: "compare", title: "어느 쪽?", rows: ["속도", "위험"], parts: [{ head: "색인", mark: "pick", lines: ["-70%", "작음"] }, { head: "캐시", lines: ["-90%", { t: "옛 값", em: true }] }], summary: "색인부터" }, "속도 -70%", "고름"],
+      [{ layout: "before-after", title: "무엇이 바뀌었나", parts: [{ id: "b", head: "고치기 전", lines: ["360px 그대로"] }, { id: "a", head: "고친 뒤", lines: ["500px 로 돌아옴"] }], arrows: [{ from: "b", to: "a", label: "값 분리" }] }, "전: 고치기 전", "값 분리"],
+      [{ layout: "hub", title: "판서란?", parts: [{ id: "c", head: "판서", lines: ["작업마다 한 장"] }, { id: "w", head: "언제", lines: ["결론이 났을 때"] }, { head: "무엇", lines: ["핵심"] }, { head: "어떻게", lines: ["글만 보냄"] }], arrows: [{ from: "c", to: "w", label: "그릴 때" }] }, "가운데: 판서", "그릴 때"],
+    ];
+    // 바로 앞 항목이 띠 「보기」 로 그림 부품에 간 뒤다. 판서 탭이 한 번에 열려야 한다(1.8.0 에서는 남은 이동 대상이 그림으로 되돌렸다)
+    await evaluate(`document.getElementById('tab-talk').click()`);
+    await waitFor(`!document.getElementById('talk-view').hidden`);
+    for (const [input, read, shown] of pages) {
+      const res = await fetch(base + "/api/mcp", { method: "POST", headers: { "content-type": "application/json", "x-atv-key": keys.write, Host: host }, body: JSON.stringify({ env: sid, cwd, tool: "explain", input }) });
+      const msg = await res.text();
+      expect(res.ok && !msg.includes("버림") && !msg.includes("거부"), `explain: ${msg}`);
+      // 보는 중에 새 장이 오면 화면은 그 장으로 옮기지 않으므로(▶ 에 점) 마지막 장까지 넘겨 본다
+      try {
+        await waitFor(`(() => { const n = document.getElementById('tv-next'); if (!n.disabled) n.click(); const s = document.getElementById('talk-svg'); return !s.hasAttribute('hidden') && (s.getAttribute('aria-label') || '').includes(${JSON.stringify(read)}) && [...s.querySelectorAll('text')].some((t) => t.textContent === ${JSON.stringify(shown)}); })()`);
+      } catch (error) {
+        const seen = await evaluate(`JSON.stringify({ no: document.getElementById('tv-no').textContent, label: (document.getElementById('talk-svg').getAttribute('aria-label') || '').slice(0, 60), replay: !!window.__atv.replay, center: localStorage.getItem('atv.center'), view: !document.getElementById('talk-view').hidden, sid: window.__atv.sid === ${JSON.stringify(sid)}, pages: Object.values(window.__atv.scene.explains || {}).map((p) => [p.key, p.t, p.page.title]), talkKey: window.__atv.talkKey })`);
+        throw new Error(`${input.layout}: ${msg} · 화면 ${seen}`);
+      }
+      expect(await evaluate(inside), `${input.layout}: 판 밖으로 나간 글이 있음`);
+    }
+    await evaluate(`document.getElementById('tab-canvas').click()`);
+    await waitFor(`document.getElementById('talk-view').hidden`);
   });
 
   for (const theme of ["light", "dark"]) {

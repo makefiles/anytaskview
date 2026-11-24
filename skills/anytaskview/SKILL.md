@@ -67,7 +67,11 @@ Before writing it, decide in this order (taken from visual-explainer-skill's ana
 
 1. The one core idea. It becomes `title` (a question works well) and, if needed, `sub`.
 2. Two to four parts that carry it. Each is a `head` of a word or two and up to five short lines (about 20 characters, so they stay large).
-3. How the parts relate: cause or sequence → `arrows` between neighbouring parts with a one-word `label`; options → one part each and `mark:"pick"` on the chosen one; actors and ordered actions → parts for the actors and `steps` with `by` set to the acting part's id; a decision inside one part → `flow:true` with `shape` box, diamond or bubble and `via` on the arrow into a line.
+3. The layout, from what the conclusion is, not by habit (a page of 3-4 parts and a summary every time is the failure to avoid):
+   - `row` (default) for a cause or a sequence across parts: `arrows` between neighbouring parts with a one-word `label`; actors and ordered actions → parts for the actors and `steps` with `by` set to the acting part's id; a decision inside one part → `flow:true` with `shape` box, diamond or bubble and `via` on the arrow into a line.
+   - `compare` when options were weighed: parts are the options, `rows` names the criteria, and each part's `lines` give its value for each row in order, a word or a short phrase each so the table stays large; `mark:"pick"` on the chosen one. No arrows, steps, flow or icons.
+   - `before-after` when the point is what changed: two parts (before, after); one arrow from the before part to the after part, whose `label` says what was changed.
+   - `hub` for one idea and its aspects: the first part is the core, drawn as an ellipse with its head and one or two short lines only (no pick, icon, flow or note), and two or three more sit around it (a third one goes under the core, without its icon); one arrow at most between the core and each aspect.
 4. One analogy if it helps (`like`), one side remark that answers "why?" (`memo`), and the one-line takeaway (`summary`). With `steps` there is no room for `like`, and `summary` fits only with up to four steps.
 5. Emphasis last, and little of it: `em` for red text, `mark` underline, circle, highlight or box on the one or two lines that matter.
 
@@ -83,7 +87,7 @@ explain: {"title":"쿠폰이 두 번 깎인다?","sub":"합계가 바뀔 때마�
   "summary":"할인 계산은 서버 한 곳에서만 하고, 화면은 그 값을 보여 주기만 한다"}
 ```
 
-Options: `{"title":"캐시냐 색인이냐","parts":[{"head":"색인 추가","mark":"pick","lines":["응답 -70%","쓰기 조금 느림"]},{"head":"캐시","lines":["응답 -90%",{"t":"옛 값 위험","em":true}]}],"like":{"lines":["자주 찾는 책에 책갈피를 꽂는 셈"]},"summary":"위험이 작은 색인부터 넣는다"}`. Actors in order: parts LLM, 서버, 화면 and `"steps":[{"t":"결론이 나면 explain 을 부름","by":"p1"},{"t":"작업마다 한 장으로 저장","by":"p2"}]`.
+Options: `{"layout":"compare","title":"캐시냐 색인이냐","rows":["응답","위험"],"parts":[{"head":"색인 추가","mark":"pick","lines":["-70%","쓰기 조금 느림"]},{"head":"캐시","lines":["-90%",{"t":"옛 값","em":true}]}],"like":{"lines":["자주 찾는 책에 책갈피를 꽂는 셈"]},"summary":"위험이 작은 색인부터 넣는다"}`. What changed: `{"layout":"before-after","title":"폭이 돌아온다","parts":[{"id":"b","head":"고치기 전","lines":["넓혀도 360px"]},{"id":"a","head":"고친 뒤","lines":["500px 로 돌아옴"]}],"arrows":[{"from":"b","to":"a","label":"값 분리"}]}`. One idea: `{"layout":"hub","title":"판서란?","parts":[{"head":"판서","lines":["작업마다 한 장"]},{"head":"언제"},{"head":"무엇"},{"head":"어떻게"}]}`. Actors in order: parts LLM, 서버, 화면 and `"steps":[{"t":"결론이 나면 explain 을 부름","by":"p1"},{"t":"작업마다 한 장으로 저장","by":"p2"}]`.
 
 ## Example
 

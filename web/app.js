@@ -675,6 +675,9 @@ const TALK_ASK = "지금 작업의 핵심을 판서(explain 도구)로 한 장 �
 // 판서를 보는 동안 그림은 그리지 않으므로(render), 그림으로 돌아올 때 처음부터 다시 잰다
 function setCenter(which, focus = false) {
   if (which === "canvas" && talkOn()) canvas.invalidate();
+  // 띠 「보기」·찾기로 고른 그림 부품에 아직 가지 못했어도(배치를 재는 중) 사용자가 판서를 고르면 그 이동은 버린다.
+  // 남겨 두면 다음 그리기에서 applyFocus 가 그림으로 되돌려 판서 탭이 한 번 먹히지 않았다
+  if (which === "talk" && state.focus?.part) state.focus = null;
   store.set("atv.center", which);
   queueRender("view");
   if (focus) $(which === "talk" ? "tab-talk" : "tab-canvas").focus();

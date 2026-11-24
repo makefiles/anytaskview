@@ -1,5 +1,6 @@
 // 판서: explain 도구가 보낸 한 장(lib/scene.js evalExplain)을 화이트보드처럼 그린다.
-// LLM 은 글만 보내고 자리·색·크기는 모두 여기서 정한다. 칸은 가로 한 줄이고, 칸마다 마커 색 하나(빨강은 강조 전용)다.
+// LLM 은 글과 틀(layout)만 보내고 자리·색·크기는 모두 여기서 정한다. 틀은 칸 가로 한 줄(row, 기본)·비교표(compare)·
+// 전후(before-after)·가운데와 가지(hub)이고, 칸마다 마커 색 하나(빨강은 강조 전용)다.
 // 손그림 선은 roughjs(전역 rough, /vendor/rough.js), 글씨는 나눔손글씨 펜(style.css 의 @font-face).
 // 같은 장은 늘 같은 모양으로 그린다: roughjs 의 seed 를 그릴 때마다 1부터 센다.
 // 글 폭을 재므로 svg 가 보일 때(display 가 none 이 아닐 때), 글꼴을 받은 뒤에 불러야 한다(fontReady)
@@ -74,10 +75,10 @@ export function drawTalk(svg, rec) {
     const h = 16;
     put(rc.linearPath([[x - h * Math.cos(ang - 0.5), y - h * Math.sin(ang - 0.5)], [x, y], [x - h * Math.cos(ang + 0.5), y - h * Math.sin(ang + 0.5)]], opt(color, 3, { roughness: 0.4 })));
   }
-  function arrow(x1, y1, x2, y2, bend, color = C.ink, dash = false) {
+  function arrow(x1, y1, x2, y2, bend, color = C.ink, dash = false, stroke = 3) {
     const len = Math.hypot(x2 - x1, y2 - y1) || 1, nx = -(y2 - y1) / len, ny = (x2 - x1) / len;
     const cx = (x1 + x2) / 2 + nx * bend, cy = (y1 + y2) / 2 + ny * bend;
-    put(rc.curve([[x1, y1], [cx, cy], [x2, y2]], opt(color, 3, { roughness: 0.5, ...(dash ? { strokeLineDash: [9, 9] } : {}) })));
+    put(rc.curve([[x1, y1], [cx, cy], [x2, y2]], opt(color, stroke, { roughness: 0.5, ...(dash ? { strokeLineDash: [9, 9] } : {}) })));
     arrowHead(x2, y2, Math.atan2(y2 - cy, x2 - cx), color);
   }
 
@@ -246,15 +247,18 @@ export function drawTalk(svg, rec) {
     });
   }
 
-  // 칸 하나: 색 둥근 상자, 모서리 번호, 머리와 밑줄, 아이콘·줄(가운데로 옮기고 넘치면 줄임), 바닥 메모
-  function drawPart(p, i, x, y, w, h, color) {
+  // 고른 안: 빨간 둥근 테두리와 오른쪽 위 「고름」
+  function pickMark(x, y, w, h) {
+    put(rc.path(rr(x - 9, y - 9, w + 18, h + 18, 26), opt(C.red, 2.8, { roughness: 0.9 })));
+    ICONS.check(x + w - 92, y - 22, 30, C.red);
+    text(x + w - 12, y - 12, "고름", { size: 30, bold: true, color: C.red, anchor: "end" });
+  }
+
+  // 칸 하나: 색 둥근 상자, 모서리 번호(label), 머리와 밑줄, 아이콘·줄(가운데로 옮기고 넘치면 줄임), 바닥 메모
+  function drawPart(p, i, x, y, w, h, color, label = String(i + 1), icon = true) {
     put(rc.path(rr(x, y, w, h, 20), opt(color, 3.2)));
-    if (p.mark === "pick") {
-      put(rc.path(rr(x - 9, y - 9, w + 18, h + 18, 26), opt(C.red, 2.8, { roughness: 0.9 })));
-      ICONS.check(x + w - 92, y - 22, 30, C.red);
-      text(x + w - 12, y - 12, "고름", { size: 30, bold: true, color: C.red, anchor: "end" });
-    }
-    badge(x + 6, y + 6, 20, String(i + 1), color);
+    if (p.mark === "pick") pickMark(x, y, w, h);
+    badge(x + 6, y + 6, 20, label, color);
 
     let hy = y + 50, headEl = null;
     for (const r of wrap(p.head, 34, w - 64, true)) { headEl = text(x + w / 2, hy, r, { size: 34, bold: true, color, anchor: "middle" }); hy += 36; }
@@ -273,7 +277,7 @@ export function drawTalk(svg, rec) {
     curBack = pb;
     curFront = pf;
     let cy = 0;
-    if (p.icon && ICONS[p.icon]) { ICONS[p.icon](x + w / 2, cy + 40, 76, color); cy += 96; }
+    if (icon && p.icon && ICONS[p.icon]) { ICONS[p.icon](x + w / 2, cy + 40, 76, color); cy += 96; }
     if (p.flow) flowPart(x, w, cy, p.lines || [], color);
     else for (const raw of p.lines || []) {
       const l = line(raw), size = 30;
@@ -346,6 +350,105 @@ export function drawTalk(svg, rec) {
     return steps.length * 60;
   }
 
+  // 따로 묶어 그린 것을 (x, y, w, h) 칸 가운데에 두고, 넘치면 줄인다. draw 는 x + w / 2 를 가운데로, 위를 0 으로 그린다
+  function fitIn(draw, x, y, w, h) {
+    const g = group(), gb = group(), gf = group();
+    g.append(gb, gf);
+    front.append(g);
+    curBack = gb;
+    curFront = gf;
+    draw();
+    curBack = back;
+    curFront = front;
+    if (!gf.childNodes.length) return;
+    const bb = g.getBBox(), s = Math.min(1, h / bb.height, w / bb.width), mx = x + w / 2;
+    g.setAttribute("transform", `translate(${mx} ${y + (h - bb.height * s) / 2}) scale(${s}) translate(${-mx} ${-bb.y})`);
+  }
+  // 줄 하나를 감싸 가운데 맞춤으로 쓴다(강조 그대로)
+  function lineBlock(raw, cx, maxW, size = 30, cy = 0) {
+    const l = line(raw);
+    let last;
+    for (const r of wrap(l.t, size, maxW, l.em)) { last = text(cx, cy + size * 0.85, r, { size, bold: !!l.em, color: l.em ? C.red : C.ink, anchor: "middle" }); cy += size * 1.3; }
+    if (l.mark && last) mark(last, l.mark);
+    return cy;
+  }
+
+  // 비교형: 안을 열, 기준(rows)을 줄로 둔 손그림 표. 머리 줄은 안마다 번호와 칸 색, 고른 안은 열 전체에 빨간 테두리
+  function drawCompare(x, y, w, h, parts, rows) {
+    const labelW = Math.min(260, Math.max(150, ...rows.map((r) => width(r, 28, true) + 40)));
+    const colW = (w - labelW) / parts.length, cellW = colW - 34, headH = 84;
+    // 칸 바닥 메모는 줄바꿈하고, 가장 긴 메모에 맞춰 맨 아래 줄 높이를 정한다
+    const noteRows = parts.map((p) => (p.note ? wrap(p.note, 22, cellW) : []));
+    const noteH = Math.max(...noteRows.map((r) => r.length)) ? 14 + 26 * Math.max(...noteRows.map((r) => r.length)) : 0;
+    // 줄 높이는 그 줄에서 가장 많이 감싸이는 칸(기준 이름 포함)의 줄 수에 비례해 나눈다(짧은 값만 있는 줄이 자리를 덜 쓴다)
+    const need = rows.map((r, k) => Math.max(wrap(r, 28, labelW - 30, true).length, ...parts.map((p) => { const l = p.lines?.[k]; return l ? wrap(line(l).t, 30, cellW, line(l).em).length : 1; })));
+    const total = need.reduce((a, b) => a + b, 0), avail = h - headH - noteH, rowY = [];
+    need.reduce((acc, n) => (rowY.push(acc), acc + (avail * n) / total), y + headH);
+    const rowH = (k) => (avail * need[k]) / total;
+    put(rc.path(rr(x, y, w, h, 18), opt(C.ink, 2.6)));
+    put(rc.line(x + 8, y + headH, x + w - 8, y + headH, opt(C.ink, 2.4)));
+    for (let k = 1; k < rows.length; k++) put(rc.line(x + 10, rowY[k], x + w - 10, rowY[k], opt(C.frame, 1.8)));
+    if (noteH) put(rc.line(x + 10, y + h - noteH, x + w - 10, y + h - noteH, opt(C.frame, 1.8)));
+    put(rc.line(x + labelW, y + 8, x + labelW, y + h - 8, opt(C.ink, 2.4)));
+    for (let i = 1; i < parts.length; i++) put(rc.line(x + labelW + i * colW, y + 10, x + labelW + i * colW, y + h - 10, opt(C.frame, 1.8)));
+    rows.forEach((r, k) => fitIn(() => {
+      let cy = 0;
+      for (const s of wrap(r, 28, labelW - 30, true)) { text(x + labelW / 2, cy + 24, s, { size: 28, bold: true, anchor: "middle" }); cy += 34; }
+    }, x + 12, rowY[k] + 6, labelW - 24, rowH(k) - 12));
+    parts.forEach((p, i) => {
+      const cx = x + labelW + i * colW, color = PALETTE[i % PALETTE.length], hx = cx + 50, hw = colW - 60;
+      badge(cx + 28, y + headH / 2, 18, String(i + 1), color);
+      fitIn(() => {
+        let cy = 0;
+        for (const s of wrap(p.head, 32, hw, true)) { text(hx + hw / 2, cy + 28, s, { size: 32, bold: true, color, anchor: "middle" }); cy += 36; }
+      }, hx, y + 8, hw, headH - 16);
+      (p.lines || []).forEach((l, k) => fitIn(() => lineBlock(l, cx + colW / 2, cellW), cx + 8, rowY[k] + 6, colW - 16, rowH(k) - 12));
+      if (noteRows[i].length) fitIn(() => noteRows[i].forEach((s, k) => text(cx + colW / 2, 20 + k * 26, s, { size: 22, color: C.mut, anchor: "middle" })), cx + 8, y + h - noteH + 6, colW - 16, noteH - 12);
+      if (p.mark === "pick") pickMark(cx + 6, y + 6, colW - 12, h - 12);
+    });
+  }
+
+  // 전후형: 왼쪽 「전」 칸(회색), 굵은 화살표와 그 위의 바꾼 것(빨강), 오른쪽 「후」 칸(초록)
+  function drawChange(x, y, w, h, parts, arrows) {
+    const gap = 220, pw = (w - gap) / 2;
+    drawPart(parts[0], 0, x, y, pw, h, C.mut, "전");
+    drawPart(parts[1], 1, x + pw + gap, y, pw, h, PALETTE[1], "후");
+    const midY = y + h / 2, a = arrows[0]; // 입력 검사가 전에서 후로 가는 화살표 하나만 남긴다
+    arrow(x + pw + 18, midY, x + pw + gap - 18, midY, -10, C.ink, !!a?.dash, 6);
+    const label = a?.label;
+    if (!label) return;
+    const rows = wrap(label, 30, gap - 30, true);
+    rows.forEach((s, k) => text(x + pw + gap / 2, midY - 30 - (rows.length - 1 - k) * 34, s, { size: 30, bold: true, color: C.red, anchor: "middle" }));
+  }
+
+  // 중심형: 가운데 핵심(첫 칸)을 큰 타원으로, 가지는 왼쪽·오른쪽·(셋째는 가운데 아래) 칸. 가운데와 가지를 가지 색 선으로 잇고,
+  // 가운데와 그 가지를 잇는 화살표가 있으면 그 방향의 화살표와 말을 선 위에 쓴다. 가운데 아래 칸은 낮아서 아이콘을 그리지 않는다
+  function drawHub(x, y, w, h, parts, arrows) {
+    const [core, ...kids] = parts, sideW = 300, gap = 140, mx = x + sideW + gap, mw = w - 2 * (sideW + gap);
+    // 셋째 가지가 있으면 가운데를 위로 줄인다. 아래 줄(포스트잇·정리)이 있어 판 칸이 낮으면 가지 칸에 더 준다
+    const third = kids.length > 2, coreH = third ? h * (h < 500 ? 0.38 : 0.42) : h, cx = mx + mw / 2, cy = y + coreH / 2, below = h < 500 ? 26 : 40;
+    const slots = [[x, y, sideW, h], [x + w - sideW, y, sideW, h], [mx - 60, y + coreH + below, mw + 120, h - coreH - below]];
+    put(rc.ellipse(cx, cy, mw + 40, coreH, opt(C.ink, 3, { fill: "#fff3c4", fillStyle: "solid", roughness: 0.5 })));
+    fitIn(() => {
+      let ty = 0;
+      for (const s of wrap(core.head, 38, mw * 0.7, true)) { text(cx, ty + 34, s, { size: 38, bold: true, anchor: "middle" }); ty += 42; }
+      for (const raw of core.lines || []) ty = lineBlock(raw, cx, mw * 0.74, 27, ty + 4);
+    }, cx - mw * 0.4, cy - coreH * 0.36, mw * 0.8, coreH * 0.72);
+    kids.forEach((p, k) => {
+      const [bx, by, bw, bh] = slots[k], color = PALETTE[k % PALETTE.length];
+      drawPart(p, k, bx, by, bw, bh, color, String(k + 1), k < 2);
+      // 가지 선: 타원 가장자리에서 가지 칸 가장자리까지
+      const ends = k === 0 ? [cx - mw / 2 - 20, cy, bx + bw + 10, cy] : k === 1 ? [cx + mw / 2 + 20, cy, bx - 10, cy] : [cx, cy + coreH / 2, cx, by - 10];
+      const a = arrows.find((r) => (r.from === core.id && r.to === p.id) || (r.from === p.id && r.to === core.id));
+      const [x1, y1, x2, y2] = a?.from === p.id ? [ends[2], ends[3], ends[0], ends[1]] : ends;
+      if (a) arrow(x1, y1, x2, y2, 0, color, a.dash);
+      else put(rc.line(x1, y1, x2, y2, opt(color, 3)));
+      if (!a?.label) return;
+      const rows = wrap(a.label, 24, k === 2 ? 260 : gap - 20, true), lx = k === 2 ? cx + 16 : (ends[0] + ends[2]) / 2;
+      rows.forEach((s, j) => text(lx, (k === 2 ? (y1 + y2) / 2 + 8 : cy - 16) - (rows.length - 1 - j) * 28, s, { size: 24, bold: true, color, anchor: k === 2 ? "start" : "middle" }));
+    });
+  }
+
   // 화이트보드 테두리(알루미늄 틀)
   const frame = document.createElementNS(NS, "rect");
   for (const [k, v] of Object.entries({ x: 5, y: 5, width: TALK_W - 10, height: TALK_H - 10, rx: 10, fill: "#fdfdfb", stroke: C.frame, "stroke-width": 10 })) frame.setAttribute(k, v);
@@ -358,25 +461,31 @@ export function drawTalk(svg, rec) {
   const d = new Date(rec.t);
   text(TALK_W - M - 8, 64, `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`, { size: 26, color: C.mut, anchor: "end" });
 
-  const parts = B.parts || [], steps = B.steps || [], rest = B.memo || B.like || B.summary;
+  const parts = B.parts || [], steps = B.steps || [], rest = B.memo || B.like || B.summary, layout = B.layout || "row";
   const top = B.sub ? 176 : 132, n = Math.max(1, parts.length);
-  const partsH = steps.length ? 190 : rest ? 372 : TALK_H - M - top;
-  const gap = (B.arrows || []).length ? 82 : 36, colW = (TALK_W - 2 * M - gap * (n - 1)) / n;
+  // 가지가 셋인 중심형은 가운데 아래에도 칸이 있어 아래 줄(포스트잇·비유·정리)을 조금 줄이고 판 칸에 더 준다
+  const partsH = steps.length ? 190 : rest ? (layout === "hub" && parts.length > 3 ? 420 : 372) : TALK_H - M - top;
   const box = new Map();
-  parts.forEach((p, i) => {
-    const x = M + i * (colW + gap), color = PALETTE[i % PALETTE.length];
-    box.set(p.id, { x, w: colW, color });
-    drawPart(p, i, x, top, colW, partsH, color);
-  });
+  if (layout === "compare") drawCompare(M, top, TALK_W - 2 * M, partsH, parts, B.rows || []);
+  else if (layout === "before-after") drawChange(M, top, TALK_W - 2 * M, partsH, parts, B.arrows || []);
+  else if (layout === "hub") drawHub(M, top, TALK_W - 2 * M, partsH, parts, B.arrows || []);
+  else {
+    const gap = (B.arrows || []).length ? 82 : 36, colW = (TALK_W - 2 * M - gap * (n - 1)) / n;
+    parts.forEach((p, i) => {
+      const x = M + i * (colW + gap), color = PALETTE[i % PALETTE.length];
+      box.set(p.id, { x, w: colW, color });
+      drawPart(p, i, x, top, colW, partsH, color);
+    });
 
-  // 칸 사이 화살표와 그 위의 말: 출발 칸의 색
-  const midY = top + partsH * 0.5;
-  for (const a of B.arrows || []) {
-    const s = box.get(a.from), t = box.get(a.to);
-    if (!s || !t) continue;
-    const ltr = s.x < t.x, x1 = ltr ? s.x + s.w + 8 : s.x - 8, x2 = ltr ? t.x - 8 : t.x + t.w + 8;
-    arrow(x1, midY, x2, midY, ltr ? -14 : 14, s.color, a.dash);
-    if (a.label) text((x1 + x2) / 2, midY - 26, a.label, { size: 28, bold: true, color: s.color, anchor: "middle" });
+    // 칸 사이 화살표와 그 위의 말: 출발 칸의 색
+    const midY = top + partsH * 0.5;
+    for (const a of B.arrows || []) {
+      const s = box.get(a.from), t = box.get(a.to);
+      if (!s || !t) continue;
+      const ltr = s.x < t.x, x1 = ltr ? s.x + s.w + 8 : s.x - 8, x2 = ltr ? t.x - 8 : t.x + t.w + 8;
+      arrow(x1, midY, x2, midY, ltr ? -14 : 14, s.color, a.dash);
+      if (a.label) text((x1 + x2) / 2, midY - 26, a.label, { size: 28, bold: true, color: s.color, anchor: "middle" });
+    }
   }
 
   let y = top + partsH + 44;
@@ -401,7 +510,9 @@ export function drawTalk(svg, rec) {
 export function talkText(rec) {
   const B = rec.page, out = [B.title, B.sub];
   const headOf = (id) => (B.parts || []).find((p) => p.id === id)?.head || id;
-  (B.parts || []).forEach((p, i) => out.push(`${i + 1}. ${p.head}${p.mark === "pick" ? "(고름)" : ""}`, ...(p.lines || []).map((l) => line(l).t), p.note));
+  // 칸 머리 앞: 전후형은 「전」·「후」, 중심형은 가운데와 가지 번호, 나머지는 번호. 비교형의 줄은 기준 이름을 붙여 읽는다
+  const lead = (i) => (B.layout === "before-after" ? ["전", "후"][i] + ":" : B.layout === "hub" ? (i ? `${i}.` : "가운데:") : `${i + 1}.`);
+  (B.parts || []).forEach((p, i) => out.push(`${lead(i)} ${p.head}${p.mark === "pick" ? "(고름)" : ""}`, ...(p.lines || []).map((l, k) => (B.layout === "compare" ? `${B.rows?.[k] || ""} ${line(l).t}`.trim() : line(l).t)), p.note));
   for (const a of B.arrows || []) if (a.label) out.push(`${headOf(a.from)} → ${headOf(a.to)}: ${a.label}`);
   (B.steps || []).forEach((s, i) => out.push(`단계 ${i + 1}. ${line(s).t}`));
   if (B.memo) out.push(B.memo.head, ...B.memo.lines);
